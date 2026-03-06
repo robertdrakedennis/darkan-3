@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "ghidra": {
+      "command": "python",
+      "args": [
+        "/home/trent/projects/project-undercut/bridge_mcp_ghidra.py",
+        "--base-port",
+        "8080",
+        "--port-range",
+        "10"
+      ]
+    }
+  }
+}

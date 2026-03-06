@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bolt RS3</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Bolt RS3</h1>
+      <div class="header-actions">
+        <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
+        <button id="btn-theme" class="icon-btn" title="Toggle theme">&#9790;</button>
+      </div>
+    </header>
+
+    <main>
+      <div id="no-accounts" class="panel">
+        <p>No accounts logged in.</p>
+        <button id="btn-login" class="btn btn-primary">Login with Jagex Account</button>
+      </div>
+
+      <div id="account-panel" class="panel" style="display:none">
+        <div class="field">
+          <label for="sel-account">Account</label>
+          <select id="sel-account"></select>
+        </div>
+        <div class="field">
+          <label for="sel-character">Character</label>
+          <select id="sel-character"></select>
+        </div>
+
+        <div class="field mode-field">
+          <label>Mode</label>
+          <div class="radio-group">
+            <label><input type="radio" name="mode" value="Live" checked> Live</label>
+            <label><input type="radio" name="mode" value="Custom"> Custom</label>
+          </div>
+        </div>
+
+        <div id="custom-fields" style="display:none">
+          <div class="field">
+            <label for="inp-host">Server Host</label>
+            <input type="text" id="inp-host" placeholder="localhost">
+          </div>
+          <div class="field">
+            <label for="inp-port">Server Port</label>
+            <input type="number" id="inp-port" placeholder="43594">
+          </div>
+        </div>
+
+        <button id="btn-play" class="btn btn-play">&#9654; Play</button>
+
+        <div class="account-actions">
+          <button id="btn-add-account" class="btn btn-secondary">Add Account</button>
+          <button id="btn-logout" class="btn btn-danger">Logout</button>
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      <div id="status-log"></div>
+    </footer>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal" style="display:none">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button id="btn-close-settings" class="icon-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label>
+            <input type="checkbox" id="chk-close-after">
+            Close launcher after game starts
+          </label>
+        </div>
+        <div class="field">
+          <label for="inp-launch-cmd">Custom launch command</label>
+          <input type="text" id="inp-launch-cmd" placeholder="e.g. gamemoderun %command%">
+          <small>Use %command% as placeholder for the game command</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-save-settings" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
