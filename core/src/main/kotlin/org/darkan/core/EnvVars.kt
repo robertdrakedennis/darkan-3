@@ -25,7 +25,8 @@ object EnvVars {
     val worldPort: Int = dotenv.get("WORLD_PORT", "43595").toInt()
     val cachePath: String = dotenv.get("CACHE_PATH", System.getProperty("user.home") + "/.local/share/bolt-launcher/Jagex/RuneScape")
     val memCache: Boolean = dotenv.get("MEM_CACHE", "true").toBooleanStrict()
-    val majorVersion: Int = dotenv.get("MAJOR_VERSION", "944").toInt()
+    val majorVersion: Int = dotenv.get("MAJOR_VERSION", "946").toInt()
     val minorVersion: Int = dotenv.get("MINOR_VERSION", "1").toInt()
     val cacheThreadUsage: Double = dotenv.get("CACHE_THREAD_USAGE", "1.0").toDouble()
+    val configHttpPort: Int = dotenv.get("CONFIG_HTTP_PORT", "8080").toInt()
 }

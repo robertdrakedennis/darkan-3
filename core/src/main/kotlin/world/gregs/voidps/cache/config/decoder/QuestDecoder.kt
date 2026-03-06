@@ -4,33 +4,41 @@ import world.gregs.voidps.buffer.read.Reader
 import world.gregs.voidps.cache.Config.QUESTS
 import world.gregs.voidps.cache.config.ConfigDecoder
 import world.gregs.voidps.cache.config.data.QuestDefinition
-import world.gregs.voidps.cache.definition.Parameters
 
-class QuestDecoder(
-    private val parameters: Parameters = Parameters.EMPTY
-) : ConfigDecoder<QuestDefinition>(QUESTS) {
+class QuestDecoder : ConfigDecoder<QuestDefinition>(QUESTS) {
 
     override fun create(size: Int) = Array(size) { QuestDefinition(it) }
 
     override fun QuestDefinition.read(opcode: Int, buffer: Reader) {
         when (opcode) {
-            1 -> name = buffer.readPrefixedString()
-            2 -> listName = buffer.readPrefixedString()
-            3 -> varps = readArray(buffer)
-            4 -> varbits = readArray(buffer)
-            5 -> subQuest = buffer.readShort()
-            6 -> buffer.readUnsignedByte()
-            7 -> difficulty = buffer.readUnsignedByte()
-            8 -> members = true
+            1 -> name = buffer.readString()
+            2 -> description = buffer.readString()
+            3, 4 -> {
+                // MasterQuestVar array: count * {ushort, uint, uint} = 10 bytes each
+                val count = buffer.readUnsignedByte()
+                buffer.skip(count * 10)
+            }
+            5 -> sortKey = buffer.readUnsignedShort()
+            6 -> difficulty = buffer.readUnsignedByte()
+            7 -> members = buffer.readUnsignedByte()
+            8 -> questFlags = true
             9 -> questPoints = buffer.readUnsignedByte()
-            10 -> pathStart = IntArray(buffer.readUnsignedByte()) { buffer.readInt() }
+            10 -> {
+                val count = buffer.readUnsignedByte()
+                pathStart = IntArray(count) { buffer.readInt() }
+            }
             12 -> otherPathStart = buffer.readInt()
-            13 -> questRequirements = IntArray(buffer.readUnsignedByte()) { buffer.readShort() }
-            14 -> skillRequirements = Array(buffer.readUnsignedByte()) { IntArray(2) { buffer.readUnsignedByte() } }
-            15 -> buffer.readShort()
+            13 -> {
+                val count = buffer.readUnsignedByte()
+                questRequirements = IntArray(count) { buffer.readUnsignedShort() }
+            }
+            14 -> {
+                val count = buffer.readUnsignedByte()
+                skillRequirements = Array(count) { IntArray(2) { buffer.readUnsignedByte() } }
+            }
+            15 -> buffer.readShort() // ushort, not stored
             17 -> itemSprite = buffer.readBigSmart()
             18, 19 -> {
-                // PrerequisiteVar array: count * {uint, uint, uint, string}
                 val count = buffer.readUnsignedByte()
                 repeat(count) {
                     buffer.readInt()
@@ -39,32 +47,13 @@ class QuestDecoder(
                     buffer.readString()
                 }
             }
-            249 -> readParameters(buffer, parameters)
+            249 -> readParameters(buffer)
         }
     }
 
     override fun changeValues(definitions: Array<QuestDefinition>, definition: QuestDefinition) {
         if (definition.listName == null) {
             definition.listName = definition.name
-        }
-    }
-
-    private fun readArray(buffer: Reader) = Array(buffer.readUnsignedByte()) { intArrayOf(buffer.readShort(), buffer.readInt(), buffer.readInt()) }
-
-    companion object {
-        private fun Reader.readPrefixedString(): String {
-            val head = readByte()
-            check(head == 0) { "Bad version number in gjstr2" }
-            val sb = StringBuilder()
-            var b: Int
-            while (readableBytes() > 0) {
-                b = readByte()
-                if (b == 0) {
-                    break
-                }
-                sb.append(byteToChar(b.toByte()))
-            }
-            return sb.toString()
         }
     }
 }

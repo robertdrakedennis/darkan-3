@@ -35,8 +35,8 @@ class AnimationDecoder : DefinitionDecoder<AnimationDefinition>(ANIMATIONS) {
                 repeat(length) { buffer.readSmart() }
             }
             5 -> priority = buffer.readUnsignedByte()
-            6 -> leftHandItem = buffer.readShort()
-            7 -> rightHandItem = buffer.readShort()
+            6 -> leftHandItem = buffer.readUnsignedShort()
+            7 -> rightHandItem = buffer.readUnsignedShort()
             8 -> maxLoops = buffer.readUnsignedByte()
             9 -> animatingPrecedence = buffer.readUnsignedByte()
             10 -> walkingPrecedence = buffer.readUnsignedByte()

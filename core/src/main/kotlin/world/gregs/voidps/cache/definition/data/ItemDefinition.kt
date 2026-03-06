@@ -16,7 +16,7 @@ data class ItemDefinition(
     var spriteTranslateX: Int = 0,
     var spriteTranslateY: Int = 0,
     var stackable: Int = 0,
-    var cost: Int = 1,
+    var cost: Long = 1,
     var members: Boolean = false,
     var wearPos: Int = -1,       // Primary equipment slot (-1 = not equippable)
     var wearPos2: Int = -1,      // Secondary equipment slot
@@ -72,6 +72,18 @@ data class ItemDefinition(
     var pickSizeShift: Int = 0,
     var singleNoteId: Int = -1,
     var singleNoteTemplateId: Int = -1,
+    var category: Int = -1,
+    var geBuyLimit: Int = 0,
+    var tradeable: Boolean = false,
+    var searchable: Boolean = false,
+    var shardItemId: Int = -1,
+    var shardTemplateId: Int = -1,
+    var shardCombineAmount: Int = 0,
+    var shardName: String? = null,
+    var bindId: Int = -1,
+    var boundTemplateId: Int = -1,
+    var headModels: IntArray? = null,
+    var groundCursors: IntArray? = null,
     override var params: Map<Int, Any>? = null,
     override var stringId: String = "",
     override var extras: Map<String, Any>? = null
@@ -84,12 +96,12 @@ data class ItemDefinition(
         get() = lendTemplateId != -1
 
     val singleNote: Boolean
-        get() = singleNoteTemplateId != -1
+        get() = boundTemplateId != -1
 
     // --- Java interop convenience methods ---
 
     /** Legacy alias for [cost]. */
-    fun getValue() = cost
+    fun getValue() = cost.toInt()
 
     /** Whether this item is stackable (stackable != 0). */
     fun isStackable() = stackable != 0
@@ -171,10 +183,10 @@ data class ItemDefinition(
     fun getFemaleWornModelId1(): Int = primaryFemaleModel
 
     /** Gets the general store sell price (cost * 0.3, minimum 1). */
-    fun getSellPrice(): Int = (cost * 0.3).toInt().coerceAtLeast(1)
+    fun getSellPrice(): Int = (cost.toInt() * 0.3).toInt().coerceAtLeast(1)
 
     /** Gets the high alchemy price (cost * 0.6, minimum 1). */
-    fun getHighAlchPrice(): Int = (cost * 0.6).toInt().coerceAtLeast(1)
+    fun getHighAlchPrice(): Int = (cost.toInt() * 0.6).toInt().coerceAtLeast(1)
 
     /** Whether the item has a face/head covering mask (param 625). */
     fun faceMask(): Boolean = (params?.get(625) as? Int ?: 0) != 0
@@ -309,6 +321,24 @@ data class ItemDefinition(
         if (pickSizeShift != other.pickSizeShift) return false
         if (singleNoteId != other.singleNoteId) return false
         if (singleNoteTemplateId != other.singleNoteTemplateId) return false
+        if (category != other.category) return false
+        if (geBuyLimit != other.geBuyLimit) return false
+        if (tradeable != other.tradeable) return false
+        if (searchable != other.searchable) return false
+        if (shardItemId != other.shardItemId) return false
+        if (shardTemplateId != other.shardTemplateId) return false
+        if (shardCombineAmount != other.shardCombineAmount) return false
+        if (shardName != other.shardName) return false
+        if (bindId != other.bindId) return false
+        if (boundTemplateId != other.boundTemplateId) return false
+        if (headModels != null) {
+            if (other.headModels == null) return false
+            if (!headModels.contentEquals(other.headModels)) return false
+        } else if (other.headModels != null) return false
+        if (groundCursors != null) {
+            if (other.groundCursors == null) return false
+            if (!groundCursors.contentEquals(other.groundCursors)) return false
+        } else if (other.groundCursors != null) return false
         if (params != other.params) return false
         if (stringId != other.stringId) return false
         if (extras != other.extras) return false
@@ -326,7 +356,7 @@ data class ItemDefinition(
         result = 31 * result + spriteTranslateX
         result = 31 * result + spriteTranslateY
         result = 31 * result + stackable
-        result = 31 * result + cost
+        result = 31 * result + cost.hashCode()
         result = 31 * result + members.hashCode()
         result = 31 * result + wearPos
         result = 31 * result + wearPos2
@@ -382,6 +412,18 @@ data class ItemDefinition(
         result = 31 * result + pickSizeShift
         result = 31 * result + singleNoteId
         result = 31 * result + singleNoteTemplateId
+        result = 31 * result + category
+        result = 31 * result + geBuyLimit
+        result = 31 * result + tradeable.hashCode()
+        result = 31 * result + searchable.hashCode()
+        result = 31 * result + shardItemId
+        result = 31 * result + shardTemplateId
+        result = 31 * result + shardCombineAmount
+        result = 31 * result + (shardName?.hashCode() ?: 0)
+        result = 31 * result + bindId
+        result = 31 * result + boundTemplateId
+        result = 31 * result + (headModels?.contentHashCode() ?: 0)
+        result = 31 * result + (groundCursors?.contentHashCode() ?: 0)
         result = 31 * result + (params?.hashCode() ?: 0)
         result = 31 * result + stringId.hashCode()
         result = 31 * result + extras.hashCode()

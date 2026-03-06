@@ -6,6 +6,7 @@ import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.file.FileProvider
 import world.gregs.voidps.cache.file.prefetchKeys
 import org.darkan.core.net.JS5Server
+import org.darkan.lobby.server.ConfigServer
 import org.darkan.lobby.server.LobbyServer
 
 fun main() {
@@ -18,8 +19,11 @@ fun main() {
 
     val provider = FileProvider.load(cache)
     val js5 = JS5Server(provider, prefetchKeys)
-    val lobby = LobbyServer(js5)
 
+    val configServer = ConfigServer()
+    configServer.start()
+
+    val lobby = LobbyServer(js5)
     Logger.log("Main", "Starting server...")
     runBlocking { lobby.start().join() }
 }

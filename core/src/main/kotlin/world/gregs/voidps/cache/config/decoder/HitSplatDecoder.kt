@@ -62,7 +62,7 @@ class HitSplatDecoder : ConfigDecoder<HitSplatDefinition>(HIT_SPLATS) {
                 repeat(count) { buffer.readShort() }
             }
             28, 29, 30 -> buffer.skip(1) // single byte fields
-            249 -> { } // parameters
+            249 -> readParameters(buffer)
         }
     }
 }

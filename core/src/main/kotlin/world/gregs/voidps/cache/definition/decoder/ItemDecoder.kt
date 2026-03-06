@@ -15,7 +15,6 @@ class ItemDecoder : DefinitionDecoder<ItemDefinition>(ITEMS) {
 
     override fun ItemDefinition.read(opcode: Int, buffer: Reader) {
         when (opcode) {
-            // Opcode 1: model ID (bigSmart for rev 727)
             1 -> modelId = buffer.readBigSmart()
             2 -> name = buffer.readString()
             3 -> buffer.readString() // buffEffect
@@ -36,13 +35,12 @@ class ItemDecoder : DefinitionDecoder<ItemDefinition>(ITEMS) {
             }
             10 -> buffer.skip(2) // unknown ushort
             11 -> stackable = 1
-            12 -> cost = buffer.readInt()
+            12 -> cost = buffer.readInt().toLong()
             13 -> wearPos = buffer.readUnsignedByte()
             14 -> wearPos2 = buffer.readUnsignedByte()
             15 -> { } // Unit
             16 -> members = true
             18 -> multiStackSize = buffer.readUnsignedShort()
-            // Opcodes 23-26: equipment model IDs (bigSmart for rev 727)
             23 -> primaryMaleModel = buffer.readBigSmart()
             24 -> secondaryMaleModel = buffer.readBigSmart()
             25 -> primaryFemaleModel = buffer.readBigSmart()
@@ -53,20 +51,17 @@ class ItemDecoder : DefinitionDecoder<ItemDefinition>(ITEMS) {
             40 -> readColours(buffer)
             41 -> readTextures(buffer)
             42 -> readColourPalette(buffer)
-            // Opcode 43: noteId (int in modern RS3)
-            43 -> buffer.readInt()
+            43 -> buffer.readInt() // notedId
             44, 45 -> buffer.skip(2) // bitmask recolor/retexture
             65 -> exchangeable = true
-            69 -> buffer.readInt() // geBuyLimit
-            // Opcodes 78-79: tertiary equipment model IDs (bigSmart for rev 727)
+            69 -> geBuyLimit = buffer.readInt()
             78 -> tertiaryMaleModel = buffer.readBigSmart()
             79 -> tertiaryFemaleModel = buffer.readBigSmart()
-            // Opcodes 90-93: dialogue head model IDs (bigSmart for rev 727)
             90 -> primaryMaleDialogueHead = buffer.readBigSmart()
             91 -> primaryFemaleDialogueHead = buffer.readBigSmart()
             92 -> secondaryMaleDialogueHead = buffer.readBigSmart()
             93 -> secondaryFemaleDialogueHead = buffer.readBigSmart()
-            94 -> buffer.readUnsignedShort() // category
+            94 -> category = buffer.readUnsignedShort()
             95 -> spriteCameraYaw = buffer.readUnsignedShort()
             96 -> dummyItem = buffer.readUnsignedByte()
             97 -> noteId = buffer.readUnsignedShort()
@@ -97,25 +92,36 @@ class ItemDecoder : DefinitionDecoder<ItemDefinition>(ITEMS) {
                 femaleWieldZ = buffer.readByte() shl 2
                 femaleWieldY = buffer.readByte() shl 2
             }
-            in 127..130 -> buffer.skip(2) // cursor opcodes (ushort in modern RS3)
+            in 127..130 -> buffer.skip(2) // cursor opcodes
             132 -> {
                 val length = buffer.readUnsignedByte()
                 campaigns = IntArray(length) { buffer.readUnsignedShort() }
             }
             134 -> pickSizeShift = buffer.readUnsignedByte()
-            139 -> singleNoteId = buffer.readUnsignedShort()
-            140 -> singleNoteTemplateId = buffer.readUnsignedShort()
-            in 142..146 -> buffer.readUnsignedShort() // headModels
-            in 150..154 -> buffer.readUnsignedShort() // groundCursors
-            156, 157 -> { } // boolean flags (tradeable, searchable)
-            161 -> buffer.readUnsignedShort() // shardItemId
-            162 -> buffer.readUnsignedShort() // shardTemplateId
-            163 -> buffer.readUnsignedShort() // shardCombineAmount
-            164 -> buffer.readString() // shardName
-            165 -> { } // stackable = 2
+            139 -> bindId = buffer.readUnsignedShort()
+            140 -> boundTemplateId = buffer.readUnsignedShort()
+            in 142..146 -> {
+                if (headModels == null) {
+                    headModels = IntArray(6) { -1 }
+                }
+                headModels!![opcode - 142] = buffer.readUnsignedShort()
+            }
+            in 150..154 -> {
+                if (groundCursors == null) {
+                    groundCursors = IntArray(5) { -1 }
+                }
+                groundCursors!![opcode - 150] = buffer.readUnsignedShort()
+            }
+            156 -> tradeable = true
+            157 -> searchable = true
+            161 -> shardItemId = buffer.readUnsignedShort()
+            162 -> shardTemplateId = buffer.readUnsignedShort()
+            163 -> shardCombineAmount = buffer.readUnsignedShort()
+            164 -> shardName = buffer.readString()
+            165 -> stackable = 2
             167, 168 -> { } // boolean flags
-            178 -> { } // stackable = 0
-            181 -> buffer.readLong() // price as long
+            178 -> stackable = 0
+            181 -> cost = buffer.readLong()
             in 242..248 -> { } // unknown flags
             249 -> readParameters(buffer)
             else -> { }
@@ -129,8 +135,8 @@ class ItemDecoder : DefinitionDecoder<ItemDefinition>(ITEMS) {
         if (definition.lendTemplateId != -1) {
             definition.toLend(definitions.getOrNull(definition.lendId), definitions.getOrNull(definition.lendTemplateId))
         }
-        if (definition.singleNoteTemplateId != -1) {
-            definition.toSingleNote(definitions.getOrNull(definition.singleNoteTemplateId), definitions.getOrNull(definition.singleNoteId))
+        if (definition.boundTemplateId != -1) {
+            definition.toSingleNote(definitions.getOrNull(definition.boundTemplateId), definitions.getOrNull(definition.bindId))
         }
     }
 }

@@ -7,6 +7,7 @@ data class IdentityKitDefinition(
     override var id: Int = -1,
     var bodyPartId: Int = 0,
     var modelIds: IntArray? = null,
+    var nonSelectable: Boolean = false,
     override var originalColours: ShortArray? = null,
     override var modifiedColours: ShortArray? = null,
     override var originalTextureColours: ShortArray? = null,

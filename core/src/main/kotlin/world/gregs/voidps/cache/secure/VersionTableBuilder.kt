@@ -1,6 +1,5 @@
 package world.gregs.voidps.cache.secure
 
-import world.gregs.voidps.cache.ReadOnlyCache
 import java.math.BigInteger
 
 class VersionTableBuilder(
@@ -26,7 +25,7 @@ class VersionTableBuilder(
     fun sector(index: Int, sectorData: ByteArray, whirlpool: Whirlpool) {
         val crc = CRC.calculate(sectorData)
         crc(index, crc)
-        val output = ByteArray(ReadOnlyCache.WHIRLPOOL_SIZE)
+        val output = ByteArray(WHIRLPOOL_SIZE)
         whirlpool.reset()
         whirlpool.add(sectorData)
         whirlpool.finalize(output)
@@ -62,7 +61,7 @@ class VersionTableBuilder(
             return versionTable
         }
         built = true
-        val output = ByteArray(ReadOnlyCache.WHIRLPOOL_SIZE + 1)
+        val output = ByteArray(WHIRLPOOL_SIZE + 1)
         output[0] = 1
         whirlpool.reset()
         whirlpool.add(versionTable, 5, positionFor(indexCount) - 5)
@@ -86,7 +85,8 @@ class VersionTableBuilder(
 
     companion object {
         private fun positionFor(index: Int) = 6 + index * TABLE_INDEX_OFFSET
-        private const val TABLE_INDEX_OFFSET = ReadOnlyCache.WHIRLPOOL_SIZE + 8
+        private const val WHIRLPOOL_SIZE = 64
+        private const val TABLE_INDEX_OFFSET = WHIRLPOOL_SIZE + 8
         private const val MAX_RSA_SIZE = 256
     }
 }

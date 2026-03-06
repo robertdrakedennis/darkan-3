@@ -14,11 +14,14 @@ class IdentityKitDecoder : ConfigDecoder<IdentityKitDefinition>(IDENTITY_KIT) {
             1 -> bodyPartId = buffer.readUnsignedByte()
             2 -> {
                 val length = buffer.readUnsignedByte()
-                modelIds = IntArray(length) { buffer.readUnsignedShort() }
+                modelIds = IntArray(length) { buffer.readBigSmart() }
             }
+            3 -> nonSelectable = true
+            in 4..39, in 42..43, in 46..59 -> { } // no-op ranges
             40 -> readColours(buffer)
             41 -> readTextures(buffer)
-            in 60..69 -> headModels[opcode - 60] = buffer.readUnsignedShort()
+            44, 45 -> buffer.readShort() // recolor/retexture bitmask
+            in 60..64 -> headModels[opcode - 60] = buffer.readBigSmart()
         }
     }
 }

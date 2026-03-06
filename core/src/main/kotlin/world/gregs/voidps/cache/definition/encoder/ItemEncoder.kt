@@ -58,9 +58,9 @@ class ItemEncoder : DefinitionEncoder<ItemDefinition> {
             writeByte(11)
         }
 
-        if (definition.cost != 1) {
+        if (definition.cost != 1L) {
             writeByte(12)
-            writeInt(definition.cost)
+            writeInt(definition.cost.toInt())
         }
 
         if (definition.members) {
@@ -276,14 +276,14 @@ class ItemEncoder : DefinitionEncoder<ItemDefinition> {
             writeByte(definition.pickSizeShift)
         }
 
-        if (definition.singleNoteId != -1) {
+        if (definition.bindId != -1) {
             writeByte(139)
-            writeShort(definition.singleNoteId)
+            writeShort(definition.bindId)
         }
 
-        if (definition.singleNoteTemplateId != -1) {
+        if (definition.boundTemplateId != -1) {
             writeByte(140)
-            writeShort(definition.singleNoteTemplateId)
+            writeShort(definition.boundTemplateId)
         }
 
         definition.writeParameters(this)

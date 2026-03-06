@@ -19,6 +19,8 @@ pub enum IpcMessage {
         account_id: String,
         display_name: String,
     },
+    #[serde(rename = "launch_custom")]
+    LaunchCustom,
     #[serde(rename = "save_config")]
     SaveConfig { config: Config },
     #[serde(rename = "close")]
@@ -106,6 +108,9 @@ impl IpcState {
                 ref display_name,
             } => {
                 self.handle_launch(account_id, display_name);
+            }
+            IpcMessage::LaunchCustom => {
+                self.handle_launch_custom();
             }
             IpcMessage::SaveConfig { ref config } => {
                 self.handle_save_config(config);
@@ -274,6 +279,74 @@ impl IpcState {
                 &paths.rs3_binary,
                 &config_uri,
                 Some(&params),
+                &paths.data_dir,
+                custom_cmd.as_deref(),
+            ) {
+                Ok(()) => {
+                    send_status("Game launched!");
+                    if close_after {
+                        let _ = cmd_tx.send(AppCommand::CloseWindow);
+                    }
+                }
+                Err(e) => {
+                    send_error(&format!("Failed to launch: {}", e));
+                }
+            }
+        });
+    }
+
+    fn handle_launch_custom(&self) {
+        let config = self.config.lock().unwrap().clone();
+        let paths = self.paths.clone();
+        let cmd_tx = self.cmd_tx.clone();
+        let close_after = config.close_after_launch;
+        let custom_cmd = config.custom_launch_command.clone();
+
+        // Build config URI from custom settings, falling back to sensible defaults
+        let host = config
+            .custom_server_host
+            .as_deref()
+            .unwrap_or("localhost");
+        let config_uri = config.custom_config_uri.unwrap_or_else(|| {
+            format!("http://{}:8080/jav_config.ws", host)
+        });
+
+        tokio::spawn(async move {
+            let send_status = |msg: &str| {
+                let event = IpcEvent::LaunchStatus {
+                    message: msg.to_string(),
+                };
+                let js = format!(
+                    "window.__bolt_callback({})",
+                    serde_json::to_string(&event).unwrap()
+                );
+                let _ = cmd_tx.send(AppCommand::SendToWebview(js));
+            };
+
+            let send_error = |msg: &str| {
+                let event = IpcEvent::LaunchError {
+                    message: msg.to_string(),
+                };
+                let js = format!(
+                    "window.__bolt_callback({})",
+                    serde_json::to_string(&event).unwrap()
+                );
+                let _ = cmd_tx.send(AppCommand::SendToWebview(js));
+            };
+
+            // In custom mode, skip CDN update check — require existing binary
+            if !paths.rs3_binary.exists() {
+                send_error(
+                    "No client binary found. Please download the client first by launching in Live mode with a Jagex account.",
+                );
+                return;
+            }
+
+            send_status("Launching game (Custom server)...");
+            match crate::game::process::launch_rs3(
+                &paths.rs3_binary,
+                &config_uri,
+                None, // No OAuth session params for custom mode
                 &paths.data_dir,
                 custom_cmd.as_deref(),
             ) {

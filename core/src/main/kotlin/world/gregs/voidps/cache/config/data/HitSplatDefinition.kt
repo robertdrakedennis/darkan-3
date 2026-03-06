@@ -1,6 +1,7 @@
 package world.gregs.voidps.cache.config.data
 
 import world.gregs.voidps.cache.Definition
+import world.gregs.voidps.cache.definition.Parameterized
 
 data class HitSplatDefinition(
     override var id: Int = -1,
@@ -16,5 +17,6 @@ data class HitSplatDefinition(
     var offsetY: Int = 0,
     var fade: Int = -1,
     var comparisonType: Int = -1,
-    var anInt3214: Int = 0
-) : Definition
+    var anInt3214: Int = 0,
+    override var params: Map<Int, Any>? = null,
+) : Definition, Parameterized
