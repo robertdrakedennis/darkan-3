@@ -301,7 +301,6 @@ impl IpcState {
 
     fn handle_launch_custom(&self) {
         let config = self.config.lock().unwrap().clone();
-        let paths = self.paths.clone();
         let cmd_tx = self.cmd_tx.clone();
         let close_after = config.close_after_launch;
         let custom_cmd = config.custom_launch_command.clone();
@@ -315,21 +314,13 @@ impl IpcState {
             format!("http://{}:8829/jav_config.ws", host)
         });
 
-        // Find rs3linux launcher binary in ./client/ relative to CWD, then next to launcher exe
+        // ~/darkan-3 is the sole runtime directory for custom mode
+        let darkan_dir = std::path::PathBuf::from(
+            std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
+        )
+        .join("darkan-3");
+
         let launcher_name = crate::game::process::launcher_binary_name();
-        let client_dir = std::path::PathBuf::from("client");
-        let binary_path = {
-            let cwd_path = client_dir.join(launcher_name);
-            if cwd_path.exists() {
-                cwd_path
-            } else if let Ok(exe) = std::env::current_exe() {
-                exe.parent()
-                    .unwrap_or(std::path::Path::new("."))
-                    .join(launcher_name)
-            } else {
-                std::path::PathBuf::from(launcher_name)
-            }
-        };
 
         tokio::spawn(async move {
             let send_status = |msg: &str| {
@@ -354,13 +345,90 @@ impl IpcState {
                 let _ = cmd_tx.send(AppCommand::SendToWebview(js));
             };
 
-            // Check that the launcher binary exists
-            if !binary_path.exists() {
+            // Ensure ~/darkan-3 exists
+            if let Err(e) = std::fs::create_dir_all(&darkan_dir) {
                 send_error(&format!(
-                    "Launcher binary not found: {}. Expected rs3linux in ./client/",
-                    binary_path.display()
+                    "Failed to create {}: {}",
+                    darkan_dir.display(),
+                    e
                 ));
                 return;
+            }
+
+            // Ensure rs3linux is in ~/darkan-3; seed from ./data/client/ if needed
+            let target_binary = darkan_dir.join(launcher_name);
+            if !target_binary.exists() {
+                let source = std::path::PathBuf::from("data")
+                    .join("client")
+                    .join(launcher_name);
+                if source.exists() {
+                    send_status("Installing launcher binary...");
+                    if let Err(e) = std::fs::copy(&source, &target_binary) {
+                        send_error(&format!("Failed to copy {} to ~/darkan-3: {}", launcher_name, e));
+                        return;
+                    }
+                    // Preserve executable permission
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = std::fs::set_permissions(
+                            &target_binary,
+                            std::fs::Permissions::from_mode(0o755),
+                        );
+                    }
+                } else {
+                    send_error(&format!(
+                        "{} not found in ~/darkan-3 or ./data/client/",
+                        launcher_name
+                    ));
+                    return;
+                }
+            }
+
+            // Also seed libdarkan_patcher.so if available and not yet in ~/darkan-3
+            let patcher_name = "libdarkan_patcher.so";
+            let target_patcher = darkan_dir.join(patcher_name);
+            if !target_patcher.exists() {
+                // Check next to launcher exe, then ./data/client/, then dev build path
+                let candidates = [
+                    std::env::current_exe()
+                        .ok()
+                        .and_then(|e| e.parent().map(|p| p.join(patcher_name))),
+                    Some(
+                        std::path::PathBuf::from("data")
+                            .join("client")
+                            .join(patcher_name),
+                    ),
+                    std::env::current_exe().ok().and_then(|e| {
+                        e.parent().map(|p| {
+                            p.join("..")
+                                .join("..")
+                                .join("..")
+                                .join("patcher")
+                                .join("target")
+                                .join("release")
+                                .join(patcher_name)
+                        })
+                    }),
+                ];
+                for candidate in candidates.iter().flatten() {
+                    if candidate.exists() {
+                        let _ = std::fs::copy(candidate, &target_patcher);
+                        break;
+                    }
+                }
+            }
+
+            // Create default preferences.cfg if missing
+            let prefs_path = darkan_dir.join("preferences.cfg");
+            if !prefs_path.exists() {
+                let prefs_content = format!(
+                    "cache_folder={dir}\nLanguage=0\nuser_folder={dir}\n",
+                    dir = darkan_dir.display()
+                );
+                if let Err(e) = std::fs::write(&prefs_path, &prefs_content) {
+                    log::warn!("Failed to write preferences.cfg: {}", e);
+                }
             }
 
             // Fetch jav_config.ws to extract RSA modulus from param=99
@@ -382,16 +450,16 @@ impl IpcState {
                 .clone()
                 .or_else(|| crate::game::rs3::extract_rsa_modulus(&jav_params));
 
-            // Launch rs3linux with --configURI, CWD set to ./client/ so it finds rs2client
+            // Launch from ~/darkan-3 — rs3linux will auto-download rs2client from config server
             send_status("Launching rs3linux (Custom server)...");
             match crate::game::process::launch_rs3(
-                &binary_path,
+                &target_binary,
                 &config_uri,
-                None, // No OAuth session params for custom mode
-                &paths.data_dir,
+                None,
+                &darkan_dir,
                 custom_cmd.as_deref(),
                 rsa_modulus.as_deref(),
-                Some(&client_dir), // CWD = ./client/ so rs3linux finds rs2client + preferences.cfg
+                Some(&darkan_dir), // CWD = ~/darkan-3
             ) {
                 Ok(()) => {
                     send_status("Game launched!");
