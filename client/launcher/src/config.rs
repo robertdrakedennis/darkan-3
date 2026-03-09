@@ -32,6 +32,8 @@ pub struct Config {
     pub custom_server_port: Option<u16>,
     #[serde(default)]
     pub custom_config_uri: Option<String>,
+    #[serde(default)]
+    pub custom_rsa_modulus: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -48,6 +50,7 @@ impl Default for Config {
             custom_server_host: None,
             custom_server_port: None,
             custom_config_uri: None,
+            custom_rsa_modulus: None,
         }
     }
 }

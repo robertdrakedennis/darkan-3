@@ -13,7 +13,7 @@ import java.util.zip.Inflater
 /**
  * Context per thread for decompressing data in parallel
  */
-internal class DecompressionContext {
+class DecompressionContext {
     private val gzipInflater = Inflater(true)
     private val bzip2Compressor: BZIP2Compressor by lazy { BZIP2Compressor() }
     private val lzmaDecoder: Decoder by lazy { Decoder() }
@@ -29,10 +29,10 @@ internal class DecompressionContext {
         }
         val buffer = BufferReader(data)
         val type = buffer.readUnsignedByte()
-        val compressedSize = buffer.readInt() and 0xFFFFFF
+        val compressedSize = buffer.readInt()
         var decompressedSize = 0
         if (type != 0) {
-            decompressedSize = buffer.readInt() and 0xFFFFFF
+            decompressedSize = buffer.readInt()
         }
         when (type) {
             NONE -> {
@@ -76,13 +76,18 @@ internal class DecompressionContext {
         return null
     }
 
-    private fun decompress(compressed: ByteArray, offset: Int, decompressed: ByteArray, decompressedLength: Int) {
-        if (!lzmaDecoder.setDecoderProperties(compressed)) {
+    private fun decompress(compressed: ByteArray, propsOffset: Int, decompressed: ByteArray, decompressedLength: Int) {
+        // LZMA properties are 5 bytes at propsOffset (offset 9 in the container).
+        // Extract them into a separate array for setDecoderProperties.
+        val props = ByteArray(5)
+        System.arraycopy(compressed, propsOffset, props, 0, 5)
+        if (!lzmaDecoder.setDecoderProperties(props)) {
             logError("LZMA: Bad properties.")
             return
         }
-        val input = ByteArrayInputStream(compressed)
-        input.skip(offset.toLong())
+        // Compressed stream starts after the 5-byte properties header
+        val streamOffset = propsOffset + 5
+        val input = ByteArrayInputStream(compressed, streamOffset, compressed.size - streamOffset)
         val output = ByteArrayWrapperOutputStream(decompressed)
         lzmaDecoder.code(input, output, decompressedLength.toLong())
     }

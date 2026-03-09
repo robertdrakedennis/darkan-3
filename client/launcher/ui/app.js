@@ -30,7 +30,6 @@
   const inpLaunchCmd = $("#inp-launch-cmd");
   const inpHost = $("#inp-host");
   const inpPort = $("#inp-port");
-
   // IPC
   function send(msg) {
     window.ipc.postMessage(JSON.stringify(msg));
@@ -194,7 +193,7 @@
     state.config.custom_server_host = inpHost.value || null;
     state.config.custom_server_port = parseInt(inpPort.value) || null;
     const host = inpHost.value || "localhost";
-    state.config.custom_config_uri = "http://" + host + ":8080/jav_config.ws";
+    state.config.custom_config_uri = "http://" + host + ":8829/jav_config.ws";
     send({ type: "save_config", config: state.config });
   }
 

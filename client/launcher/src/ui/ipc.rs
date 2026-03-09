@@ -219,6 +219,8 @@ impl IpcState {
                             Some(&params),
                             &paths.data_dir,
                             custom_cmd.as_deref(),
+                            None, // live mode — no RSA patching
+                            None, // no working_dir for live mode
                         ) {
                             send_error(&format!("Failed to launch: {}", e));
                         } else {
@@ -281,6 +283,8 @@ impl IpcState {
                 Some(&params),
                 &paths.data_dir,
                 custom_cmd.as_deref(),
+                None, // live mode — no RSA patching
+                None, // no working_dir for live mode
             ) {
                 Ok(()) => {
                     send_status("Game launched!");
@@ -302,14 +306,30 @@ impl IpcState {
         let close_after = config.close_after_launch;
         let custom_cmd = config.custom_launch_command.clone();
 
-        // Build config URI from custom settings, falling back to sensible defaults
+        // Build config URI from custom settings
         let host = config
             .custom_server_host
             .as_deref()
             .unwrap_or("localhost");
-        let config_uri = config.custom_config_uri.unwrap_or_else(|| {
-            format!("http://{}:8080/jav_config.ws", host)
+        let config_uri = config.custom_config_uri.clone().unwrap_or_else(|| {
+            format!("http://{}:8829/jav_config.ws", host)
         });
+
+        // Find rs3linux launcher binary in ./client/ relative to CWD, then next to launcher exe
+        let launcher_name = crate::game::process::launcher_binary_name();
+        let client_dir = std::path::PathBuf::from("client");
+        let binary_path = {
+            let cwd_path = client_dir.join(launcher_name);
+            if cwd_path.exists() {
+                cwd_path
+            } else if let Ok(exe) = std::env::current_exe() {
+                exe.parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .join(launcher_name)
+            } else {
+                std::path::PathBuf::from(launcher_name)
+            }
+        };
 
         tokio::spawn(async move {
             let send_status = |msg: &str| {
@@ -334,21 +354,44 @@ impl IpcState {
                 let _ = cmd_tx.send(AppCommand::SendToWebview(js));
             };
 
-            // In custom mode, skip CDN update check — require existing binary
-            if !paths.rs3_binary.exists() {
-                send_error(
-                    "No client binary found. Please download the client first by launching in Live mode with a Jagex account.",
-                );
+            // Check that the launcher binary exists
+            if !binary_path.exists() {
+                send_error(&format!(
+                    "Launcher binary not found: {}. Expected rs3linux in ./client/",
+                    binary_path.display()
+                ));
                 return;
             }
 
-            send_status("Launching game (Custom server)...");
+            // Fetch jav_config.ws to extract RSA modulus from param=99
+            send_status("Fetching config from server...");
+            let client = reqwest::Client::new();
+            let jav_params =
+                match crate::game::rs3::fetch_jav_config_params(&client, &config_uri).await {
+                    Ok(params) => params,
+                    Err(e) => {
+                        send_error(&format!("Failed to fetch jav_config.ws: {}", e));
+                        return;
+                    }
+                };
+            log::info!("Parsed {} jav_config params", jav_params.len());
+
+            // Determine RSA modulus: prefer explicit config, fall back to param=99
+            let rsa_modulus = config
+                .custom_rsa_modulus
+                .clone()
+                .or_else(|| crate::game::rs3::extract_rsa_modulus(&jav_params));
+
+            // Launch rs3linux with --configURI, CWD set to ./client/ so it finds rs2client
+            send_status("Launching rs3linux (Custom server)...");
             match crate::game::process::launch_rs3(
-                &paths.rs3_binary,
+                &binary_path,
                 &config_uri,
                 None, // No OAuth session params for custom mode
                 &paths.data_dir,
                 custom_cmd.as_deref(),
+                rsa_modulus.as_deref(),
+                Some(&client_dir), // CWD = ./client/ so rs3linux finds rs2client + preferences.cfg
             ) {
                 Ok(()) => {
                     send_status("Game launched!");

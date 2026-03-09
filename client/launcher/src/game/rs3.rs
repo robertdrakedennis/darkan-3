@@ -91,3 +91,33 @@ pub fn verify_hash(data: &[u8], expected: &str) -> bool {
 pub fn save_hash(hash_path: &Path, hash: &str) -> Result<()> {
     std::fs::write(hash_path, hash).context("Failed to save hash file")
 }
+
+/// Fetch jav_config.ws and parse param=N=value lines into key-value pairs
+pub async fn fetch_jav_config_params(
+    client: &reqwest::Client,
+    config_uri: &str,
+) -> Result<Vec<(String, String)>> {
+    let resp = client
+        .get(config_uri)
+        .send()
+        .await
+        .context("Failed to fetch jav_config.ws")?;
+    let text = resp
+        .text()
+        .await
+        .context("Failed to read jav_config.ws body")?;
+    let mut params = Vec::new();
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("param=") {
+            if let Some((key, value)) = rest.split_once('=') {
+                params.push((key.to_string(), value.to_string()));
+            }
+        }
+    }
+    Ok(params)
+}
+
+/// Extract RSA modulus from param=99 if present
+pub fn extract_rsa_modulus(params: &[(String, String)]) -> Option<String> {
+    params.iter().find(|(k, _)| k == "99").map(|(_, v)| v.clone())
+}
