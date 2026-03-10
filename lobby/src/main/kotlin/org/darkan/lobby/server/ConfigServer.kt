@@ -218,7 +218,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=58=https://account.jagex.com/")
         line("param=59=https://auth.runescape.com/")
         line("param=60=0")
-        line("param=99=${EnvVars.rsaPublicModulusHex}")  // hex RSA modulus for client patcher
+        line("param=99=${EnvVars.loginRsaModulusHex}")  // hex RSA modulus for client patcher
     }
 
     companion object {
@@ -258,9 +258,10 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
             message[0] = 0x01
             System.arraycopy(whirlpoolHash, 0, message, 1, 64)
 
-            // RSA sign: signature = message^d mod n
-            val modulus = BigInteger(EnvVars.js5RsaModulus)
-            val exponent = BigInteger(EnvVars.js5RsaExponent)
+            // RSA sign with the login key — rs3linux's embedded public key is
+            // patched by DARKAN_RSA_MODULUS which is the login modulus hex
+            val modulus = BigInteger(EnvVars.loginRsaModulus)
+            val exponent = BigInteger(EnvVars.loginRsaExponent)
             val messageBigInt = BigInteger(1, message) // positive BigInteger
             val signature = messageBigInt.modPow(exponent, modulus)
 

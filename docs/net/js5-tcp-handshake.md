@@ -119,18 +119,39 @@ The client reads exactly **1 byte**:
 
 After receiving SYNC (0), the client reads **N * 4 bytes** where N is the prefetch key count.
 
-The prefetch key count `N` is stored at `Js5WorkerThread+0x250` and is set during worker thread initialization via a `gT_ushort` read from the init message (see `OnMessage` case 2). This value is passed from the main thread when the JS5 system is initialized.
+The prefetch key count `N` is stored at `Js5WorkerThread+0x250` and is set during worker thread initialization via a `gT_ushort` read from the internal init message (see `OnMessage` case 2, second `gT_ushort`). This value is passed from the main thread when the JS5 system is initialized.
 
 Each key is read as a **big-endian 4-byte int** via `Packet::gT_uint`.
 
-**Typical value**: N = 27 (for 27 archive indices in the current cache).
+### N = 0 Case (Confirmed)
 
-**Server implementation**: The server must send exactly N int32 values after the SYNC byte. The number of keys must match what the client expects. If the server sends 0 bytes (as observed in our bug), the client will wait forever or timeout.
+**The NXT client fully supports N = 0.** When N is 0, the code path in `MainLogic` State 2 has an explicit guard:
+
+```c
+iVar10 = *(int *)&this->field_0x250;  // N
+iVar10 = iVar10 * 4;                  // bytes needed
+if ((ulong)(long)iVar10 <= available) {
+    if ((long)iVar10 != 0) {           // <-- SKIP if N == 0
+        ClientStream::Read(..., iVar10);
+        // parse N uint32 keys
+    }
+    // transition to State 3 regardless
+}
+```
+
+When N = 0:
+- The condition `0 <= available` is always true
+- The inner `if ((long)iVar10 != 0)` is false, so the read is skipped entirely
+- The client immediately sends ACK + CONNECTION_READY and transitions to State 3
+
+**Empirical confirmation:** Our working cache downloader tool connects to Jagex's live JS5 server (`content.runescape.com:43594`) without reading any prefetch keys after SYNC, and downloads the complete cache successfully. This proves Jagex's production server sends **0 prefetch keys** over TCP.
+
+**Server implementation**: The server sends ONLY the 1-byte SYNC (0x00). No prefetch keys are sent.
 
 ```
 Offset  Size      Type         Description
 ------  ----      ----         -----------
-0       N * 4     int32[] (BE) Prefetch keys (one per archive index)
+0       N * 4     int32[] (BE) Prefetch keys (N = 0 for current NXT TCP connections)
 ```
 
 ---
@@ -139,7 +160,10 @@ Offset  Size      Type         Description
 
 After reading all prefetch keys, the client sends **two** TCP writes:
 
-### Write 1: Encryption/Version ACK (8 bytes)
+### Write 1: Encryption/Version ACK (10 bytes)
+
+The buffer was pre-allocated to 10 bytes by `CreateQueues` via `Packet::ResizeBuffer(plVar6 + 0xb, 10)`.
+The `ClientStream::Write` call uses the buffer capacity (10), not the write position.
 
 ```
 Offset  Size  Type       Value
@@ -149,6 +173,7 @@ Offset  Size  Type       Value
 2       1     uint8      0
 3       1     uint8      5
 4       4     int32 (BE) Major version (946 = 0x000003B2)
+8       2     zeros      Buffer padding (from ResizeBuffer zeroing)
 ```
 
 **Source evidence** from `MainLogic` State 2:
@@ -159,17 +184,28 @@ Packet::pT_uchar(plVar17, 6);       // opcode 6
 *(buf + pos++) = 0;
 *(buf + pos++) = 5;
 Packet::pT_int(plVar17, iVar10);    // iVar10 = field_0x308 = 0x3B2 (946)
-ClientStream::Write(...);
+ClientStream::Write(stream, buf, bufCapacity);  // writes full 10 bytes
 ```
 
 The bytes `[0, 0, 5]` may encode: `padding(1) + padding(1) + encryption_type(1)` where 5 indicates no encryption, or they form a 3-byte medium value of `0x000005`.
 
-### Write 2: Connection Ready (1 byte)
+### Write 2: Connection Ready (10 bytes)
+
+The same 10-byte buffer is reused. Only byte 0 (opcode) is overwritten; bytes 1-9 are residual from the ACK.
 
 ```
 Offset  Size  Type       Value
 ------  ----  ----       -----
 0       1     uint8      3 (opcode: CONNECTION_READY)
+1-9     9     residual   00 00 05 00 00 03 B2 00 00 (from ACK write)
+```
+
+**Source evidence:**
+```c
+plVar4[0xe] = 0;                     // reset write position
+Packet::pT_uchar(plVar17, 3);       // write ONLY byte 0 = 3
+ClientStream::Write(stream, buf, bufCapacity);  // writes full 10 bytes
+ClientStream::Flush(stream);
 ```
 
 After this, `ClientStream::Flush` is called and the connection transitions to **State 3 (CONNECTED)**.
@@ -178,39 +214,69 @@ After this, `ClientStream::Flush` is called and the connection transitions to **
 
 ## Step 5: File Requests (State 3)
 
-Once connected, the client sends file requests using `FUN_009d6b90`. Each request is **6 bytes**:
+Once connected, the client sends file requests using `FUN_009d6b90`. **All NXT JS5 client messages are 10 bytes** — both file requests and control opcodes share the same frame size.
+
+### File Request (10 bytes)
+
+Only 6 bytes are meaningfully written by `FUN_009d6b90`; the remaining 4 are buffer padding (zeros).
 
 ```
-Offset  Size  Type       Description
-------  ----  ----       -----------
-0       1     uint8      Flags: (priority_enum << 4) | is_urgent
-1       1     uint8      Archive ID
-2       4     int32 (BE) Group ID
+Offset  Size  Type        Description
+------  ----  ----        -----------
+0       1     uint8       Flags: (priority_enum << 4) | is_urgent
+1       1     uint8       Archive ID (index)
+2       4     int32 (BE)  Group ID
+6       4     zeros       Buffer padding (from 10-byte pre-allocated buffer)
 ```
 
 **Flags byte breakdown:**
-- Bits 0-3: `is_urgent` flag (1 = urgent/high priority, 0 = prefetch)
+- Bit 0: `is_urgent` flag (1 = urgent/high priority, 0 = prefetch)
 - Bits 4-7: `priority_enum` value (request priority level)
+- Valid flags: 0x00 (prefetch), 0x01 (urgent), 0x10, 0x11, 0x20, 0x21, etc.
+- File request if `(flags & 0x0E) == 0`
 
-**Request for master index**: archive=255 (0xFF), group=255 (0xFF).
+### Control Opcode (10 bytes)
+
+```
+Offset  Size  Type        Description
+------  ----  ----        -----------
+0       1     uint8       Opcode (2=STATUS_LOGGED_IN, 3=STATUS_LOGGED_OUT, 4=ENCRYPTION_KEY_UPDATE, 6=ACKNOWLEDGE)
+1       3     medium (BE) Padding/encryption type (typically 0x000005)
+4       2     int16 (BE)  Padding (0)
+6       2     int16 (BE)  Major version
+8       2     int16 (BE)  Padding (0)
+```
+
+**Request for master index**: flags=0x21, archive=255, group=255.
+
+**Confirmed from**: Working cache downloader (`tools/.../JS5Protocol.kt`) tested against Jagex production servers.
 
 ---
 
 ## File Response Format (State 3)
 
-Each response from the server follows the standard JS5 response format:
+Each response from the server follows the NXT JS5 response format:
 
 ```
 Offset  Size  Type       Description
 ------  ----  ----       -----------
-0       1     uint8      Archive ID
+0       1     uint8      Archive ID (index)
 1       4     int32 (BE) Group ID (top bit: 0 = urgent, 1 = prefetch)
 5       1     uint8      Compression type (0=none, 1=bzip2, 2=gzip, 3=lzma)
 6       4     int32 (BE) Compressed data length
-10      ...   bytes      Data payload (chunked into 512-byte blocks with 0xFF separators)
+10      ...   bytes      Data payload (block-framed, see below)
 ```
 
-The response data is **chunked**: every 512 bytes, a `0xFF` separator byte is inserted. The client reads the first 5-byte header, determines the total size, then reads data in 512-byte chunks, skipping the separator bytes.
+The response data is **block-framed** with a block size of **102,400 bytes**. The first block starts after the 10-byte response header (so the first block has 102,390 bytes of payload capacity). At each block boundary, a **5-byte continuation header** is inserted:
+
+```
+Offset  Size  Type       Description
+------  ----  ----       -----------
+0       1     uint8      Archive ID (same as response header)
+1       4     int32 (BE) Group ID with prefetch bit (same as response header)
+```
+
+**NOT the legacy RS2/OSRS format** — NXT does NOT use 512-byte chunks or 0xFF separator bytes.
 
 ---
 
@@ -232,61 +298,41 @@ Using token `j4mhSS8dVoheay-bfgy69x*nmrCTmAEk` (32 chars), platform byte 0:
 00                          -- Platform byte (0)
 ```
 
-### Server -> Client (1 + 108 bytes):
+### Server -> Client (1 byte):
 ```
 00                          -- JS5_SYNC (success)
-XX XX XX XX                 -- Prefetch key 0 (int32 BE)
-XX XX XX XX                 -- Prefetch key 1
-...                         -- (27 total keys)
-XX XX XX XX                 -- Prefetch key 26
+                            -- No prefetch keys (N = 0)
 ```
 
-### Client -> Server (8 + 1 = 9 bytes):
+### Client -> Server (10 + 10 = 20 bytes):
+
+The client writes these using a 10-byte pre-allocated buffer. The ACK fills all 10 bytes, then the
+READY overwrites only byte 0 (opcode), leaving bytes 1-9 from the ACK as residual data.
+
 ```
 06                          -- Encryption ACK opcode
-00 00 05                    -- Padding/encryption type
-00 00 03 B2                 -- Major version (946)
+00 00 05                    -- Bytes: [0, 0, 5] (manually written)
+00 00 03 B2                 -- int32 BE: major version (946) from field_0x308
+00 00                       -- Residual zeros from buffer init
 
-03                          -- Connection Ready opcode
+03                          -- Connection Ready opcode (overwrites byte 0)
+00 00 05                    -- Residual from ACK (NOT re-written)
+00 00 03 B2                 -- Residual from ACK
+00 00                       -- Residual from ACK
 ```
 
-### Client -> Server (file requests, 6 bytes each):
+**Note:** The READY message reuses the same 10-byte buffer, resetting only the write position and
+writing `pT_uchar(3)` (1 byte). The remaining 9 bytes are leftover from the ACK write. Both
+messages are written and flushed together.
+
+### Client -> Server (file requests, 10 bytes each):
 ```
-11                          -- Flags: priority=1, urgent=1
+21                          -- Flags: priority=2, urgent=1
 FF                          -- Archive 255 (master index)
 00 00 00 FF                 -- Group 255 (master index)
+03 B2                       -- Major version (946)
+00 00                       -- Padding
 ```
-
----
-
-## Bugs in Current Implementation
-
-### Bug 1: Missing Trailing Byte in Handshake
-
-`JS5Connection.kt` line 87-94 and `Diagnostic.kt` line 59-65 both:
-1. Calculate `payloadSize = 4 + 4 + tokenBytes.size + 1` (should be `+ 2`)
-2. Omit the trailing platform/language byte after the null terminator
-
-**Fix**: Add 1 to payloadSize and write an extra byte (value 0) after the null terminator.
-
-### Bug 2: ACK Format Mismatch
-
-`JS5Server.kt` expects the client ACK as:
-```kotlin
-val opcode = input.readByte()   // expects ACKNOWLEDGE
-val id = input.readMedium()     // expects 3
-val endAck = input.readUShort() // expects 0
-```
-
-But the client actually sends TWO separate writes:
-1. `[6, 0, 0, 5, <version_int>]` -- 8 bytes
-2. `[3]` -- 1 byte
-
-The server incorrectly combines these into a single read sequence. The opcode 6 packet is 8 bytes (not 4), and opcode 3 is a separate 1-byte packet.
-
-### Bug 3: Hardcoded Prefetch Key Count
-
-The current `CacheDownloader.kt` hardcodes 27 prefetch keys. The actual count should match the number of archive indices in the cache. The client receives this count from the server (it's implicit -- the server sends however many keys it wants, and the client knows how many to expect based on initialization).
 
 ---
 
@@ -296,9 +342,13 @@ The JS5 server should:
 
 1. Read the handshake: opcode(1) + size(1) + major(4) + minor(4) + token(N) + null(1) + platform(1)
 2. Validate version and token
-3. Send: SYNC byte (0) + prefetch keys (N * 4 bytes)
-4. Read: opcode 6 ACK (8 bytes total: `06 00 00 05 XX XX XX XX`)
-5. Read: opcode 3 ready (1 byte: `03`)
-6. Enter file request/response loop
+3. Send: SYNC byte (0x00) ONLY — no prefetch keys (N = 0 for NXT TCP)
+4. Read: opcode 6 ACK (10 bytes: `06 00 00 05 00 00 03 B2 00 00`)
+5. Read: opcode 3 ready (10 bytes: `03 00 00 05 00 00 03 B2 00 00`)
+6. Enter file request/response loop (all client messages are 10 bytes)
 
-The `content.runescape.com:43594` server likely expects the full correct handshake including the trailing platform byte and correct size. If the size byte is wrong by 1, the server may read the wrong number of bytes, consume the first byte of the next message, and close the connection.
+**Prefetch keys are NOT sent over TCP.** The prefetch key count N is set internally by the client
+from its JS5 initialization message. Jagex's live server (`content.runescape.com:43594`) sends only
+the 1-byte SYNC response with no additional data before the client sends ACK + READY. This is
+confirmed by both binary analysis (the code handles N=0 gracefully) and empirical testing (our
+cache downloader tool works against Jagex without reading any prefetch keys).

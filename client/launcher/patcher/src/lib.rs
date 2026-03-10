@@ -6,8 +6,10 @@
 //!
 //! Patches applied (when `DARKAN_RSA_MODULUS` is set):
 //!
-//! 1. **rs2client RSA modulus** — 128-byte binary pattern in .rodata/.data,
-//!    replaced with the custom 1024-bit modulus from the env var.
+//! 1. **rs2client RSA modulus** — 256-char lowercase hex ASCII string in
+//!    .rodata, parsed at startup by jag::math::BigInteger via FUN_001706b0.
+//!    Replaced with the custom 1024-bit modulus hex from the env var,
+//!    left-padded with '0' to 256 chars.
 //!
 //! 2. **rs3linux RSA modulus** — 1024-char lowercase hex ASCII string in
 //!    .rodata used by the launcher for download signature verification.
@@ -24,20 +26,21 @@ use std::env;
 use std::fs;
 use std::ptr;
 
-/// The Jagex RSA public modulus (1024-bit, big-endian bytes) used by rs2client.
-///
-/// Decimal value:
-/// 117525752735533423040644219776209926525585489242340044375332234679786347045466594509203355398209678968096551043842518449703703964361320462967286756268851663407950384008240524570966471744081769815157355561961607944067477858512067883877129283799853947605780903005188603658779539811385137666347647991072028080201
-const JAGEX_MODULUS: [u8; 128] = [
-    0xa7, 0x5c, 0xba, 0xed, 0x30, 0xed, 0xdd, 0x55, 0x6f, 0xaa, 0x17, 0x7b, 0x5a, 0x11, 0x1d, 0xfa,
-    0x41, 0xc5, 0x95, 0xd2, 0xb1, 0x66, 0x71, 0xd8, 0x23, 0xf1, 0x88, 0x34, 0xd5, 0xa0, 0x4b, 0xf2,
-    0xb1, 0xf2, 0x18, 0xfb, 0x0f, 0xf9, 0x30, 0x5a, 0x9d, 0x0c, 0xb7, 0xfc, 0xc2, 0x69, 0x9c, 0x62,
-    0x50, 0x72, 0xdc, 0x9e, 0xfa, 0x88, 0x76, 0x49, 0x94, 0x53, 0x8f, 0x20, 0x99, 0xd4, 0x65, 0x14,
-    0x04, 0x18, 0xcc, 0x4d, 0x53, 0x06, 0xce, 0x61, 0x8e, 0x1a, 0x2b, 0x2e, 0xe5, 0xfe, 0xf7, 0x25,
-    0xef, 0x83, 0xea, 0xe6, 0x4c, 0x30, 0x31, 0xb2, 0xd8, 0x36, 0xb9, 0x99, 0xa8, 0xa3, 0xce, 0x03,
-    0x78, 0xa7, 0xd6, 0x3d, 0xbb, 0x06, 0xad, 0x63, 0x5c, 0x29, 0xd2, 0x24, 0x1a, 0x10, 0xf1, 0xcf,
-    0x72, 0x5a, 0x0a, 0xbf, 0x82, 0xbd, 0x48, 0xbb, 0x8c, 0xe4, 0xab, 0x56, 0x43, 0xa7, 0xb8, 0x49,
-];
+/// First 32 chars of the rs2client login RSA modulus hex string (1024-bit key).
+/// Found via Ghidra in FUN_001879c0 (.init_array), loaded into DAT_016e7340.
+/// Used by jag::LoginManager::CreateLoginRSAPacket via jag::math::BigInteger::ModPow.
+const RS2CLIENT_MODULUS_PREFIX: &[u8] = b"9cbc5f910c473c629a26baf5f9a1d01d";
+
+/// Full length of the rs2client login RSA modulus hex string (1024-bit = 128 bytes = 256 hex chars).
+const RS2CLIENT_MODULUS_HEX_LEN: usize = 256;
+
+/// First 32 chars of the rs2client JS5 RSA modulus hex string (4096-bit key).
+/// Found via Ghidra in FUN_001879c0 (.init_array), loaded into DAT_016e7330.
+/// Used by jag::Js5MasterIndex::Js5MasterIndex for version table signature verification.
+const RS2CLIENT_JS5_MODULUS_PREFIX: &[u8] = b"e9b6a139afb361a6438c46cdade9e7ae";
+
+/// Full length of the rs2client JS5 RSA modulus hex string (4096-bit = 512 bytes = 1024 hex chars).
+const RS2CLIENT_JS5_MODULUS_HEX_LEN: usize = 1024;
 
 /// First 32 chars of the rs3linux launcher RSA modulus hex string (4096-bit key).
 /// Used as a unique search pattern to locate the full 1024-char hex string in .rodata.
@@ -86,6 +89,8 @@ fn patch_rsa() {
         _ => return,
     };
 
+    let js5_modulus_hex = env::var("DARKAN_JS5_RSA_MODULUS").ok().filter(|v| !v.is_empty());
+
     eprintln!("[darkan-patcher] RSA patcher loaded, applying patches...");
 
     // Detect which binary we're running in
@@ -112,20 +117,10 @@ fn patch_rsa() {
         return;
     }
 
-    let new_modulus = match hex_to_bytes(&modulus_hex_clean) {
-        Some(bytes) => bytes,
-        None => {
-            eprintln!("[darkan-patcher] ERROR: DARKAN_RSA_MODULUS is not valid hex");
-            return;
-        }
-    };
-
-    if new_modulus.len() != 128 {
-        eprintln!(
-            "[darkan-patcher] WARNING: DARKAN_RSA_MODULUS is {} bytes ({}-bit), rs2client patch expects 128 bytes (1024-bit)",
-            new_modulus.len(),
-            new_modulus.len() * 8,
-        );
+    // Validate hex is parseable (don't need the bytes, but catch bad input early)
+    if hex_to_bytes(&modulus_hex_clean).is_none() {
+        eprintln!("[darkan-patcher] ERROR: DARKAN_RSA_MODULUS is not valid hex");
+        return;
     }
 
     let maps = match fs::read_to_string("/proc/self/maps") {
@@ -151,31 +146,101 @@ fn patch_rsa() {
         }
     }
 
-    // --- Patch 1: rs2client binary RSA modulus (128-byte binary pattern) ---
-    if new_modulus.len() == 128 {
-        let mut patched = false;
-        for region in &regions {
-            if let Some(offset) = scan_for_pattern(region.start, region.end, &JAGEX_MODULUS) {
+    // --- Patch 1: rs2client binary RSA modulus (256-char hex ASCII string) ---
+    //
+    // The rs2client binary stores the login RSA modulus as a lowercase hex ASCII
+    // string in .rodata (256 chars for 1024-bit key). At startup, FUN_001706b0
+    // parses it into a jag::math::BigInteger. We replace the hex string in-place
+    // so the BigInteger parser loads our custom modulus instead.
+    {
+        let padded_hex = {
+            let hex_lower = modulus_hex_clean.to_ascii_lowercase();
+            if hex_lower.len() > RS2CLIENT_MODULUS_HEX_LEN {
                 eprintln!(
-                    "[darkan-patcher] Found rs2client RSA modulus at address 0x{:x}",
-                    offset
+                    "[darkan-patcher] WARNING: DARKAN_RSA_MODULUS hex is {} chars, exceeds rs2client max of {}",
+                    hex_lower.len(),
+                    RS2CLIENT_MODULUS_HEX_LEN,
                 );
+                None
+            } else {
+                let padding = RS2CLIENT_MODULUS_HEX_LEN - hex_lower.len();
+                let mut s = "0".repeat(padding);
+                s.push_str(&hex_lower);
+                Some(s)
+            }
+        };
 
-                if patch_memory(offset, &new_modulus, region.prot) {
-                    eprintln!("[darkan-patcher] Successfully patched rs2client RSA modulus");
-                    patched = true;
-                    break;
-                } else {
-                    eprintln!("[darkan-patcher] ERROR: Failed to patch rs2client RSA modulus at 0x{:x}", offset);
+        if let Some(replacement_str) = padded_hex {
+            let replacement_bytes = replacement_str.as_bytes();
+            debug_assert_eq!(replacement_bytes.len(), RS2CLIENT_MODULUS_HEX_LEN);
+
+            let mut patched = false;
+            for region in &regions {
+                if let Some(offset) = scan_for_pattern(region.start, region.end, RS2CLIENT_MODULUS_PREFIX) {
+                    eprintln!(
+                        "[darkan-patcher] Found rs2client RSA modulus hex string at address 0x{:x}",
+                        offset,
+                    );
+
+                    if patch_memory(offset, replacement_bytes, region.prot) {
+                        eprintln!("[darkan-patcher] Successfully patched rs2client RSA modulus ({} hex chars)", RS2CLIENT_MODULUS_HEX_LEN);
+                        patched = true;
+                        break;
+                    } else {
+                        eprintln!("[darkan-patcher] ERROR: Failed to patch rs2client RSA modulus at 0x{:x}", offset);
+                    }
                 }
             }
-        }
 
-        if !patched {
-            eprintln!("[darkan-patcher] rs2client RSA modulus pattern not found (not rs2client process?)");
+            if !patched {
+                eprintln!("[darkan-patcher] rs2client RSA modulus pattern not found (not rs2client process?)");
+            }
         }
-    } else {
-        eprintln!("[darkan-patcher] Skipping rs2client RSA patch (modulus is not 1024-bit)");
+    }
+
+    // --- Patch 1b: rs2client JS5 RSA modulus (1024-char hex ASCII string, 4096-bit key) ---
+    //
+    // The version table / master index signature is verified using a separate 4096-bit key
+    // stored at DAT_016e7330, loaded from a 1024-char hex string in .rodata.
+    if let Some(ref js5_hex) = js5_modulus_hex {
+        let js5_hex_clean = {
+            let s = js5_hex.trim();
+            s.strip_prefix("0x")
+                .or_else(|| s.strip_prefix("0X"))
+                .unwrap_or(s)
+                .to_ascii_lowercase()
+        };
+
+        if js5_hex_clean.len() <= RS2CLIENT_JS5_MODULUS_HEX_LEN && hex_to_bytes(&js5_hex_clean).is_some() {
+            let padding = RS2CLIENT_JS5_MODULUS_HEX_LEN - js5_hex_clean.len();
+            let mut padded = "0".repeat(padding);
+            padded.push_str(&js5_hex_clean);
+            let replacement_bytes = padded.as_bytes();
+
+            let mut patched = false;
+            for region in &regions {
+                if let Some(offset) = scan_for_pattern(region.start, region.end, RS2CLIENT_JS5_MODULUS_PREFIX) {
+                    eprintln!(
+                        "[darkan-patcher] Found rs2client JS5 RSA modulus hex string at address 0x{:x}",
+                        offset,
+                    );
+
+                    if patch_memory(offset, replacement_bytes, region.prot) {
+                        eprintln!("[darkan-patcher] Successfully patched rs2client JS5 RSA modulus ({} hex chars)", RS2CLIENT_JS5_MODULUS_HEX_LEN);
+                        patched = true;
+                        break;
+                    } else {
+                        eprintln!("[darkan-patcher] ERROR: Failed to patch rs2client JS5 RSA modulus at 0x{:x}", offset);
+                    }
+                }
+            }
+
+            if !patched {
+                eprintln!("[darkan-patcher] rs2client JS5 RSA modulus pattern not found (not rs2client process?)");
+            }
+        } else {
+            eprintln!("[darkan-patcher] WARNING: DARKAN_JS5_RSA_MODULUS is invalid or too long");
+        }
     }
 
     // --- Patches 2-4 are rs3linux-only; skip for rs2client ---
@@ -447,8 +512,9 @@ mod tests {
     }
 
     #[test]
-    fn test_jagex_modulus_length() {
-        assert_eq!(JAGEX_MODULUS.len(), 128);
+    fn test_rs2client_modulus_constants() {
+        assert_eq!(RS2CLIENT_MODULUS_PREFIX.len(), 32);
+        assert_eq!(RS2CLIENT_MODULUS_HEX_LEN, 256);
     }
 
     #[test]

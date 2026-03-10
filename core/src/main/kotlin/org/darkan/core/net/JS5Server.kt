@@ -41,76 +41,69 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
 
             logInfo("JS5 handshake complete for $ip — version $major.$minor")
 
-            // Send SYNC + prefetch keys
+            // Send SYNC response — NXT TCP JS5 does NOT send prefetch keys after SYNC
+            // (confirmed: working cache downloader connects to Jagex without reading any keys)
             output.writeByte(ResponseOpcode.JS5_SYNC)
-            for (key in prefetchKeys)
-                output.writeInt(key)
             output.flush()
 
-            // Read client ACK sequence:
-            //   Opcode 6 (ENCRYPTION_ACK): 1 byte opcode + 3 bytes padding + 4 bytes major version = 8 bytes
-            //   Opcode 3 (CONNECTION_READY): 1 byte opcode
-            val ackOpcode = input.readByte().toInt()
+            // Read client ACK sequence. NXT sends two 10-byte control messages:
+            //   Opcode 6 (ENCRYPTION_ACK): opcode(1) + medium(3) + int(4) + short(2) = 10 bytes
+            //   Opcode 3 (CONNECTION_READY): opcode(1) + medium(3) + int(4) + short(2) = 10 bytes
+            // Confirmed via raw byte dump: both use the same format.
+            suspend fun readControlPayload() { input.readMedium(); input.readInt(); input.readShort() }
+
+            val ackOpcode = input.readByte().toInt() and 0xFF
             if (ackOpcode != RequestOpcode.ACKNOWLEDGE) {
-                logInfo("Expected ACK opcode 6, got: $ackOpcode")
+                logInfo("Expected ACK opcode 6, got: $ackOpcode from $ip")
                 output.writeByte(ResponseOpcode.LOGIN_SERVER_REJECTED_SESSION)
                 output.flushAndClose()
                 return
             }
-            // Read 3-byte padding (00 00 05) + 4-byte major version
-            input.readMedium()  // padding: 0x000005
-            input.readInt()     // major version (validated above, ignored here)
+            readControlPayload()
 
-            val readyOpcode = input.readByte().toInt()
+            val readyOpcode = input.readByte().toInt() and 0xFF
             if (readyOpcode != RequestOpcode.STATUS_LOGGED_OUT) {
-                logInfo("Expected READY opcode 3, got: $readyOpcode")
-                output.writeByte(ResponseOpcode.BAD_SESSION_ID)
-                output.flushAndClose()
-                return
+                logWarn("Expected CONNECTION_READY (3), got: $readyOpcode from $ip")
             }
+            readControlPayload()
 
-            // Enter file request loop (State 3: CONNECTED)
+            logInfo("JS5 ACK + CONNECTION_READY complete for $ip")
+
+            // Enter file request loop
+            // All NXT JS5 client messages are 10 bytes (6 meaningful + 4 padding):
+            //   File requests: flags(1) + index(1) + group(4) + padding(4) = 10
+            //   Control msgs:  opcode(1) + medium(3) + int(4) + short(2) = 10
+            // flags byte: (priority << 4) | isUrgent; file request if (flags & 0x0E) == 0
             coroutineScope {
                 while (isActive) {
                     val opcode = input.readByte().toInt() and 0xFF
-                    when (opcode) {
-                        RequestOpcode.JS5_FILE -> {
-                            // Prefetch request: archive(1) + group(4)
-                            val ref = input.read40BitULong()
-                            val idx = (ref ushr 32).toInt()
-                            val arc = (ref and 0xFFFFFFFFL).toInt()
-                            if (!provider.serve(output, ref, prefetch = true)) {
-                                logWarn("JS5 cache miss: index=$idx archive=$arc (prefetch) from $ip")
+                    when {
+                        // NXT file request: low nibble is 0 or 1 (urgency flag only)
+                        (opcode and 0x0E) == 0 -> {
+                            val urgent = (opcode and 1) != 0
+                            val index = input.readByte().toInt() and 0xFF
+                            val group = input.readInt()
+                            input.readShort() // padding
+                            input.readShort() // padding
+                            logInfo("JS5 request: index=$index group=$group flags=0x${"%02x".format(opcode)} (${if (urgent) "urgent" else "prefetch"}) from $ip")
+                            val ref = (index.toLong() shl 32) or (group.toLong() and 0xFFFFFFFFL)
+                            if (!provider.serve(output, ref, prefetch = !urgent)) {
+                                logWarn("JS5 cache miss: index=$index group=$group (${if (urgent) "urgent" else "prefetch"}) from $ip")
                             } else {
-                                logTrace("JS5 serve: index=$idx archive=$arc prefetch=true to $ip")
+                                logInfo("JS5 served: index=$index group=$group prefetch=${!urgent} to $ip")
                             }
                         }
-                        RequestOpcode.JS5_FILE_HIGH_PRIORITY -> {
-                            // Urgent request: archive(1) + group(4)
-                            val ref = input.read40BitULong()
-                            val idx = (ref ushr 32).toInt()
-                            val arc = (ref and 0xFFFFFFFFL).toInt()
-                            if (!provider.serve(output, ref, prefetch = false)) {
-                                logWarn("JS5 cache miss: index=$idx archive=$arc (urgent) from $ip")
-                            } else {
-                                logTrace("JS5 serve: index=$idx archive=$arc prefetch=false to $ip")
-                            }
-                        }
-                        RequestOpcode.STATUS_LOGGED_IN, RequestOpcode.STATUS_LOGGED_OUT -> {
-                            // Status update: 3 bytes padding (consumed and ignored)
+                        opcode == RequestOpcode.STATUS_LOGGED_IN || opcode == RequestOpcode.STATUS_LOGGED_OUT -> {
                             logTrace("JS5 status opcode $opcode from $ip")
-                            input.readMedium()
+                            readControlPayload()
                         }
-                        RequestOpcode.ENCRYPTION_KEY_UPDATE -> {
-                            // XTEA key update: 1 byte index + 4x4 byte keys = 17 bytes
+                        opcode == RequestOpcode.ENCRYPTION_KEY_UPDATE -> {
                             logTrace("JS5 encryption key update from $ip")
-                            input.readByte()  // index
-                            repeat(4) { input.readInt() } // 4 XTEA key ints
+                            readControlPayload()
                         }
-                        RequestOpcode.ACKNOWLEDGE -> {
-                            // Acknowledge: 3 bytes (consumed and ignored)
+                        opcode == RequestOpcode.ACKNOWLEDGE -> {
                             logTrace("JS5 acknowledge from $ip")
-                            input.readMedium()
+                            readControlPayload()
                         }
                         else -> {
                             logWarn("JS5 unknown opcode $opcode from $ip")

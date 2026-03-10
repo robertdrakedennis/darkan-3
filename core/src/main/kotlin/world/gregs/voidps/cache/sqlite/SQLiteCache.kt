@@ -209,7 +209,7 @@ class SQLiteCache private constructor(
                             .removeSuffix(".jcache")
                             .toInt()
                         indexFiles[indexId] = IndexFile(file)
-                        if (indexId > maxIndex) maxIndex = indexId
+                        if (indexId != 255 && indexId > maxIndex) maxIndex = indexId
                     }
             }
 
@@ -235,6 +235,7 @@ class SQLiteCache private constructor(
             }
 
             cache.versionTable = versionTable?.build(whirlpool) ?: ByteArray(0)
+
             return cache
         }
 
@@ -265,6 +266,8 @@ class SQLiteCache private constructor(
             }
             val flags = reader.readUnsignedByte()
             val archiveCount = if (version >= 7) reader.readBigSmart() else reader.readUnsignedShort()
+            // Populate NXT version table fields
+            versionTable?.fileCount(indexId, archiveCount)
             var previous = 0
             var highest = 0
             val archiveIds = IntArray(archiveCount) {
