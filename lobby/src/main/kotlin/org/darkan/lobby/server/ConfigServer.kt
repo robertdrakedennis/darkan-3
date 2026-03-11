@@ -4,11 +4,13 @@ import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import org.darkan.core.EnvVars
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logTrace
+import org.darkan.core.Logger.logWarn
 import world.gregs.voidps.cache.file.FileProvider
 import world.gregs.voidps.cache.secure.Whirlpool
 import java.math.BigInteger
@@ -26,7 +28,23 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         server = embeddedServer(Netty, port = EnvVars.configHttpPort) {
             routing {
                 get("/ms") {
+                    logInfo("JS5 HTTP request: ${call.request.local.uri}")
                     serveJs5Http(call)
+                }
+                post("/nxtclienterror.ws") {
+                    val body = call.receiveText()
+                    logWarn("=== NXT CLIENT CRASH REPORT ===")
+                    // Parse URL-encoded form data
+                    body.split("&").forEach { param ->
+                        val parts = param.split("=", limit = 2)
+                        if (parts.size == 2) {
+                            val key = java.net.URLDecoder.decode(parts[0], "UTF-8")
+                            val value = java.net.URLDecoder.decode(parts[1], "UTF-8")
+                            logWarn("  $key = $value")
+                        }
+                    }
+                    logWarn("=== END CRASH REPORT ===")
+                    call.respondText("OK", ContentType.Text.Plain)
                 }
                 get("{...}") {
                     val path = call.request.local.uri
@@ -67,8 +85,8 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
             call.respondText("JS5 HTTP not configured", ContentType.Text.Plain, HttpStatusCode.ServiceUnavailable)
             return
         }
-        val archive = call.parameters["a"]?.toIntOrNull()
-        val group = call.parameters["g"]?.toIntOrNull()
+        val archive = call.request.queryParameters["a"]?.toIntOrNull()
+        val group = call.request.queryParameters["g"]?.toIntOrNull()
         if (archive == null || group == null) {
             call.respondText("Missing parameters", ContentType.Text.Plain, HttpStatusCode.BadRequest)
             return
@@ -78,8 +96,16 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
             call.respondText("Not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
             return
         }
-        logTrace("JS5 HTTP: a=$archive g=$group -> ${data.size} bytes")
-        call.respondBytes(data, ContentType.Application.OctetStream)
+        // ALL HTTP JS5 responses go through GroupDownloaded which computes CRC over
+        // (responseBody.length - 2), expecting a 2-byte big-endian version suffix at the end.
+        // This applies to both archive indices (a=255) and group data (a!=255).
+        val version = call.request.queryParameters["v"]?.toIntOrNull() ?: 0
+        val response = ByteArray(data.size + 2)
+        System.arraycopy(data, 0, response, 0, data.size)
+        response[data.size] = ((version shr 8) and 0xFF).toByte()
+        response[data.size + 1] = (version and 0xFF).toByte()
+        logTrace("JS5 HTTP: a=$archive g=$group v=$version -> ${response.size} bytes (container=${data.size})")
+        call.respondBytes(response, ContentType.Application.OctetStream)
     }
 
     private fun generateJavConfig(): String = buildString {
@@ -183,7 +209,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=22=")
         line("param=23=false")
         line("param=24=true")
-        line("param=25=0")
+        line("param=25=0")                                    // ModeWhere=LIVE (HTTP port hardcoded to 80)
         line("param=26=false")
         line("param=27=3")
         line("param=28=265964763")

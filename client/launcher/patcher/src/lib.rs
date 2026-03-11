@@ -6,18 +6,28 @@
 //!
 //! Patches applied (when `DARKAN_RSA_MODULUS` is set):
 //!
-//! 1. **rs2client RSA modulus** — 256-char lowercase hex ASCII string in
-//!    .rodata, parsed at startup by jag::math::BigInteger via FUN_001706b0.
+//! 1. **rs2client login RSA modulus** — 256-char lowercase hex ASCII string
+//!    in .rodata, parsed at startup by jag::math::BigInteger via FUN_001706b0.
 //!    Replaced with the custom 1024-bit modulus hex from the env var,
 //!    left-padded with '0' to 256 chars.
 //!
-//! 2. **rs3linux RSA modulus** — 1024-char lowercase hex ASCII string in
+//! 2. **rs2client JS5 RSA modulus** — 1024-char lowercase hex ASCII string
+//!    in .rodata used for master index signature verification. Replaced with
+//!    the custom 4096-bit modulus hex from `DARKAN_JS5_RSA_MODULUS`.
+//!
+//! 3. **rs2client HTTP port** — Hardcoded port 80 in GetHTTPURL (two inlined
+//!    copies) replaced with the port from `DARKAN_HTTP_PORT`.
+//!
+//! 4. **rs3linux RSA modulus** — 1024-char lowercase hex ASCII string in
 //!    .rodata used by the launcher for download signature verification.
 //!    The env var value is left-padded with '0' to 1024 chars.
 //!
-//! 3. **rs3linux codebase URL regex** — The regex that validates the
+//! 5. **rs3linux codebase URL regex** — The regex that validates the
 //!    `codebase` URL is replaced with a permissive pattern so that
 //!    custom config server URLs pass validation.
+//!
+//! 6. **rs3linux LZMA decompression flag** — Disables LZMA decompression
+//!    so rs3linux saves the downloaded binary as-is (uncompressed).
 //!
 //! If `DARKAN_RSA_MODULUS` is not set, the patcher does nothing — this
 //! allows the same LD_PRELOAD to be harmlessly present in live mode.
@@ -72,6 +82,22 @@ const LZMA_FLAG_PATTERN: [u8; 21] = [
 
 /// Offset within LZMA_FLAG_PATTERN of the immediate byte to change (0x01 → 0x00).
 const LZMA_FLAG_PATCH_OFFSET: usize = 13; // The 0x01 at the end of the second MOV
+
+/// Byte patterns for the hardcoded HTTP port 80 (0x50) in rs2client's GetHTTPURL.
+/// The compiler inlined this function at TWO call sites, so both must be patched.
+///
+/// In ModeWhere=LIVE, the client does: port = 80 (hardcoded).
+/// We patch the immediate to our configHttpPort so HTTP JS5 content requests
+/// hit our server instead of port 80.
+///
+/// Copy 1 (at 0x0024fc60): MOV R8D, 0x50 followed by JZ
+const HTTP_PORT_PATTERN_1: &[u8] = &[0x41, 0xb8, 0x50, 0x00, 0x00, 0x00, 0x74];
+
+/// Copy 2 (at 0x00417b70): MOV R8D, 0x50 followed by two-byte JCC (0F xx)
+const HTTP_PORT_PATTERN_2: &[u8] = &[0x41, 0xb8, 0x50, 0x00, 0x00, 0x00, 0x0f];
+
+/// Offset of the 4-byte LE port immediate within the patterns above.
+const HTTP_PORT_PATCH_OFFSET: usize = 2;
 
 const PAGE_SIZE: usize = 4096;
 
@@ -243,6 +269,49 @@ fn patch_rsa() {
         }
     }
 
+    // --- Patch 1c: rs2client HTTP JS5 content port (hardcoded port 80 → custom port) ---
+    //
+    // WorldLobbyData::GetHTTPURL in ModeWhere=LIVE hardcodes HTTP port to 80.
+    // The compiler inlined this at two call sites, so we patch both.
+    // The port is read from DARKAN_HTTP_PORT env var (default: no patch).
+    if is_rs2client {
+        if let Ok(port_str) = env::var("DARKAN_HTTP_PORT") {
+            if let Ok(port) = port_str.parse::<u16>() {
+                let port_le = port.to_le_bytes();
+                let replacement = [port_le[0], port_le[1], 0x00, 0x00]; // 4-byte LE dword
+
+                let patterns: &[(&[u8], &str)] = &[
+                    (HTTP_PORT_PATTERN_1, "copy 1"),
+                    (HTTP_PORT_PATTERN_2, "copy 2"),
+                ];
+
+                for (pattern, label) in patterns {
+                    let mut patched = false;
+                    for region in &regions {
+                        if let Some(offset) = scan_for_pattern(region.start, region.end, pattern) {
+                            let patch_addr = offset + HTTP_PORT_PATCH_OFFSET;
+                            eprintln!(
+                                "[darkan-patcher] Found HTTP port pattern ({}) at 0x{:x}",
+                                label, offset
+                            );
+                            if patch_memory(patch_addr, &replacement, region.prot) {
+                                eprintln!(
+                                    "[darkan-patcher] Successfully patched HTTP content port {} -> {} ({})",
+                                    80, port, label
+                                );
+                                patched = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !patched {
+                        eprintln!("[darkan-patcher] HTTP port pattern ({}) not found", label);
+                    }
+                }
+            }
+        }
+    }
+
     // --- Patches 2-4 are rs3linux-only; skip for rs2client ---
     if is_rs2client {
         eprintln!("[darkan-patcher] rs2client detected, skipping rs3linux-specific patches");
@@ -363,20 +432,6 @@ fn parse_maps_for_binary(maps: &str, binary_name: &str) -> Vec<Region> {
     let mut regions = Vec::new();
     for line in maps.lines() {
         if !line.contains(binary_name) {
-            continue;
-        }
-        if let Some(region) = parse_map_line(line) {
-            regions.push(region);
-        }
-    }
-    regions
-}
-
-/// Parse all readable memory regions (fallback).
-fn parse_all_readable_maps(maps: &str) -> Vec<Region> {
-    let mut regions = Vec::new();
-    for line in maps.lines() {
-        if line.contains("[vdso]") || line.contains("[vsyscall]") || line.contains("[stack]") {
             continue;
         }
         if let Some(region) = parse_map_line(line) {

@@ -18,12 +18,31 @@ import world.gregs.voidps.cache.file.type.MemoryFileProvider
  *     index(1) + hash(4)
  *
  * The hash field is the group ID with the top bit set for prefetch responses.
+ *
+ * Block tracking is PER-RESPONSE: each response starts its own block counter
+ * from the 10-byte header. After 102,400 bytes (including header), a continuation
+ * header is inserted. This matches the NXT client's wire reader which tracks
+ * block position independently for each pending response.
+ *
+ * For group data (non-index responses), NO version suffix is appended. The wire
+ * payload is: response_header(10) + container_data(compressedSize + decompSize_if_compressed).
+ * The CRC stored in the archive index is computed by Jagex over the full container
+ * minus 2 bytes, and the client's GroupDownloaded verifies against that.
  */
 interface FileProvider {
 
     fun data(index: Int, archive: Int): ByteArray?
 
-    suspend fun serve(write: ByteWriteChannel, ref: Long, prefetch: Boolean): Boolean {
+    /**
+     * Serves a single JS5 response with correct per-response block framing.
+     *
+     * @param write The output channel to write the response to.
+     * @param ref Packed reference: (index << 32) | archive.
+     * @param prefetch Whether this is a prefetch (non-urgent) response.
+     * @param xorKey XOR encryption key (0 = no encryption).
+     * @return true on success, false on failure.
+     */
+    suspend fun serve(write: ByteWriteChannel, ref: Long, prefetch: Boolean, xorKey: Int = 0): Boolean {
         val index = (ref ushr 32).toInt()
         val archive = (ref and 0xFFFFFFFFL).toInt()
         val data = data(index, archive)
@@ -36,39 +55,75 @@ interface FileProvider {
         val compression = data[0].toInt()
         val compressedSize = getInt(data[1], data[2], data[3], data[4])
 
-        // Write 10-byte response header
-        write.writeByte(index.toByte())
-        write.writeInt(hash)
-        write.writeByte(compression.toByte())
-        write.writeInt(compressedSize)
-
         // Calculate payload size (data after the 5-byte container header)
         val payloadSize = compressedSize + if (compression != 0) 4 else 0
         val actualPayloadSize = minOf(payloadSize, data.size - CONTAINER_HEADER_LEN)
 
-        // Write payload with NXT block framing
-        var blockOffset = RESPONSE_HEADER_LEN // 10 bytes of header already "in" the first block
-        var dataPos = CONTAINER_HEADER_LEN    // skip container header (already written above)
-        var remaining = actualPayloadSize
+        // Build 10-byte response header
+        val headerBytes = ByteArray(RESPONSE_HEADER_LEN)
+        headerBytes[0] = index.toByte()
+        headerBytes[1] = (hash shr 24).toByte()
+        headerBytes[2] = (hash shr 16).toByte()
+        headerBytes[3] = (hash shr 8).toByte()
+        headerBytes[4] = hash.toByte()
+        headerBytes[5] = compression.toByte()
+        headerBytes[6] = (compressedSize shr 24).toByte()
+        headerBytes[7] = (compressedSize shr 16).toByte()
+        headerBytes[8] = (compressedSize shr 8).toByte()
+        headerBytes[9] = compressedSize.toByte()
 
-        while (remaining > 0) {
-            val blockRemaining = BLOCK_SIZE - blockOffset
-            val toWrite = minOf(blockRemaining, remaining)
-            write.writeFully(data, dataPos, toWrite)
-            dataPos += toWrite
-            remaining -= toWrite
-            blockOffset += toWrite
+        val continuationHeader = ByteArray(CONTINUATION_HEADER_LEN)
+        continuationHeader[0] = index.toByte()
+        continuationHeader[1] = (hash shr 24).toByte()
+        continuationHeader[2] = (hash shr 16).toByte()
+        continuationHeader[3] = (hash shr 8).toByte()
+        continuationHeader[4] = hash.toByte()
 
-            if (blockOffset == BLOCK_SIZE && remaining > 0) {
-                // Insert continuation header at block boundary
-                write.writeByte(index.toByte())
-                write.writeInt(hash)
-                blockOffset = CONTINUATION_HEADER_LEN
+        // Estimate max output size: header + payload + worst-case continuations
+        val maxContinuations = (RESPONSE_HEADER_LEN + actualPayloadSize) / (BLOCK_SIZE - CONTINUATION_HEADER_LEN) + 2
+        val buf = ByteArray(RESPONSE_HEADER_LEN + actualPayloadSize + maxContinuations * CONTINUATION_HEADER_LEN)
+        var pos = 0
+        // Per-response block tracking: starts at 0 for each response
+        var blockOffset = 0
+
+        // Helper: write a source byte array into buf with block framing
+        fun writeWithFraming(src: ByteArray, srcOffset: Int, length: Int) {
+            var srcPos = srcOffset
+            var rem = length
+            while (rem > 0) {
+                val blockRemaining = BLOCK_SIZE - blockOffset
+                if (blockRemaining == 0) {
+                    // At block boundary: insert continuation header
+                    System.arraycopy(continuationHeader, 0, buf, pos, CONTINUATION_HEADER_LEN)
+                    pos += CONTINUATION_HEADER_LEN
+                    blockOffset = CONTINUATION_HEADER_LEN
+                    continue
+                }
+                val toWrite = minOf(blockRemaining, rem)
+                System.arraycopy(src, srcPos, buf, pos, toWrite)
+                pos += toWrite
+                srcPos += toWrite
+                rem -= toWrite
+                blockOffset += toWrite
             }
         }
 
+        // Write the 10-byte response header with block framing
+        writeWithFraming(headerBytes, 0, RESPONSE_HEADER_LEN)
+
+        // Write payload (container data after 5-byte header, no version suffix)
+        writeWithFraming(data, CONTAINER_HEADER_LEN, actualPayloadSize)
+
+        val response = if (pos == buf.size) buf else buf.copyOfRange(0, pos)
+        // Apply XOR encryption if client requested it
+        if (xorKey != 0) {
+            for (i in response.indices) {
+                response[i] = (response[i].toInt() xor xorKey).toByte()
+            }
+        }
+        write.writeFully(response)
         write.flush()
-        logTrace("JS5 served: index=$index archive=$archive prefetch=$prefetch — ${actualPayloadSize + RESPONSE_HEADER_LEN} bytes")
+        logTrace("JS5 served: index=$index archive=$archive prefetch=$prefetch — $pos bytes")
         return true
     }
 

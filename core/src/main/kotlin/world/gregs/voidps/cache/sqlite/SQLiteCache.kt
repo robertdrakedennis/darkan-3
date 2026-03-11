@@ -254,6 +254,7 @@ class SQLiteCache private constructor(
 
             versionTable?.sector(indexId, rawTable, whirlpool)
             val decompressed = context.decompress(rawTable) ?: return
+            versionTable?.uncompressedSize(indexId, decompressed.size)
 
             val reader = BufferReader(decompressed)
             val version = reader.readUnsignedByte()
@@ -266,8 +267,6 @@ class SQLiteCache private constructor(
             }
             val flags = reader.readUnsignedByte()
             val archiveCount = if (version >= 7) reader.readBigSmart() else reader.readUnsignedShort()
-            // Populate NXT version table fields
-            versionTable?.fileCount(indexId, archiveCount)
             var previous = 0
             var highest = 0
             val archiveIds = IntArray(archiveCount) {
@@ -280,6 +279,10 @@ class SQLiteCache private constructor(
                 archiveId
             }
             archives[indexId] = archiveIds
+            // fileCount in the master index is used by the client to size tracking arrays
+            // indexed by group ID. It must be the highest group ID + 1 (array size),
+            // NOT the number of groups (which can be much smaller for sparse IDs).
+            versionTable?.fileCount(indexId, highest + 1)
 
             if (flags and NAME_FLAG != 0) {
                 for (i in 0 until archiveCount) {

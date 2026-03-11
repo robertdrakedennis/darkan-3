@@ -29,7 +29,7 @@ fun main() {
     val provider = FileProvider.load(cache, inMemory = EnvVars.memCache)
     val js5 = JS5Server(provider, prefetchKeys)
 
-    val configServer = ConfigServer()
+    val configServer = ConfigServer(provider)
     configServer.start()
 
     val lobby = LobbyServer(js5)

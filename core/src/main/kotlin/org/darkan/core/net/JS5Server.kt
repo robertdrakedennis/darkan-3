@@ -1,14 +1,25 @@
 package org.darkan.core.net
 
 import io.ktor.utils.io.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 import org.darkan.core.EnvVars
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logTrace
 import org.darkan.core.Logger.logWarn
 import world.gregs.voidps.buffer.*
 import world.gregs.voidps.cache.file.FileProvider
+
+data class JS5Request(val index: Int, val group: Int, val urgent: Boolean, val priority: Int, val ref: Long)
+
+sealed interface JS5QueueItem {
+    data class FileRequest(val request: JS5Request) : JS5QueueItem
+    data class XorKeyUpdate(val key: Int) : JS5QueueItem
+}
 
 class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
     val limiter = MultilogLimiter()
@@ -21,100 +32,219 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
         }
         logInfo("JS5 connection from $ip")
         try {
-            // Read handshake: size(1) + major(4) + minor(4) + token(N+1) + platform(1)
-            val size = input.readByte().toInt()
+            if (!handshake(input, output, ip)) return
+            requestLoop(input, output, ip)
+        } finally {
+            logTrace("JS5 connection closed: $ip")
+            limiter.remove(ip)
+        }
+    }
 
-            val major = input.readInt()
-            val minor = input.readInt()
-            if (major != EnvVars.majorVersion || minor != EnvVars.minorVersion) {
-                logWarn("JS5 version mismatch from $ip — got $major.$minor, expected ${EnvVars.majorVersion}.${EnvVars.minorVersion}. Accepting anyway for development.")
-            }
-            val token = input.readRSString()
-            if (token != EnvVars.js5ServerToken) {
-                logWarn("JS5 invalid token from $ip: $token")
-                output.writeByte(ResponseOpcode.BAD_SESSION_ID)
-                output.flushAndClose()
-                return
-            }
-            // Consume the trailing platform/language byte (NXT appends this after the null-terminated token)
-            input.readByte()
+    private suspend fun handshake(input: ByteReadChannel, output: ByteWriteChannel, ip: String): Boolean {
+        // Read handshake: size(1) + major(4) + minor(4) + token(N+1) + platform(1)
+        val size = input.readByte().toInt()
+        val major = input.readInt()
+        val minor = input.readInt()
+        if (major != EnvVars.majorVersion || minor != EnvVars.minorVersion) {
+            logWarn("JS5 version mismatch from $ip — got $major.$minor, expected ${EnvVars.majorVersion}.${EnvVars.minorVersion}. Accepting anyway.")
+        }
+        val token = input.readRSString()
+        if (token != EnvVars.js5ServerToken) {
+            logWarn("JS5 invalid token from $ip: $token")
+            output.writeByte(ResponseOpcode.BAD_SESSION_ID)
+            output.flushAndClose()
+            return false
+        }
+        input.readByte() // trailing platform/language byte
 
-            logInfo("JS5 handshake complete for $ip — version $major.$minor")
+        logInfo("JS5 handshake complete for $ip — version $major.$minor")
 
-            // Send SYNC response — NXT TCP JS5 does NOT send prefetch keys after SYNC
-            // (confirmed: working cache downloader connects to Jagex without reading any keys)
-            output.writeByte(ResponseOpcode.JS5_SYNC)
-            output.flush()
+        // Send SYNC response (no prefetch keys in 946+)
+        output.writeByte(ResponseOpcode.JS5_SYNC)
+        output.flush()
+        logInfo("JS5 sent SYNC to $ip")
 
-            // Read client ACK sequence. NXT sends two 10-byte control messages:
-            //   Opcode 6 (ENCRYPTION_ACK): opcode(1) + medium(3) + int(4) + short(2) = 10 bytes
-            //   Opcode 3 (CONNECTION_READY): opcode(1) + medium(3) + int(4) + short(2) = 10 bytes
-            // Confirmed via raw byte dump: both use the same format.
-            suspend fun readControlPayload() { input.readMedium(); input.readInt(); input.readShort() }
+        // Read ACK (opcode 6) + READY (opcode 3)
+        val ackOpcode = input.readByte().toInt() and 0xFF
+        if (ackOpcode != RequestOpcode.ACKNOWLEDGE) {
+            logWarn("Expected ACK (6), got $ackOpcode from $ip")
+            output.writeByte(ResponseOpcode.LOGIN_SERVER_REJECTED_SESSION)
+            output.flushAndClose()
+            return false
+        }
+        readControlPayload(input)
 
-            val ackOpcode = input.readByte().toInt() and 0xFF
-            if (ackOpcode != RequestOpcode.ACKNOWLEDGE) {
-                logInfo("Expected ACK opcode 6, got: $ackOpcode from $ip")
-                output.writeByte(ResponseOpcode.LOGIN_SERVER_REJECTED_SESSION)
-                output.flushAndClose()
-                return
-            }
-            readControlPayload()
+        val readyOpcode = input.readByte().toInt() and 0xFF
+        if (readyOpcode != RequestOpcode.STATUS_LOGGED_OUT) {
+            logWarn("Expected READY (3), got $readyOpcode from $ip")
+        }
+        readControlPayload(input)
 
-            val readyOpcode = input.readByte().toInt() and 0xFF
-            if (readyOpcode != RequestOpcode.STATUS_LOGGED_OUT) {
-                logWarn("Expected CONNECTION_READY (3), got: $readyOpcode from $ip")
-            }
-            readControlPayload()
+        logInfo("JS5 ACK + READY complete for $ip")
+        return true
+    }
 
-            logInfo("JS5 ACK + CONNECTION_READY complete for $ip")
+    private suspend fun requestLoop(input: ByteReadChannel, output: ByteWriteChannel, ip: String) {
+        val urgentChannel = Channel<JS5QueueItem>(200)
+        val prefetchChannel = Channel<JS5QueueItem>(200)
 
-            // Enter file request loop
-            // All NXT JS5 client messages are 10 bytes (6 meaningful + 4 padding):
-            //   File requests: flags(1) + index(1) + group(4) + padding(4) = 10
-            //   Control msgs:  opcode(1) + medium(3) + int(4) + short(2) = 10
-            // flags byte: (priority << 4) | isUrgent; file request if (flags & 0x0E) == 0
-            coroutineScope {
-                while (isActive) {
-                    val opcode = input.readByte().toInt() and 0xFF
-                    when {
-                        // NXT file request: low nibble is 0 or 1 (urgency flag only)
-                        (opcode and 0x0E) == 0 -> {
-                            val urgent = (opcode and 1) != 0
-                            val index = input.readByte().toInt() and 0xFF
-                            val group = input.readInt()
-                            input.readShort() // padding
-                            input.readShort() // padding
-                            logInfo("JS5 request: index=$index group=$group flags=0x${"%02x".format(opcode)} (${if (urgent) "urgent" else "prefetch"}) from $ip")
-                            val ref = (index.toLong() shl 32) or (group.toLong() and 0xFFFFFFFFL)
-                            if (!provider.serve(output, ref, prefetch = !urgent)) {
-                                logWarn("JS5 cache miss: index=$index group=$group (${if (urgent) "urgent" else "prefetch"}) from $ip")
-                            } else {
-                                logInfo("JS5 served: index=$index group=$group prefetch=${!urgent} to $ip")
-                            }
+        coroutineScope {
+            val readerJob = launch { reader(input, urgentChannel, prefetchChannel, ip) }
+            val writerJob = launch { writer(output, urgentChannel, prefetchChannel, ip) }
+
+            // When either coroutine finishes (normally or exceptionally), cancel the other
+            readerJob.invokeOnCompletion { writerJob.cancel() }
+            writerJob.invokeOnCompletion { readerJob.cancel() }
+        }
+    }
+
+    private suspend fun reader(
+        input: ByteReadChannel,
+        urgentChannel: Channel<JS5QueueItem>,
+        prefetchChannel: Channel<JS5QueueItem>,
+        ip: String
+    ) {
+        var requestCount = 0
+        var lastRequestTime = System.currentTimeMillis()
+
+        try {
+            while (true) {
+                var opcodeByte: Byte? = null
+                while (opcodeByte == null) {
+                    opcodeByte = withTimeoutOrNull(5000) { input.readByte() }
+                    if (opcodeByte == null) {
+                        val idleSec = (System.currentTimeMillis() - lastRequestTime) / 1000
+                        logInfo("JS5 idle ${idleSec}s after $requestCount requests from $ip")
+                    }
+                }
+
+                val opcode = opcodeByte.toInt() and 0xFF
+                requestCount++
+                lastRequestTime = System.currentTimeMillis()
+
+                when {
+                    RequestOpcode.isFileRequest(opcode) -> {
+                        val urgent = RequestOpcode.isUrgent(opcode)
+                        val priority = (opcode shr 4) and 0x07
+                        val index = input.readByte().toInt() and 0xFF
+                        val group = input.readInt()
+                        input.readInt() // padding
+                        logTrace("JS5 request: index=$index group=$group opcode=$opcode (${if (urgent) "urgent" else "prefetch"} pri=$priority) from $ip")
+                        val ref = (index.toLong() shl 32) or (group.toLong() and 0xFFFFFFFFL)
+                        val request = JS5Request(index, group, urgent, priority, ref)
+                        val item = JS5QueueItem.FileRequest(request)
+                        if (urgent) {
+                            urgentChannel.send(item)
+                        } else {
+                            prefetchChannel.send(item)
                         }
-                        opcode == RequestOpcode.STATUS_LOGGED_IN || opcode == RequestOpcode.STATUS_LOGGED_OUT -> {
-                            logTrace("JS5 status opcode $opcode from $ip")
-                            readControlPayload()
-                        }
-                        opcode == RequestOpcode.ENCRYPTION_KEY_UPDATE -> {
-                            logTrace("JS5 encryption key update from $ip")
-                            readControlPayload()
-                        }
-                        opcode == RequestOpcode.ACKNOWLEDGE -> {
-                            logTrace("JS5 acknowledge from $ip")
-                            readControlPayload()
-                        }
-                        else -> {
-                            logWarn("JS5 unknown opcode $opcode from $ip")
-                            break
-                        }
+                    }
+
+                    opcode == RequestOpcode.STATUS_LOGGED_IN -> {
+                        logTrace("JS5 logged in from $ip")
+                        readControlPayload(input)
+                    }
+
+                    opcode == RequestOpcode.STATUS_LOGGED_OUT -> {
+                        logTrace("JS5 logged out from $ip")
+                        readControlPayload(input)
+                    }
+
+                    opcode == RequestOpcode.XOR_KEY_UPDATE -> {
+                        val key = input.readByte().toInt() and 0xFF
+                        input.readShort()
+                        input.readInt()
+                        input.readShort()
+                        logInfo("JS5 XOR key set to $key from $ip")
+                        // Send to urgent channel so it's applied before any subsequent requests
+                        urgentChannel.send(JS5QueueItem.XorKeyUpdate(key))
+                    }
+
+                    opcode == RequestOpcode.ACKNOWLEDGE -> {
+                        logTrace("JS5 ACK from $ip")
+                        readControlPayload(input)
+                    }
+
+                    opcode == RequestOpcode.DISCONNECT -> {
+                        logInfo("JS5 disconnect from $ip")
+                        readControlPayload(input)
+                        return
+                    }
+
+                    else -> {
+                        logWarn("JS5 unknown opcode $opcode from $ip — skipping 9 bytes")
+                        input.discard(9)
                     }
                 }
             }
         } finally {
-            logTrace("JS5 connection closed: $ip")
-            limiter.remove(ip)
+            urgentChannel.close()
+            prefetchChannel.close()
+        }
+    }
+
+    private suspend fun writer(
+        output: ByteWriteChannel,
+        urgentChannel: Channel<JS5QueueItem>,
+        prefetchChannel: Channel<JS5QueueItem>,
+        ip: String
+    ) {
+        var xorKey = 0
+
+        while (true) {
+            // Drain all available urgent items first
+            while (true) {
+                val item = urgentChannel.tryReceive().getOrNull() ?: break
+                xorKey = processItem(item, output, xorKey, ip)
+            }
+
+            // Try a prefetch item
+            val prefetchItem = prefetchChannel.tryReceive().getOrNull()
+            if (prefetchItem != null) {
+                xorKey = processItem(prefetchItem, output, xorKey, ip)
+                continue
+            }
+
+            // Both channels empty — suspend until something arrives, preferring urgent
+            val item = select<JS5QueueItem?> {
+                urgentChannel.onReceiveCatching { result ->
+                    result.getOrNull()
+                }
+                prefetchChannel.onReceiveCatching { result ->
+                    result.getOrNull()
+                }
+            }
+
+            if (item == null) {
+                // Both channels closed
+                return
+            }
+            xorKey = processItem(item, output, xorKey, ip)
+        }
+    }
+
+    private suspend fun processItem(item: JS5QueueItem, output: ByteWriteChannel, xorKey: Int, ip: String): Int {
+        return when (item) {
+            is JS5QueueItem.XorKeyUpdate -> {
+                item.key
+            }
+            is JS5QueueItem.FileRequest -> {
+                val req = item.request
+                val ok = provider.serve(output, req.ref, prefetch = !req.urgent, xorKey = xorKey)
+                if (!ok) {
+                    logWarn("JS5 miss: index=${req.index} group=${req.group} from $ip")
+                }
+                xorKey
+            }
+        }
+    }
+
+    companion object {
+        /** Read 9 bytes of control message payload: medium(3) + int(4) + short(2) */
+        private suspend fun readControlPayload(input: ByteReadChannel) {
+            input.readMedium()
+            input.readInt()
+            input.readShort()
         }
     }
 }

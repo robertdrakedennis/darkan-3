@@ -1,0 +1,434 @@
+package org.darkan.tools
+
+import world.gregs.voidps.buffer.read.BufferReader
+import world.gregs.voidps.cache.compress.DecompressionContext
+import world.gregs.voidps.cache.secure.CRC
+import world.gregs.voidps.cache.sqlite.IndexFile
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+
+/**
+ * Cache Integrity Check Tool
+ *
+ * Validates every container stored in the local SQLite cache:
+ *   - Parses container header (compression type + compressedSize)
+ *   - Verifies data length matches compressedSize
+ *   - Attempts decompression for compressed containers
+ *   - Computes CRC32 and compares with the CRC from the archive's ref table
+ *   - Special focus on priority archives (59, 28, 62) and archive indices (255/0-66)
+ *
+ * Usage:
+ *   ./gradlew :tools:run -PmainClass=org.darkan.tools.CacheIntegrityCheckKt
+ *
+ * The cache downloader stores containers WITHOUT a 2-byte version suffix.
+ * The ref table CRCs from Jagex are computed over (container - 2 byte version suffix).
+ * Since we don't store the suffix, CRC.calculate(stored_data) should match the ref table CRC.
+ */
+
+private const val COMPRESSION_NONE = 0
+private const val COMPRESSION_BZIP2 = 1
+private const val COMPRESSION_GZIP = 2
+private const val COMPRESSION_LZMA = 3
+
+data class IntegrityResult(
+    val index: Int,
+    val archive: Int,
+    val dataSize: Int,
+    val compression: Int,
+    val compressedSize: Int,
+    val decompressedSize: Int,
+    val expectedPayloadSize: Int,
+    val actualPayloadSize: Int,
+    val truncated: Boolean,
+    val oversized: Boolean,
+    val extraBytes: Int,
+    val decompressionOk: Boolean?,
+    val decompressionError: String?,
+    val crcMatch: Boolean?,
+    val storedCrc: Int?,
+    val computedCrc: Int,
+    val refTableCrc: Int?
+)
+
+fun main() {
+    val cachePath = Paths.get("./data/cache")
+    if (!Files.exists(cachePath)) {
+        System.err.println("Cache directory not found: $cachePath")
+        System.exit(1)
+    }
+
+    println("=== Cache Integrity Check ===")
+    println("Cache path: $cachePath")
+    println()
+
+    // Discover all jcache files
+    val jcacheFiles = mutableMapOf<Int, Path>()
+    Files.list(cachePath).use { stream ->
+        stream.filter { it.fileName.toString().matches(Regex("js5-\\d+\\.jcache")) }
+            .forEach { file ->
+                val indexId = file.fileName.toString()
+                    .removePrefix("js5-")
+                    .removeSuffix(".jcache")
+                    .toInt()
+                jcacheFiles[indexId] = file
+            }
+    }
+
+    println("Found ${jcacheFiles.size} jcache files: ${jcacheFiles.keys.sorted()}")
+    println()
+
+    // Open all index files
+    val indexFiles = jcacheFiles.mapValues { IndexFile(it.value) }
+    val context = DecompressionContext()
+
+    // Parse ref tables to get expected CRCs for group data
+    val refTableCrcs = mutableMapOf<Int, Map<Int, Int>>() // index -> (archive -> crc)
+    val refTableVersions = mutableMapOf<Int, Map<Int, Int>>() // index -> (archive -> version)
+
+    // First pass: parse all ref tables to extract expected CRCs
+    println("=== Phase 1: Parsing ref tables for expected CRCs ===")
+    for (indexId in indexFiles.keys.sorted().filter { it != 255 }) {
+        val refData = indexFiles[indexId]?.getRawTable()
+        if (refData == null) {
+            println("  Index $indexId: no ref table")
+            continue
+        }
+        try {
+            val (crcs, versions) = parseRefTableCrcs(context, refData)
+            refTableCrcs[indexId] = crcs
+            refTableVersions[indexId] = versions
+            println("  Index $indexId: ${crcs.size} archive CRCs parsed from ref table")
+        } catch (e: Exception) {
+            println("  Index $indexId: FAILED to parse ref table: ${e.message}")
+        }
+    }
+    println()
+
+    // Statistics
+    var totalContainers = 0
+    var totalOk = 0
+    var totalTruncated = 0
+    var totalOversized = 0
+    var totalBadCompression = 0
+    var totalDecompFailed = 0
+    var totalCrcMismatch = 0
+    var totalTooSmall = 0
+
+    val results = mutableListOf<IntegrityResult>()
+    val priorityArchives = setOf(59, 28, 62)
+
+    // Second pass: validate all containers
+    println("=== Phase 2: Validating all containers ===")
+
+    // Check archive indices (255/N) first
+    println()
+    println("--- Archive Indices (255/N) ---")
+    val indexFile255 = indexFiles[255]
+    if (indexFile255 != null) {
+        for (indexId in indexFiles.keys.sorted().filter { it != 255 }) {
+            val data = indexFile255.getRaw(indexId) ?: indexFiles[indexId]?.getRawTable()
+            if (data == null) continue
+            val result = validateContainer(255, indexId, data, null, context)
+            results.add(result)
+            totalContainers++
+            reportResult("  255/$indexId", result)
+            if (result.truncated) totalTruncated++
+            if (result.oversized) totalOversized++
+            if (result.decompressionOk == false) totalDecompFailed++
+            if (result.crcMatch == false) totalCrcMismatch++
+            if (result.compression > 3) totalBadCompression++
+            if (result.dataSize < 5) totalTooSmall++
+            if (!result.truncated && result.decompressionOk != false && result.crcMatch != false) totalOk++
+        }
+    }
+
+    // Check group data for each index
+    for (indexId in indexFiles.keys.sorted().filter { it != 255 }) {
+        val idxFile = indexFiles[indexId] ?: continue
+        val allKeys = idxFile.allKeys()
+        if (allKeys.isEmpty()) continue
+
+        val expectedCrcs = refTableCrcs[indexId] ?: emptyMap()
+        val sorted = allKeys.sorted()
+
+        println()
+        println("--- Index $indexId: ${sorted.size} groups ---")
+
+        var indexOk = 0
+        var indexTruncated = 0
+        var indexDecompFail = 0
+        var indexCrcMismatch = 0
+
+        for (archiveId in sorted) {
+            val data = idxFile.getRaw(archiveId) ?: continue
+            val expectedCrc = expectedCrcs[archiveId]
+            val result = validateContainer(indexId, archiveId, data, expectedCrc, context)
+            results.add(result)
+            totalContainers++
+
+            if (result.truncated || result.decompressionOk == false || result.crcMatch == false || result.compression > 3 || result.dataSize < 5) {
+                // Only print failures to keep output manageable
+                reportResult("  $indexId/$archiveId", result)
+            }
+
+            if (result.truncated) { totalTruncated++; indexTruncated++ }
+            if (result.oversized) totalOversized++
+            if (result.decompressionOk == false) { totalDecompFailed++; indexDecompFail++ }
+            if (result.crcMatch == false) { totalCrcMismatch++; indexCrcMismatch++ }
+            if (result.compression > 3) totalBadCompression++
+            if (result.dataSize < 5) totalTooSmall++
+            if (!result.truncated && result.decompressionOk != false && result.crcMatch != false) { totalOk++; indexOk++ }
+        }
+
+        val statusTag = if (indexTruncated == 0 && indexDecompFail == 0 && indexCrcMismatch == 0) "ALL OK" else "ISSUES"
+        println("  [$statusTag] Index $indexId summary: ${sorted.size} groups, $indexOk ok, $indexTruncated truncated, $indexDecompFail decomp-fail, $indexCrcMismatch crc-mismatch")
+    }
+
+    // Priority archives detailed report
+    println()
+    println("=== Phase 3: Priority Archives Detail (59, 28, 62) ===")
+    for (indexId in priorityArchives.sorted()) {
+        val idxFile = indexFiles[indexId] ?: continue
+        val allKeys = idxFile.allKeys()
+        val expectedCrcs = refTableCrcs[indexId] ?: emptyMap()
+        println()
+        println("--- Index $indexId: ${allKeys.size} groups ---")
+        for (archiveId in allKeys.sorted().take(20)) {
+            val data = idxFile.getRaw(archiveId) ?: continue
+            val result = validateContainer(indexId, archiveId, data, expectedCrcs[archiveId], context)
+            reportResult("  $indexId/$archiveId", result, verbose = true)
+        }
+        if (allKeys.size > 20) {
+            println("  ... (${allKeys.size - 20} more groups not shown)")
+        }
+    }
+
+    // Version suffix analysis
+    println()
+    println("=== Phase 4: Version Suffix Analysis ===")
+    println("Checking if stored containers have trailing version bytes...")
+    var containersWithExact2Extra = 0
+    var containersWithNoExtra = 0
+    var containersWithOtherExtra = 0
+    for (result in results) {
+        when {
+            result.extraBytes == 2 -> containersWithExact2Extra++
+            result.extraBytes == 0 -> containersWithNoExtra++
+            result.extraBytes > 0 -> containersWithOtherExtra++
+        }
+    }
+    println("  Containers with exactly 0 extra bytes: $containersWithNoExtra")
+    println("  Containers with exactly 2 extra bytes (version suffix?): $containersWithExact2Extra")
+    println("  Containers with other extra bytes: $containersWithOtherExtra")
+
+    if (containersWithExact2Extra > 0) {
+        println()
+        println("  WARNING: $containersWithExact2Extra containers have exactly 2 extra bytes beyond the")
+        println("  declared compressedSize. This likely indicates a 2-byte version suffix is stored.")
+        println("  The CRC comparison above was computed over the FULL stored data. If the ref table")
+        println("  CRC is over (data - 2 bytes), the CRC comparison may be wrong for these containers.")
+
+        // Re-check CRC without last 2 bytes for containers with 2 extra bytes
+        var crcFixedCount = 0
+        for (result in results.filter { it.extraBytes == 2 && it.refTableCrc != null }) {
+            val idxFile = indexFiles[result.index] ?: continue
+            val data = if (result.index == 255) {
+                indexFile255?.getRaw(result.archive) ?: indexFiles[result.archive]?.getRawTable()
+            } else {
+                idxFile.getRaw(result.archive)
+            } ?: continue
+            val crcMinus2 = CRC.calculate(data, 0, data.size - 2)
+            if (crcMinus2 == result.refTableCrc) {
+                crcFixedCount++
+                if (crcFixedCount <= 10) {
+                    println("  FIX: ${result.index}/${result.archive}: CRC(data-2)=0x${"%08x".format(crcMinus2)} matches refTable CRC")
+                }
+            }
+        }
+        if (crcFixedCount > 0) {
+            println("  FINDING: $crcFixedCount containers have CRC match when excluding last 2 bytes!")
+            println("  This confirms the 2-byte version suffix IS stored and should be excluded from CRC.")
+        }
+    }
+
+    // Final summary
+    println()
+    println("========================================")
+    println("=== FINAL SUMMARY ===")
+    println("========================================")
+    println("Total containers checked:    $totalContainers")
+    println("OK:                          $totalOk")
+    println("Truncated:                   $totalTruncated")
+    println("Oversized (extra bytes):     $totalOversized")
+    println("Bad compression type:        $totalBadCompression")
+    println("Decompression failed:        $totalDecompFailed")
+    println("CRC mismatch (vs ref table): $totalCrcMismatch")
+    println("Too small (< 5 bytes):       $totalTooSmall")
+    println("========================================")
+
+    if (totalTruncated + totalDecompFailed + totalCrcMismatch + totalBadCompression + totalTooSmall > 0) {
+        println("RESULT: INTEGRITY ISSUES FOUND")
+        System.exit(1)
+    } else {
+        println("RESULT: ALL CONTAINERS VALID")
+    }
+
+    // Clean up
+    for (idxFile in indexFiles.values) {
+        idxFile.close()
+    }
+}
+
+private fun validateContainer(
+    index: Int,
+    archive: Int,
+    data: ByteArray,
+    refTableCrc: Int?,
+    context: DecompressionContext
+): IntegrityResult {
+    if (data.size < 5) {
+        return IntegrityResult(
+            index, archive, data.size,
+            -1, 0, 0, 0, 0,
+            truncated = true, oversized = false, extraBytes = 0,
+            decompressionOk = null, decompressionError = "too small",
+            crcMatch = null, storedCrc = null, computedCrc = 0, refTableCrc = refTableCrc
+        )
+    }
+
+    val compression = data[0].toInt() and 0xFF
+    val compressedSize = readBEInt(data, 1)
+
+    val headerSize = 5 + if (compression != 0) 4 else 0
+    val expectedTotalSize = headerSize + compressedSize
+    val actualPayloadSize = data.size - 5
+    val expectedPayloadSize = compressedSize + if (compression != 0) 4 else 0
+
+    val truncated = data.size < expectedTotalSize
+    val extraBytes = if (data.size > expectedTotalSize) data.size - expectedTotalSize else 0
+    val oversized = extraBytes > 0
+
+    val decompressedSize = if (compression != 0 && data.size >= 9) readBEInt(data, 5) else compressedSize
+
+    // Attempt decompression
+    var decompressionOk: Boolean? = null
+    var decompressionError: String? = null
+    if (!truncated && compression in 0..3) {
+        try {
+            val decompressed = context.decompress(data)
+            if (decompressed != null) {
+                decompressionOk = true
+            } else {
+                decompressionOk = false
+                decompressionError = "decompress returned null"
+            }
+        } catch (e: Exception) {
+            decompressionOk = false
+            decompressionError = "${e::class.simpleName}: ${e.message}"
+        }
+    } else if (compression > 3) {
+        decompressionOk = false
+        decompressionError = "invalid compression type $compression"
+    }
+
+    // CRC check: compute over entire stored data
+    val computedCrc = CRC.calculate(data, 0, data.size)
+    // Also try CRC over (data - 2 bytes) in case version suffix is stored
+    val computedCrcMinus2 = if (data.size > 2) CRC.calculate(data, 0, data.size - 2) else computedCrc
+
+    val crcMatch = when {
+        refTableCrc == null -> null
+        computedCrc == refTableCrc -> true
+        computedCrcMinus2 == refTableCrc -> true // matches if we exclude version suffix
+        else -> false
+    }
+
+    return IntegrityResult(
+        index, archive, data.size,
+        compression, compressedSize, decompressedSize,
+        expectedPayloadSize, actualPayloadSize,
+        truncated, oversized, extraBytes,
+        decompressionOk, decompressionError,
+        crcMatch, null, computedCrc, refTableCrc
+    )
+}
+
+private fun parseRefTableCrcs(
+    context: DecompressionContext,
+    rawTable: ByteArray
+): Pair<Map<Int, Int>, Map<Int, Int>> {
+    val decompressed = context.decompress(rawTable)
+        ?: throw RuntimeException("Failed to decompress ref table")
+
+    val reader = BufferReader(decompressed)
+    val version = reader.readUnsignedByte()
+    if (version < 5 || version > 7) throw RuntimeException("Bad ref table version: $version")
+    if (version >= 6) reader.readInt() // revision
+
+    val flags = reader.readUnsignedByte()
+    val archiveCount = if (version >= 7) reader.readBigSmart() else reader.readUnsignedShort()
+
+    // Archive IDs (delta-encoded)
+    var previous = 0
+    val archiveIds = IntArray(archiveCount) {
+        val archiveId = if (version >= 7)
+            reader.readBigSmart() + previous
+        else
+            reader.readUnsignedShort() + previous
+        previous = archiveId
+        archiveId
+    }
+
+    // Name hashes (if flags & 1)
+    if (flags and 1 != 0) reader.skip(archiveCount * 4)
+
+    // CRCs
+    val crcs = IntArray(archiveCount) { reader.readInt() }
+
+    // Unknown hashes (if flags & 8)
+    if (flags and 8 != 0) reader.skip(archiveCount * 4)
+
+    // Whirlpool (if flags & 2)
+    if (flags and 2 != 0) reader.skip(archiveCount * 64)
+
+    // Sizes (if flags & 4)
+    if (flags and 4 != 0) reader.skip(archiveCount * 8)
+
+    // Versions
+    val versions = IntArray(archiveCount) { reader.readInt() }
+
+    val crcMap = mutableMapOf<Int, Int>()
+    val versionMap = mutableMapOf<Int, Int>()
+    for (i in 0 until archiveCount) {
+        crcMap[archiveIds[i]] = crcs[i]
+        versionMap[archiveIds[i]] = versions[i]
+    }
+    return Pair(crcMap, versionMap)
+}
+
+private fun reportResult(prefix: String, result: IntegrityResult, verbose: Boolean = false) {
+    val status = buildString {
+        append("${result.dataSize}B")
+        append(" comp=${result.compression}")
+        append(" compSize=${result.compressedSize}")
+        if (result.compression != 0) append(" decompSize=${result.decompressedSize}")
+        append(" payload=${result.actualPayloadSize}/${result.expectedPayloadSize}")
+
+        if (result.truncated) append(" TRUNCATED(short by ${result.expectedPayloadSize - result.actualPayloadSize})")
+        if (result.extraBytes > 0) append(" EXTRA(+${result.extraBytes})")
+        if (result.decompressionOk == false) append(" DECOMP_FAIL(${result.decompressionError})")
+        if (result.decompressionOk == true && verbose) append(" decomp=OK")
+        if (result.crcMatch == false) {
+            append(" CRC_MISMATCH(computed=0x${"%08x".format(result.computedCrc)} ref=0x${"%08x".format(result.refTableCrc ?: 0)})")
+        }
+        if (result.crcMatch == true && verbose) append(" crc=OK")
+    }
+    println("$prefix: $status")
+}
+
+private fun readBEInt(data: ByteArray, offset: Int): Int =
+    ((data[offset].toInt() and 0xFF) shl 24) or
+    ((data[offset + 1].toInt() and 0xFF) shl 16) or
+    ((data[offset + 2].toInt() and 0xFF) shl 8) or
+    (data[offset + 3].toInt() and 0xFF)

@@ -71,7 +71,7 @@ class LobbyServer(val js5: JS5Server) {
                 when (val reqOpcode = input.readByte().toInt()) {
                     RequestOpcode.JS5_INIT -> js5.init(input, output, ip)
                     else -> {
-                        logTrace("Unhandled request opcode: $reqOpcode")
+                        logInfo("Connection from $ip with unhandled opcode: $reqOpcode (0x${"%02x".format(reqOpcode)})")
                         output.finish(ResponseOpcode.INVALID_LOGIN_SERVER)
                     }
                 }

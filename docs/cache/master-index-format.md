@@ -45,14 +45,14 @@ Message: [opcode=0x0A(1B)] [dataSize(2B, ushort BE)] [rawContainerData(dataSize 
 
 The raw container data is the **entire container** as received from the JS5 response (starting with the compression byte).
 
-### Step 3: WorkerOnMessage Case 10
+### Step 3: WorkerOnMessage Case 10 (VERIFIED librs2client.so @ 0x0069cd70)
 
 The main thread handler:
 1. Reads `dataSize` as ushort (2 bytes, BE)
-2. If `dataSize == 0`, master index download failed -- abort
-3. Copies `dataSize` bytes of raw container data into a buffer
-4. Retrieves RSA key pair from `this + 0x60` (a pointer to a struct with two BigInteger pointers: exponent and modulus)
-5. Calls `Js5MasterIndex::Js5MasterIndex(masterIndexObj, rsaKeys)` with the buffer as an implicit parameter
+2. If `dataSize == 0`, master index download failed -- set error flag and return
+3. Copies `dataSize` bytes of raw container data into a Packet buffer
+4. Retrieves RSA key pointers: exponent from `this + 0x78`, modulus from `this + 0x80`
+5. Calls `Js5MasterIndex::Js5MasterIndex(masterIndexObj, exponent, modulus, packet)`
 
 **Critical: NO decompression occurs before passing to the constructor.** The constructor receives and parses the raw container bytes directly.
 
@@ -97,7 +97,7 @@ rsaSignatureSize = compressedSize - 1 - archiveCount * 80
 
 (Where `compressedSize` is the value from container offset 1-4.)
 
-**archiveCount (offset 5):** Read as a single unsigned byte. This is the **first byte of the payload** (at container offset 5). The constructor stores `archiveCount - 1` in the object. Maximum 255 archives.
+**archiveCount (offset 5):** Read as a single unsigned byte. This is the **first byte of the payload** (at container offset 5). The constructor stores `archiveCount - 1` at object offset 0x00 (used internally), and `archiveCount + 1` at object offset 0x08 (used as array capacity). The per-entry loop iterates exactly `archiveCount` times. Maximum 255 archives.
 
 **Per-archive entries (offset 6+):** Each entry is exactly **80 bytes**. Read order confirmed from the constructor's entry loop:
 
@@ -120,13 +120,14 @@ Wire order within each 80-byte entry:
 +16: whirlpool (64B)
 ```
 
-The constructor stores them into the entry object (0x28 = 40 bytes) as:
+The constructor stores them into the entry object (0x20 = 32 bytes, from `operator_new(0x20)`) as:
 ```c
-*piVar7 = iVar13;        // offset 0x00: CRC
-piVar7[1] = iVar12;      // offset 0x04: version
-// whirlpool stored at offset 0x08 (via FUN_005b7180 -- heap-allocated buffer reference)
-*(lVar6 + 0x20) = uVar14;  // offset 0x20: fileCount
-*(lVar6 + 0x24) = uVar15;  // offset 0x24: uncompressedSize
+// Verified from librs2client.so @ 0x004d2b20:
+*puVar10 = uVar29;       // offset 0x00: CRC (uint32)
+puVar10[1] = uVar3;      // offset 0x04: version (uint32)
+// offset 0x08: Array<uint8> for whirlpool (64 bytes, heap-allocated)
+puVar10[6] = uVar4;      // offset 0x18: fileCount (uint32)
+puVar10[7] = local_1fc;  // offset 0x1C: uncompressedSize (uint32)
 ```
 
 ---
@@ -372,39 +373,78 @@ This ensures the RSA block written to the container has no unexpected padding.
 
 ## RSA Key Location in the Binary
 
-The RSA keys for JS5 master index verification are accessed through the `Js5ResourceProvider` object at offset `this + 0x60`. This field is a pointer to a structure containing two `BigInteger*` fields:
+The RSA keys for JS5 master index verification are stored directly on the `Js5ResourceProvider` object (NOT via a pointer to a struct):
 
 ```
-struct Js5RsaKeys {
-    BigInteger* exponent;   // offset 0x00 -- public exponent (typically 65537 = 0x10001)
-    BigInteger* modulus;    // offset 0x08 -- RSA modulus
-};
+Js5ResourceProvider offsets (librs2client.so):
+    this + 0x78:  BigInteger* exponent   // public exponent (65537 = 0x10001)
+    this + 0x80:  BigInteger* modulus    // RSA modulus
 ```
 
-**In WorkerOnMessage:**
+These are the 9th and 10th constructor parameters: `..., bool diskCacheEnabled, BigInteger* exponent, BigInteger* modulus`.
+
+**In WorkerOnMessage (librs2client.so @ 0x0069d2d8):**
 ```c
-plVar5 = *(long **)(this + 0x60);  // Js5RsaKeys*
-Js5MasterIndex::Js5MasterIndex(obj, plVar5);
+pBVar10 = *(BigInteger **)(this + 0x78);  // exponent
+pBVar11 = *(BigInteger **)(this + 0x80);  // modulus
+Js5MasterIndex::Js5MasterIndex(pJVar21, pBVar10, pBVar11, local_1c8);
 ```
 
-**In the constructor (rs2client):**
+**In the Js5MasterIndex constructor (librs2client.so @ 0x004d2b20):**
 ```c
-// data = Js5RsaKeys* passed as second param (or via in_RDX register)
-math::BigInteger::ModPow(ciphertext, *data,      // *data = exponent
-                         (long *)*in_RDX,         // *in_RDX = modulus
-                         result);
-```
-
-**In the constructor (librs2client.so):**
-```c
-// param_1 = exponent BigInteger*, param_2 = modulus BigInteger*
+// Signature: Js5MasterIndex(this, BigInteger* param_1, BigInteger* param_2, Packet* param_3)
+// param_1 = exponent, param_2 = modulus
 mp_exptmod(ciphertext,
-           *(undefined8 *)param_1,  // exponent's mp_int data
-           *(undefined8 *)param_2,  // modulus's mp_int data
-           result);
+           *(undefined8 *)param_1,  // X = exponent (mp_int data pointer)
+           *(undefined8 *)param_2,  // P = modulus (mp_int data pointer)
+           result);                 // Y = result
+// libtommath: mp_exptmod(G, X, P, Y) computes Y = G^X mod P
 ```
 
-The patcher must replace the modulus stored in the BigInteger pointed to by `(*(Js5RsaKeys**)(resourceProvider + 0x60))->modulus`. The actual modulus bytes are in the `mp_int`'s digit array, which is a heap allocation. The patcher typically pattern-matches the known Jagex modulus bytes in the binary's data segment and overwrites them.
+**CRITICAL:** The parameter order is `(exponent, modulus)`, NOT `(modulus, exponent)`. This was previously documented incorrectly in `js5-post-master-index-flow.md`.
+
+### How the Patcher Works
+
+The RSA keys are initialized in `FUN_001879c0` (`.init_array` constructor):
+
+```c
+// At 0x001879c0 in rs2client:
+FUN_001706b0(&DAT_016e7348, "10001", 0x10);       // Login exponent = 65537
+FUN_001706b0(&DAT_016e7340, "9cbc5f91...", 0x10);  // Login modulus (1024-bit, 256 hex chars @ 0x0111c898)
+FUN_001706b0(&DAT_016e7338, "10001", 0x10);        // JS5 exponent = 65537
+FUN_001706b0(&DAT_016e7330, &DAT_0111c9a0, 0x10);  // JS5 modulus (4096-bit, 1024 hex chars @ 0x0111c9a0)
+FUN_001706b0(&DAT_016e7328, "10001", 0x10);        // Unknown exponent = 65537
+FUN_001706b0(&DAT_016e7320, "ccd229d9...", 0x10);  // Unknown modulus (512-bit, 128 hex chars @ 0x0111cda8)
+```
+
+`FUN_001706b0` parses a hex string (base 16) into a `jag::math::BigInteger` stored at the given global address. The hex strings are in `.rodata`.
+
+**Key addresses:**
+- `0x0111c898`: Login RSA modulus hex string (256 chars, prefix `9cbc5f91...`)
+- `0x0111c9a0`: JS5 RSA modulus hex string (1024 chars, prefix `e9b6a139afb361a6438c46cdade9e7ae`)
+- `0x0111cda8`: Unknown RSA modulus hex string (128 chars, prefix `ccd229d9...`)
+
+The LD_PRELOAD patcher (`libdarkan_patcher.so`) pattern-matches these hex strings in the process's memory and overwrites them with custom values BEFORE the `.init_array` constructor runs. Since LD_PRELOAD constructors execute before the main binary's constructors, the patched hex strings are what `FUN_001706b0` actually parses.
+
+**Critical requirement:** The patcher reads `DARKAN_JS5_RSA_MODULUS` from the **process environment**. This env var must be `export`-ed in the shell, not just set as a shell variable. Using `source .env` without `set -a` or explicit `export` will NOT make the variables visible to child processes.
+
+The `Js5ResourceProvider` object stores the key pointers directly (librs2client.so):
+- `this + 0x78` -> BigInteger* for JS5 exponent (global at 0xa3f9c8)
+- `this + 0x80` -> BigInteger* for JS5 modulus (global at 0xa3f9d0)
+
+**Static init order (librs2client.so @ 0x0015b8b0):**
+```
+BigInteger("10001", 16) -> global 0xa39ff8  (Login exponent)
+BigInteger(loginModHex, 16) -> global 0xa39ff0  (Login modulus, hex at 0x6f5a88)
+BigInteger("10001", 16) -> global 0xa3f9c8  (JS5 exponent)
+BigInteger(js5ModHex, 16) -> global 0xa3f9d0  (JS5 modulus, hex at 0x6f5b90)
+BigInteger("10001", 16) -> global 0xa3bf08  (Unknown exponent)
+BigInteger(unknownModHex, 16) -> global 0xa3bf00  (Unknown modulus, hex at 0x6f5f98)
+BigInteger(exp4Hex, 16) -> global 0xa39fe8  (4th key exponent, hex at 0x6f6020)
+BigInteger(mod4Hex, 16) -> global 0xa39fe0  (4th key modulus, hex at 0x6f6070)
+```
+
+The patcher replaces the hex strings at their `.rodata` addresses BEFORE the static initialization constructors run.
 
 ---
 

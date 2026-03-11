@@ -2,15 +2,18 @@
 # Launch the NXT client against the local Darkan server.
 # Usage: ./run-client.sh
 #
-# Reads patcher env vars from .env, applies LD_PRELOAD patches, and
-# launches rs3linux pointing at the local config server.
+# Emulates the launcher's custom mode:
+# - Sets working directory to ~/.darkan3
+# - Creates preferences.cfg there
+# - Applies LD_PRELOAD patches
 
 set -euo pipefail
-cd "$(dirname "$0")"
 
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_URI="${CONFIG_URI:-http://localhost:8829/jav_config.ws}"
-CLIENT_BINARY="./data/client/rs3linux"
-PATCHER_SO="./libdarkan_patcher.so"
+CLIENT_BINARY="$PROJECT_DIR/data/client/rs3linux"
+PATCHER_SO="$PROJECT_DIR/libdarkan_patcher.so"
+DARKAN_DIR="$HOME/.darkan3"
 
 if [[ ! -f "$CLIENT_BINARY" ]]; then
     echo "ERROR: Client binary not found at $CLIENT_BINARY" >&2
@@ -24,13 +27,39 @@ if [[ ! -f "$PATCHER_SO" ]]; then
 fi
 
 # Export patcher env vars from .env
-if [[ -f .env ]]; then
+if [[ -f "$PROJECT_DIR/.env" ]]; then
     while IFS= read -r line; do
-        # Skip comments and blank lines
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${line// }" ]] && continue
         export "$line"
-    done < .env
+    done < "$PROJECT_DIR/.env"
 fi
 
-exec env LD_PRELOAD="$(realpath "$PATCHER_SO")" "$CLIENT_BINARY" --configURI "$CONFIG_URI"
+# Set up ~/.darkan3 exactly like the launcher's custom mode
+mkdir -p "$DARKAN_DIR"
+cp -f "$PROJECT_DIR/client/preferences.cfg" "$DARKAN_DIR/preferences.cfg"
+
+# Clear stale cache data (NXT client creates Jagex/RuneScape/ under cache_folder)
+if [[ -d "$DARKAN_DIR/Jagex/RuneScape" ]]; then
+    echo "Clearing stale cache at $DARKAN_DIR/Jagex/RuneScape/"
+    rm -rf "$DARKAN_DIR/Jagex/RuneScape"
+fi
+
+cd "$DARKAN_DIR"
+
+env \
+    HOME="$DARKAN_DIR" \
+    LD_PRELOAD="$PATCHER_SO" \
+    SDL_VIDEODRIVER=x11 \
+    SDL_VIDEO_X11_WMCLASS=RuneScape \
+    EGL_LOG_LEVEL=debug \
+    LIBGL_DEBUG=verbose \
+    MESA_DEBUG=1 \
+    "$CLIENT_BINARY" --configURI "$CONFIG_URI" 2>&1 || true
+
+EC=${PIPESTATUS[0]:-$?}
+if [[ $EC -gt 128 ]]; then
+    echo "Client killed by signal $((EC - 128)) ($(kill -l $((EC - 128)) 2>/dev/null || echo '?'))"
+elif [[ $EC -ne 0 ]]; then
+    echo "Client exited with code $EC"
+fi

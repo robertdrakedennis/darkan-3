@@ -10,7 +10,7 @@ import java.math.BigInteger
  *   [archiveCount * 80B: CRC(4)+version(4)+fileCount(4)+uncompressedSize(4)+whirlpool(64)]
  *   [RSA signature block]
  *
- * The RSA signature is computed as: sign(0x01 || whirlpool(archiveCount..entries))
+ * The RSA signature is computed as: sign(0x0A || whirlpool(archiveCount..entries))
  * Whirlpool is over bytes [5 .. 6 + archiveCount*80) of the container.
  */
 class VersionTableBuilder(
@@ -80,7 +80,7 @@ class VersionTableBuilder(
         val hashStart = 5
         val hashLen = positionFor(indexCount) - hashStart
         val output = ByteArray(WHIRLPOOL_SIZE + 1)
-        output[0] = 1
+        output[0] = 10
         whirlpool.reset()
         whirlpool.add(versionTable, hashStart, hashLen)
         whirlpool.finalize(output, 1)
@@ -98,7 +98,7 @@ class VersionTableBuilder(
         val data = ByteArray(end)
         System.arraycopy(versionTable, 0, data, 0, data.size)
 
-        System.err.println("[VersionTable] Built: ${data.size}B, $indexCount indices, RSA block ${rsa.size}B, modulus ${modulus.toString(16).take(16)}...")
+        System.err.println("[VersionTable] Built: ${data.size}B, $indexCount indices, RSA ${rsa.size}B")
 
         return data
     }
