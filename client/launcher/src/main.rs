@@ -224,13 +224,18 @@ fn restore_sessions(creds: &config::Credentials) -> Vec<auth::types::Session> {
                 expiry: saved.expiry,
             },
             session_id,
+            consent_id_token: saved.consent_id_token.clone(),
         });
     }
 
     sessions
 }
 
-/// Refresh any saved sessions that are near expiry
+/// Refresh any saved sessions that are expired or near expiry.
+///
+/// After refreshing OAuth tokens, also creates a new game session_id
+/// from the fresh id_token. Game sessions expire independently of OAuth
+/// tokens, so the stored session_id must be renewed too.
 async fn refresh_saved_sessions(
     mut creds: config::Credentials,
     paths: &Paths,
@@ -244,8 +249,8 @@ async fn refresh_saved_sessions(
     let mut to_remove = Vec::new();
 
     for (i, session) in creds.sessions.iter_mut().enumerate() {
-        // Refresh if less than 30 seconds remaining
-        if session.expiry.saturating_sub(now_ms) < 30_000 {
+        // Refresh if expired or within 5 minutes of expiry
+        if session.expiry.saturating_sub(now_ms) < 300_000 {
             log::info!("Refreshing token for user {}", session.display_name);
             match auth::oauth::refresh_token(&client, &session.refresh_token).await {
                 Ok(tokens) => {
@@ -253,6 +258,11 @@ async fn refresh_saved_sessions(
                     session.id_token = tokens.id_token;
                     session.refresh_token = tokens.refresh_token;
                     session.expiry = tokens.expiry;
+                    // Note: we do NOT create a new game session here because
+                    // create_session requires the consent id_token (from the
+                    // consent flow), not the launcher id_token from refresh.
+                    // Fresh game sessions are created at launch time using
+                    // the stored consent_id_token.
                 }
                 Err(e) => {
                     log::warn!(

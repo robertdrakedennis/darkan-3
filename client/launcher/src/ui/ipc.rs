@@ -148,18 +148,23 @@ impl IpcState {
     }
 
     fn handle_launch(&self, account_id: &str, display_name: &str) {
-        let sessions = self.sessions.lock().unwrap();
-        let session = sessions
-            .iter()
-            .find(|s| s.accounts.iter().any(|a| a.account_id == account_id));
+        let (stored_session_id, consent_id_token) = {
+            let sessions = self.sessions.lock().unwrap();
+            let session = sessions
+                .iter()
+                .find(|s| s.accounts.iter().any(|a| a.account_id == account_id));
 
-        let session_id = match session {
-            Some(s) => s.session_id.clone(),
-            None => {
-                self.send_event(&IpcEvent::LaunchError {
-                    message: "No active session found for this account".to_string(),
-                });
-                return;
+            match session {
+                Some(s) => (
+                    s.session_id.clone(),
+                    s.consent_id_token.clone(),
+                ),
+                None => {
+                    self.send_event(&IpcEvent::LaunchError {
+                        message: "No active session found for this account".to_string(),
+                    });
+                    return;
+                }
             }
         };
 
@@ -200,6 +205,29 @@ impl IpcState {
             };
 
             let client = reqwest::Client::new();
+
+            // Create a fresh game session using the consent id_token.
+            // The consent id_token (from the consent flow) is different from the
+            // launcher id_token (from OAuth refresh) — only the consent one works.
+            send_status("Preparing game session...");
+            let session_id = match &consent_id_token {
+                Some(cit) => {
+                    match crate::auth::session::create_session(&client, cit).await {
+                        Ok(sid) => {
+                            log::info!("Created fresh game session");
+                            sid
+                        }
+                        Err(e) => {
+                            log::warn!("Session creation failed: {}. Using stored session.", e);
+                            stored_session_id.clone()
+                        }
+                    }
+                }
+                None => {
+                    log::info!("No consent_id_token saved (pre-migration login). Using stored session.");
+                    stored_session_id.clone()
+                }
+            };
 
             // In proxy mode, fetch the proxy's jav_config to extract RSA modulus
             let proxy_rsa_modulus = if is_proxy {
@@ -540,6 +568,7 @@ impl IpcState {
                 expiry: session.tokens.expiry,
                 accounts: session.accounts.clone(),
                 session_id: Some(session.session_id.clone()),
+                consent_id_token: session.consent_id_token.clone(),
             });
             let _ = crate::config::save_credentials(&self.paths.creds_file, &creds);
         }
@@ -561,3 +590,4 @@ impl IpcState {
         self.send_event(&IpcEvent::LoginComplete { session: info });
     }
 }
+

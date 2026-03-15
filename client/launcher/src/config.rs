@@ -73,6 +73,10 @@ pub struct SavedSession {
     pub accounts: Vec<crate::auth::types::Account>,
     #[serde(default)]
     pub session_id: Option<String>,
+    /// Consent id_token (from the consent flow, different from launcher id_token).
+    /// Used to create fresh game sessions at launch time.
+    #[serde(default)]
+    pub consent_id_token: Option<String>,
 }
 
 pub struct Paths {

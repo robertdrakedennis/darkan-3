@@ -36,6 +36,10 @@ pub struct Session {
     pub accounts: Vec<Account>,
     pub tokens: AuthTokens,
     pub session_id: String,
+    /// The consent id_token (from the consent flow, different client_id).
+    /// Required for creating new game sessions — the launcher id_token won't work.
+    #[serde(default)]
+    pub consent_id_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

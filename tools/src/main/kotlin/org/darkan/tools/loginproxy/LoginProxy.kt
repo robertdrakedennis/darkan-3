@@ -1086,6 +1086,7 @@ private class ProxySession(
                 }
             }
 
+            val magicPos = dpos // remember where the magic byte (and real plaintext) starts
             val magic = decrypted[dpos].toInt() and 0xFF
             dpos++
             if (magic != 10) {
@@ -1129,14 +1130,10 @@ private class ProxySession(
             initializeIsaacCiphers(keys)
 
             // Re-encrypt the decrypted RSA plaintext with Jagex's public key.
-            //
-            // The decrypted bytes came from BigInteger.toByteArray() which may have
-            // a leading 0x00 sign byte. We need the raw plaintext starting from the
-            // magic byte (0x0A = 10).
-            //
-            // Find the magic byte position to get the canonical plaintext.
-            val plaintextStart = if (dpos > 1) 1 else 0  // skip leading zero if present
-            val rsaPlaintext = decrypted.copyOfRange(plaintextStart, decrypted.size)
+            // The plaintext must include the 0x0A magic byte — Jagex's server
+            // validates it after decryption. magicPos accounts for any leading
+            // 0x00 sign byte that BigInteger.toByteArray() may have prepended.
+            val rsaPlaintext = decrypted.copyOfRange(magicPos, decrypted.size)
             log("MITM", "Re-encrypting RSA plaintext (${rsaPlaintext.size}B) with Jagex public key...")
             log("MITM", "  Plaintext starts with: ${rsaPlaintext.take(5).joinToString(" ") { "%02X".format(it) }}")
 

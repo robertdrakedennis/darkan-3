@@ -326,6 +326,7 @@ async fn handle_consent_complete(
         accounts,
         tokens,
         session_id,
+        consent_id_token: Some(consent_id_token),
     };
 
     state.add_session(session);
