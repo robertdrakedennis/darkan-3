@@ -8,7 +8,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_URI="${CONFIG_URI:-http://localhost:8829/jav_config.ws}"
 CLIENT_BINARY="$PROJECT_DIR/data/client/rs3linux"
-PATCHER_SO="$PROJECT_DIR/libdarkan_patcher.so"
+PATCHER_SO="$PROJECT_DIR/client/launcher/patcher/target/release/libdarkan_patcher.so"
 DARKAN_DIR="$HOME/.darkan3"
 
 if [[ ! -f "$CLIENT_BINARY" ]]; then

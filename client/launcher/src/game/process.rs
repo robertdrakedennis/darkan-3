@@ -21,6 +21,7 @@ pub fn launch_rs3(
     custom_command: Option<&str>,
     rsa_modulus: Option<&str>,
     working_dir: Option<&Path>,
+    proxy_mode: bool,
 ) -> Result<()> {
     let binary_str = binary.to_string_lossy().to_string();
     let data_dir_str = data_dir.to_string_lossy().to_string();
@@ -50,15 +51,23 @@ pub fn launch_rs3(
         cmd.env("JX_DISPLAY_NAME", p.display_name);
     }
 
-    // Set up LD_PRELOAD for RSA patching if a custom modulus is provided
-    if let Some(modulus) = rsa_modulus {
+    // Set up LD_PRELOAD for binary patching.
+    // In proxy mode the patcher is always needed (codebase URL regex patch),
+    // even if no RSA modulus is available from the proxy's jav_config.
+    let needs_patcher = rsa_modulus.is_some() || proxy_mode;
+    if needs_patcher {
         if let Some(patcher_path) = find_patcher_library(binary) {
             log::info!("Setting LD_PRELOAD to {}", patcher_path.display());
             cmd.env("LD_PRELOAD", &patcher_path);
-            cmd.env("DARKAN_RSA_MODULUS", modulus);
+            if let Some(modulus) = rsa_modulus {
+                cmd.env("DARKAN_RSA_MODULUS", modulus);
+            }
+            if proxy_mode {
+                cmd.env("DARKAN_PROXY_MODE", "1");
+            }
         } else {
             log::warn!(
-                "RSA modulus provided but libdarkan_patcher.so not found. \
+                "Patcher needed but libdarkan_patcher.so not found. \
                  Build it with: cd client/launcher/patcher && cargo build --release"
             );
         }
@@ -94,7 +103,8 @@ pub fn launcher_binary_name() -> &'static str {
 /// Search order:
 /// 1. Next to the launcher executable itself
 /// 2. In the same directory as the client binary
-/// 3. In ../patcher/target/release/ relative to the launcher executable (dev builds)
+/// 3. ~/darkan-3/ (project runtime directory)
+/// 4. In ../patcher/target/release/ relative to the launcher executable (dev builds)
 pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> {
     let lib_name = "libdarkan_patcher.so";
 
@@ -109,6 +119,14 @@ pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> 
     // Next to the client binary
     if let Some(parent) = client_binary.parent() {
         let candidate = parent.join(lib_name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    // ~/darkan-3/ — the project runtime directory used by custom mode
+    if let Ok(home) = std::env::var("HOME") {
+        let candidate = std::path::PathBuf::from(home).join("darkan-3").join(lib_name);
         if candidate.exists() {
             return Some(candidate);
         }

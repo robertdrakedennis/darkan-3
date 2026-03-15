@@ -12,7 +12,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_URI="${CONFIG_URI:-http://localhost:8829/jav_config.ws}"
 CLIENT_BINARY="$PROJECT_DIR/data/client/rs3linux"
-PATCHER_SO="$PROJECT_DIR/libdarkan_patcher.so"
+PATCHER_SO="$PROJECT_DIR/client/launcher/patcher/target/release/libdarkan_patcher.so"
 DARKAN_DIR="$HOME/.darkan3"
 
 if [[ ! -f "$CLIENT_BINARY" ]]; then
@@ -22,7 +22,7 @@ fi
 
 if [[ ! -f "$PATCHER_SO" ]]; then
     echo "ERROR: Patcher not found at $PATCHER_SO" >&2
-    echo "Build it: cd client/launcher/patcher && cargo build --release && cp target/release/libdarkan_patcher.so ../../.." >&2
+    echo "Build it: cd client/launcher/patcher && cargo build --release" >&2
     exit 1
 fi
 
@@ -40,10 +40,11 @@ mkdir -p "$DARKAN_DIR"
 cp -f "$PROJECT_DIR/client/preferences.cfg" "$DARKAN_DIR/preferences.cfg"
 
 # Clear stale cache data (NXT client creates Jagex/RuneScape/ under cache_folder)
-if [[ -d "$DARKAN_DIR/Jagex/RuneScape" ]]; then
-    echo "Clearing stale cache at $DARKAN_DIR/Jagex/RuneScape/"
-    rm -rf "$DARKAN_DIR/Jagex/RuneScape"
-fi
+# Disabled to allow cache accumulation across runs — re-enable if cache corruption suspected
+#if [[ -d "$DARKAN_DIR/Jagex/RuneScape" ]]; then
+#    echo "Clearing stale cache at $DARKAN_DIR/Jagex/RuneScape/"
+#    rm -rf "$DARKAN_DIR/Jagex/RuneScape"
+#fi
 
 cd "$DARKAN_DIR"
 
@@ -52,9 +53,6 @@ env \
     LD_PRELOAD="$PATCHER_SO" \
     SDL_VIDEODRIVER=x11 \
     SDL_VIDEO_X11_WMCLASS=RuneScape \
-    EGL_LOG_LEVEL=debug \
-    LIBGL_DEBUG=verbose \
-    MESA_DEBUG=1 \
     "$CLIENT_BINARY" --configURI "$CONFIG_URI" 2>&1 || true
 
 EC=${PIPESTATUS[0]:-$?}

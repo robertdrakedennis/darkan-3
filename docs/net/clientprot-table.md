@@ -1,11 +1,15 @@
 # ClientProt Opcode Table (Complete)
 
-Binary: NXT Client (current build)
-Extracted from: `jag::ServerProt::RegisterAll` at `0x00182860`
-Constructor: `0x00182470` (ClientProt), `0x00182570` (ServerProt)
-ClientProt struct size: 0x10 bytes (opcode:int, size:int, handlerTarget:ptr, name:eastl::string)
-Dispatch vector: `fixed_vector<ClientProt const*, 122>` at `0x016fbde0`
+Binary: NXT Client (Build 946-5)
+Extracted from: `jag::ServerProt::RegisterAll` at `0x00182030` (946-5)
+Constructor: `0x00181c40` (ClientProt), `0x00181da0` (ClientProt::InitEntry for lobby entries)
+ClientProt struct size: 0x10 bytes (opcode:int32+0x00, size:int32+0x04, name:char*+0x08)
+Entry base addresses: `0x016e9560` to `0x016e9d60` (0x10 stride), outlier at `0x016fcfe0` (op 120)
 Total opcodes: 130 (0-129)
+
+`[VERIFIED]` All 130 sizes confirmed matching between engine `ClientProt.kt` and 946-5 binary.
+6 sizes changed from 946-3: ops 15 (0→3), 21 (0→3), 34 (0→5), 41 (0→9), 80 (0→1), 87 (0→var_byte).
+16 UNKNOWN opcodes (11,13,22,41,42,44,53,55,57,72,73,79,100,108,112,126) — 15 have no sender, only op 42 has sender at `0x003693a0`.
 
 ## Size Mode Legend
 
@@ -42,13 +46,13 @@ Total opcodes: 130 (0-129)
 | 12 | 16 | 0x016fba00 | IF_BUTTON_T | FUN_002e2b90 (dispatcher) | Interface |
 | 13 | 2 | 0x016fb9f0 | *(unknown)* | | |
 | 14 | 3 | 0x016fb9e0 | OPOBJ7 | (via OPOBJ switch) | Actions |
-| 15 | 0 | 0x016fb9d0 | NO_TIMEOUT | 0x00360cb0 | Misc |
+| 15 | 3 | 0x016e9630 | NO_TIMEOUT | 0x00360cb0 | Misc | `[946-5]` size 0→3 |
 | 16 | 11 | 0x016fb9c0 | OPLOC_T (long form) | 0x001feca0 | Actions |
 | 17 | VAR_BYTE | 0x016fb9b0 | EVENT_MOUSE_CLICK | 0x00211130 (CS2 getter) | Misc |
 | 18 | 8 | 0x016fb9a0 | IF_BUTTON5 | IfButtonXInner (table[4]) | Interface |
 | 19 | 3 | 0x016fb990 | OPNPC_T2 | SendOpNpc2T | Actions |
 | 20 | 3 | 0x016fb980 | OPOBJ1 | (via OPOBJ switch) | Actions |
-| 21 | 0 | 0x016fb970 | MAP_BUILD_COMPLETE | 0x00420950 | Misc |
+| 21 | 3 | 0x016e9670 | MAP_BUILD_COMPLETE | 0x00420950 | Misc | `[946-5]` size 0→3 |
 | 22 | 1 | 0x016fb960 | *(unknown)* | | |
 | 23 | 7 | 0x016fb950 | OPNPC3 | (via OPNPC switch) | Actions |
 | 24 | VAR_BYTE | 0x016fb940 | CLIENT_CHEAT | 0x00360f30 | Misc |
@@ -61,14 +65,14 @@ Total opcodes: 130 (0-129)
 | 31 | VAR_SHORT | 0x016fb8d0 | EVENT_CAMERA_POSITION_2 | (camera event variant) | Misc |
 | 32 | VAR_BYTE | 0x016fb8c0 | CS2_CALLBACK | 0x003cd910 | Misc |
 | 33 | 5 | 0x016fb8b0 | MOVE_GAME (from minimenu) | 0x001fe300 | Movement |
-| 34 | 0 | 0x016fb8a0 | QUEUED_PACKET | 0x00378630 | Misc |
+| 34 | 5 | 0x016e96f0 | QUEUED_PACKET | 0x00378630 | Misc | `[946-5]` size 0→5 |
 | 35 | 3 | 0x016fb890 | OPNPC_T5 | SendOpNpc5T | Actions |
 | 36 | 3 | 0x016fb880 | OPNPC_T6 | SendOpNpc6T | Actions |
 | 37 | 15 | 0x016fb870 | OPLOC_T (extended form) | 0x001fe840 | Actions |
 | 38 | 9 | 0x016fb860 | OPLOC_T1 | SendOpLoc1T | Actions |
 | 39 | VAR_BYTE | 0x016fb850 | SOCIAL_REQUEST | 0x003cda50 | Social |
 | 40 | 9 | 0x016fb840 | OPLOC_T3 | SendOpLoc3T | Actions |
-| 41 | 0 | 0x016fb830 | *(unknown)* | | |
+| 41 | 9 | 0x016e97b0 | *(unknown)* | | | `[946-5]` size 0→9 |
 | 42 | 3 | 0x016fb820 | UNKNOWN_3BYTE_42 | 0x003ce0b0 | Misc |
 | 43 | 9 | 0x016fb810 | OPLOC_T6 | SendOpLoc6T | Actions |
 | 44 | VAR_SHORT | 0x016fb800 | *(unknown)* | | |
@@ -107,14 +111,14 @@ Total opcodes: 130 (0-129)
 | 77 | 7 | 0x016fb5f0 | OPNPC5 | (via OPNPC switch) | Actions |
 | 78 | VAR_BYTE | 0x016fb5e0 | FRIENDLIST_ADD | 0x003d3f80 | Social |
 | 79 | 1 | 0x016fb5d0 | *(unknown — no sender)* | | |
-| 80 | 0 | 0x016fb5c0 | NO_TIMEOUT_2 | ProcessConnections | Misc |
+| 80 | 1 | 0x016e9ac0 | NO_TIMEOUT_2 | ProcessConnections | Misc | `[946-5]` size 0→1 |
 | 81 | VAR_BYTE | 0x016fb5b0 | ACTIVE_CHAT_PHRASE_SENDPRIVATE | 0x00369e70 (CS2) | Chat |
 | 82 | 3 | 0x016fb5a0 | WINDOW_STATUS | 0x00360b70 | Misc |
 | 83 | 1 | 0x016fb590 | FOCUS_CHANGED | 0x002c48b0 | Display |
 | 84 | VAR_BYTE | 0x016fb580 | OPOBJ_CS2_2 | 0x0040b590 | Actions |
 | 85 | 7 | 0x016fb570 | EVENT_MOUSE_MOVE | 0x0021ea40 | Misc |
 | 86 | VAR_BYTE | 0x016fb560 | MESSAGE_CLAN_CHAT | 0x003e6420 | Chat |
-| 87 | 0 | 0x016fb550 | CLOSE_MODAL | 0x00360e90 | Interface |
+| 87 | VAR_BYTE | 0x016e9b30 | CLOSE_MODAL | 0x00360e90 | Interface | `[946-5]` size 0→var_byte |
 | 88 | 2 | 0x016fb540 | SOUND_SONGSELECT (cs2) | 0x00361040 | Misc |
 | 89 | 5 | 0x016fb530 | MOVE_SCRIPTED | 0x0040cfc0 (CS2) | Movement |
 | 90 | 7 | 0x016fb520 | OPNPC4 | (via OPNPC switch) | Actions |

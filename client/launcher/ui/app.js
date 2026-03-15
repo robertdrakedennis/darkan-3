@@ -15,7 +15,6 @@
   const selAccount = $("#sel-account");
   const selCharacter = $("#sel-character");
   const btnPlay = $("#btn-play");
-  const btnPlayCustom = $("#btn-play-custom");
   const btnLogin = $("#btn-login");
   const btnAddAccount = $("#btn-add-account");
   const btnLogout = $("#btn-logout");
@@ -47,6 +46,19 @@
 
   function isCustomMode() {
     return getSelectedMode() === "Custom";
+  }
+
+  function isProxyMode() {
+    return getSelectedMode() === "Proxy";
+  }
+
+  function showServerFields() {
+    return isCustomMode() || isProxyMode();
+  }
+
+  function needsOAuth() {
+    const mode = getSelectedMode();
+    return mode === "Live" || mode === "Proxy";
   }
 
   // Receive events from Rust
@@ -81,7 +93,7 @@
       case "launch_status":
         state.launching = event.message !== "Game launched!";
         btnPlay.disabled = state.launching;
-        btnPlayCustom.disabled = state.launching;
+        updatePlayButton();
         logStatus(
           event.message,
           event.message === "Game launched!" ? "success" : ""
@@ -91,7 +103,7 @@
       case "launch_error":
         state.launching = false;
         btnPlay.disabled = false;
-        btnPlayCustom.disabled = false;
+        updatePlayButton();
         logStatus(event.message, "error");
         break;
 
@@ -107,7 +119,7 @@
     // Restore mode selection
     const mode = state.config.server_mode || "Live";
     setSelectedMode(mode);
-    customFields.style.display = mode === "Custom" ? "" : "none";
+    customFields.style.display = (mode === "Custom" || mode === "Proxy") ? "" : "none";
 
     // Restore custom server fields
     inpHost.value = state.config.custom_server_host || "localhost";
@@ -120,13 +132,22 @@
 
   function updateUI() {
     const custom = isCustomMode();
+    const serverFields = showServerFields();
+    const oauth = needsOAuth();
 
-    if (state.sessions.length === 0) {
-      noAccounts.style.display = custom ? "none" : "";
+    if (custom) {
+      // Private Server mode: no accounts needed
+      noAccounts.style.display = "none";
       accountPanel.style.display = "none";
+      btnPlay.style.display = "";
+    } else if (state.sessions.length === 0) {
+      noAccounts.style.display = "";
+      accountPanel.style.display = "none";
+      btnPlay.style.display = "none";
     } else {
       noAccounts.style.display = "none";
-      accountPanel.style.display = custom ? "none" : "";
+      accountPanel.style.display = "";
+      btnPlay.style.display = "";
 
       // Populate account selector
       const prevAccount = selAccount.value;
@@ -144,12 +165,7 @@
       updateCharacters();
     }
 
-    // In custom mode, hide the live account panel and show the custom play button
-    // In live mode, show the account panel (if sessions exist) and hide the custom play button
-    if (custom) {
-      noAccounts.style.display = "none";
-      accountPanel.style.display = "none";
-    }
+    customFields.style.display = serverFields ? "" : "none";
 
     // Settings
     if (state.config) {
@@ -192,9 +208,24 @@
     state.config.server_mode = getSelectedMode();
     state.config.custom_server_host = inpHost.value || null;
     state.config.custom_server_port = parseInt(inpPort.value) || null;
-    const host = inpHost.value || "localhost";
-    state.config.custom_config_uri = "http://" + host + ":8829/jav_config.ws";
+    if (getSelectedMode() !== "Live") {
+      const host = inpHost.value || "localhost";
+      const port = parseInt(inpPort.value) || 8829;
+      state.config.custom_config_uri = "http://" + host + ":" + port + "/jav_config.ws";
+    } else {
+      state.config.custom_config_uri = null;
+    }
     send({ type: "save_config", config: state.config });
+  }
+
+  function updatePlayButton() {
+    if (state.launching) {
+      btnPlay.textContent = "Launching\u2026";
+      btnPlay.classList.add("launching");
+    } else {
+      btnPlay.innerHTML = "&#9654; Play";
+      btnPlay.classList.remove("launching");
+    }
   }
 
   // Event handlers
@@ -208,34 +239,36 @@
     }
   });
 
-  // Live mode play button
+  // Unified play button — action depends on mode
   btnPlay.addEventListener("click", () => {
-    const accountId = selCharacter.value;
-    const session = state.sessions.find((s) => s.user_id === selAccount.value);
-    if (!accountId || !session) return;
+    if (isCustomMode()) {
+      // Custom mode: no account needed, just save config and launch
+      saveServerModeToConfig();
+      state.launching = true;
+      btnPlay.disabled = true;
+      updatePlayButton();
+      send({ type: "launch_custom" });
+    } else {
+      // Live/Proxy mode: need account selection
+      const accountId = selCharacter.value;
+      const session = state.sessions.find((s) => s.user_id === selAccount.value);
+      if (!accountId || !session) return;
 
-    const account = session.accounts.find((a) => a.accountId === accountId);
-    if (!account) return;
+      const account = session.accounts.find((a) => a.accountId === accountId);
+      if (!account) return;
 
-    state.launching = true;
-    btnPlay.disabled = true;
+      if (showServerFields()) saveServerModeToConfig();
 
-    send({
-      type: "launch",
-      account_id: accountId,
-      display_name: account.displayName,
-    });
-  });
+      state.launching = true;
+      btnPlay.disabled = true;
+      updatePlayButton();
 
-  // Custom mode play button
-  btnPlayCustom.addEventListener("click", () => {
-    // Save current custom settings before launching
-    saveServerModeToConfig();
-
-    state.launching = true;
-    btnPlayCustom.disabled = true;
-
-    send({ type: "launch_custom" });
+      send({
+        type: "launch",
+        account_id: accountId,
+        display_name: account.displayName,
+      });
+    }
   });
 
   selAccount.addEventListener("change", updateCharacters);
@@ -243,7 +276,6 @@
   // Mode radio
   document.querySelectorAll('input[name="mode"]').forEach((r) => {
     r.addEventListener("change", () => {
-      customFields.style.display = r.value === "Custom" ? "" : "none";
       updateUI();
       saveServerModeToConfig();
     });

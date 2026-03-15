@@ -110,14 +110,18 @@ struct Region {
 
 #[ctor::ctor]
 fn patch_rsa() {
-    let modulus_hex = match env::var("DARKAN_RSA_MODULUS") {
-        Ok(val) if !val.is_empty() => val,
-        _ => return,
-    };
-
+    let modulus_hex = env::var("DARKAN_RSA_MODULUS").ok().filter(|v| !v.is_empty());
     let js5_modulus_hex = env::var("DARKAN_JS5_RSA_MODULUS").ok().filter(|v| !v.is_empty());
+    let proxy_mode = env::var("DARKAN_PROXY_MODE").map(|v| v == "1").unwrap_or(false);
 
-    eprintln!("[darkan-patcher] RSA patcher loaded, applying patches...");
+    // In proxy mode, the patcher runs even without an RSA modulus (for codebase regex patch).
+    // In non-proxy mode, an RSA modulus is required — otherwise there's nothing to do.
+    if modulus_hex.is_none() && !proxy_mode {
+        return;
+    }
+
+    eprintln!("[darkan-patcher] Patcher loaded, applying patches (proxy_mode={}, has_rsa={})...",
+        proxy_mode, modulus_hex.is_some());
 
     // Detect which binary we're running in
     let exe_name = fs::read_link("/proc/self/exe")
@@ -129,24 +133,23 @@ fn patch_rsa() {
     eprintln!("[darkan-patcher] Detected binary: {:?} (rs2client={}, rs3linux={})",
         exe_name.as_deref().unwrap_or("unknown"), is_rs2client, is_rs3linux);
 
-    // Strip optional 0x prefix and validate hex
-    let modulus_hex_clean = {
-        let s = modulus_hex.trim();
+    // Clean and validate RSA modulus hex (if provided)
+    let modulus_hex_clean = modulus_hex.map(|hex| {
+        let s = hex.trim();
         s.strip_prefix("0x")
             .or_else(|| s.strip_prefix("0X"))
             .unwrap_or(s)
             .to_string()
-    };
+    });
 
-    if modulus_hex_clean.len() % 2 != 0 || modulus_hex_clean.is_empty() {
-        eprintln!("[darkan-patcher] ERROR: DARKAN_RSA_MODULUS is not valid hex (odd length or empty)");
-        return;
-    }
-
-    // Validate hex is parseable (don't need the bytes, but catch bad input early)
-    if hex_to_bytes(&modulus_hex_clean).is_none() {
-        eprintln!("[darkan-patcher] ERROR: DARKAN_RSA_MODULUS is not valid hex");
-        return;
+    if let Some(ref hex) = modulus_hex_clean {
+        if hex.len() % 2 != 0 || hex.is_empty() {
+            eprintln!("[darkan-patcher] ERROR: DARKAN_RSA_MODULUS is not valid hex (odd length or empty)");
+            if !proxy_mode { return; }
+        } else if hex_to_bytes(hex).is_none() {
+            eprintln!("[darkan-patcher] ERROR: DARKAN_RSA_MODULUS is not valid hex");
+            if !proxy_mode { return; }
+        }
     }
 
     let maps = match fs::read_to_string("/proc/self/maps") {
@@ -178,7 +181,7 @@ fn patch_rsa() {
     // string in .rodata (256 chars for 1024-bit key). At startup, FUN_001706b0
     // parses it into a jag::math::BigInteger. We replace the hex string in-place
     // so the BigInteger parser loads our custom modulus instead.
-    {
+    if let Some(ref modulus_hex_clean) = modulus_hex_clean {
         let padded_hex = {
             let hex_lower = modulus_hex_clean.to_ascii_lowercase();
             if hex_lower.len() > RS2CLIENT_MODULUS_HEX_LEN {
@@ -222,13 +225,18 @@ fn patch_rsa() {
                 eprintln!("[darkan-patcher] rs2client RSA modulus pattern not found (not rs2client process?)");
             }
         }
+    } else {
+        eprintln!("[darkan-patcher] No RSA modulus provided, skipping rs2client RSA patch");
     }
 
     // --- Patch 1b: rs2client JS5 RSA modulus (1024-char hex ASCII string, 4096-bit key) ---
     //
     // The version table / master index signature is verified using a separate 4096-bit key
     // stored at DAT_016e7330, loaded from a 1024-char hex string in .rodata.
-    if let Some(ref js5_hex) = js5_modulus_hex {
+    // Skipped in proxy mode: JS5 goes directly to Jagex, so their key must remain.
+    if proxy_mode {
+        eprintln!("[darkan-patcher] Proxy mode: skipping JS5 RSA modulus patch");
+    } else if let Some(ref js5_hex) = js5_modulus_hex {
         let js5_hex_clean = {
             let s = js5_hex.trim();
             s.strip_prefix("0x")
@@ -274,7 +282,10 @@ fn patch_rsa() {
     // WorldLobbyData::GetHTTPURL in ModeWhere=LIVE hardcodes HTTP port to 80.
     // The compiler inlined this at two call sites, so we patch both.
     // The port is read from DARKAN_HTTP_PORT env var (default: no patch).
-    if is_rs2client {
+    // Skipped in proxy mode: HTTP JS5 goes directly to Jagex on port 80.
+    if is_rs2client && proxy_mode {
+        eprintln!("[darkan-patcher] Proxy mode: skipping HTTP port patch");
+    } else if is_rs2client {
         if let Ok(port_str) = env::var("DARKAN_HTTP_PORT") {
             if let Ok(port) = port_str.parse::<u16>() {
                 let port_le = port.to_le_bytes();
@@ -312,14 +323,20 @@ fn patch_rsa() {
         }
     }
 
-    // --- Patches 2-4 are rs3linux-only; skip for rs2client ---
+    // --- Patches 4-6 are rs3linux-only; skip for rs2client ---
     if is_rs2client {
         eprintln!("[darkan-patcher] rs2client detected, skipping rs3linux-specific patches");
         return;
     }
 
     // --- Patch 2: rs3linux launcher RSA modulus (1024-char hex ASCII string) ---
-    {
+    // In custom mode: always patch — our ConfigServer signs download_hash_0 with
+    // our RSA key, so rs3linux needs our public key to verify.
+    // In proxy mode: SKIP — rs3linux downloads from Jagex and must verify with
+    // Jagex's public key. Patching would break download_hash verification.
+    if proxy_mode {
+        eprintln!("[darkan-patcher] Proxy mode: skipping rs3linux RSA modulus patch (Jagex key needed for download verification)");
+    } else if let Some(ref modulus_hex_clean) = modulus_hex_clean {
         // Build the replacement: left-pad the hex modulus with '0' to 1024 chars, lowercase
         let padded_hex = {
             let hex_lower = modulus_hex_clean.to_ascii_lowercase();
@@ -364,10 +381,16 @@ fn patch_rsa() {
                 eprintln!("[darkan-patcher] rs3linux RSA modulus pattern not found (not rs3linux process?)");
             }
         }
+    } else {
+        eprintln!("[darkan-patcher] No RSA modulus provided, skipping rs3linux RSA patch");
     }
 
     // --- Patch 3: rs3linux codebase URL validation regex ---
-    {
+    // In proxy mode, the codebase URL is still Jagex's (matches the original regex).
+    // Skip patching to avoid potential null-padding issues with the regex engine.
+    if proxy_mode {
+        eprintln!("[darkan-patcher] Proxy mode: skipping codebase regex patch (Jagex URL matches original regex)");
+    } else {
         let mut patched = false;
         for region in &regions {
             if let Some(offset) = scan_for_pattern(region.start, region.end, CODEBASE_REGEX) {
@@ -399,6 +422,11 @@ fn patch_rsa() {
     }
 
     // --- Patch 4: rs3linux LZMA decompression flag (disable for uncompressed binary serving) ---
+    // Skipped in proxy mode: rs3linux handles decompression normally with Jagex binaries.
+    if proxy_mode {
+        eprintln!("[darkan-patcher] Proxy mode: skipping LZMA decompression flag patch");
+        return;
+    }
     {
         let mut patched = false;
         for region in &regions {
@@ -552,6 +580,7 @@ fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
     }
     Some(bytes)
 }
+
 
 #[cfg(test)]
 mod tests {

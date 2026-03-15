@@ -75,15 +75,15 @@ Used by `SetComponentProperty` (param_3, which maps to slot 0x40 of a type-4 upd
 
 ---
 
-#### IF_OPENTOP (opcode 108, size 6)
-**Handler Address:** `0x233be0` | **ServerProt Global:** `0x016f4160`
+#### IF_OPENTOP (opcode 207 / 0xCF, size 2) **CORRECTED**
+**NOTE:** Previously incorrectly documented as opcode 108. Opcode 108 is IF_SETOBJECT_ALWAYSNUM.
+**Verified from RegisterAll:** `InitEntry(&DAT_016fd220, 0xcf, 2)`
 **Packet Format:**
 | Read | Type | Description |
 |------|------|-------------|
-| g4s_alt2 | int | Component hash |
 | ushort_BE | ushort | Interface ID |
 
-**Behavior:** Creates update type 0xc. Sets interfaceId at slot 0x20. Flag at slot 0x40 set to 1 if ushort value equals 0x7f (marks as modal/fullscreen).
+**Behavior:** Creates update type 0xc, marks it dirty, stores interfaceId at slot 0x20 via `SetUpdateSlotValue`. See `docs/net/serverprot/if-opentop.md` for full analysis.
 
 ---
 
@@ -592,7 +592,7 @@ If NPC type data is not loaded (type != 4), uses fallback defaults from `DAT_017
 | 100 | 10 | IF_SETPOSITION | `0x232fc0` | `0x016f38e0` |
 | 105 | 8 | IF_SETPLAYERMODEL_COLOUR | `0x219130` | `0x016f3de0` |
 | 106 | 4 | IF_SETOBJECT_SELF | `0x224940` | `0x016f3d60` |
-| 108 | 6 | IF_OPENTOP | `0x233be0` | `0x016f4160` |
+| 207 | 2 | IF_OPENTOP | (see if-opentop.md) | `0x016fd220` | **CORRECTED: was 108/6**
 | 113 | 10 | IF_SETNPCHEAD | `0x2245e0` | `0x016f3ba0` |
 | 116 | 25 | IF_OPENSUB_OVERLAY2 | `0x2252f0` | `0x016f4060` |
 | 119 | 8 | IF_OPENSUB | `0x233c80` | `0x016f41a0` |

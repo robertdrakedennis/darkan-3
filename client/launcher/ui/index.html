@@ -18,29 +18,38 @@
 
     <main>
       <div id="no-accounts" class="panel">
-        <p>No accounts logged in.</p>
-        <button id="btn-login" class="btn btn-primary">Login with Jagex Account</button>
+        <p>Sign in with your Jagex account to play.</p>
+        <button id="btn-login" class="btn btn-primary">Sign In</button>
       </div>
 
       <div class="panel mode-panel">
         <div class="field mode-field">
-          <label>Mode</label>
+          <label>Server</label>
           <div class="radio-group">
-            <label><input type="radio" name="mode" value="Live" checked> Live</label>
-            <label><input type="radio" name="mode" value="Custom"> Custom</label>
+            <div class="mode-option">
+              <label><input type="radio" name="mode" value="Live" checked> Official</label>
+              <small>Play on Jagex servers</small>
+            </div>
+            <div class="mode-option">
+              <label><input type="radio" name="mode" value="Proxy"> Proxy</label>
+              <small>Route traffic through local proxy</small>
+            </div>
+            <div class="mode-option">
+              <label><input type="radio" name="mode" value="Custom"> Private Server</label>
+              <small>Connect to a custom server</small>
+            </div>
           </div>
         </div>
 
         <div id="custom-fields" style="display:none">
           <div class="field">
-            <label for="inp-host">Server Host</label>
+            <label for="inp-host">Server Address</label>
             <input type="text" id="inp-host" placeholder="localhost">
           </div>
           <div class="field">
-            <label for="inp-port">Server Port</label>
-            <input type="number" id="inp-port" placeholder="43594">
+            <label for="inp-port">Config Port</label>
+            <input type="number" id="inp-port" placeholder="8829">
           </div>
-          <button id="btn-play-custom" class="btn btn-play">&#9654; Play (Custom Server)</button>
         </div>
       </div>
 
@@ -54,13 +63,13 @@
           <select id="sel-character"></select>
         </div>
 
-        <button id="btn-play" class="btn btn-play">&#9654; Play</button>
-
         <div class="account-actions">
-          <button id="btn-add-account" class="btn btn-secondary">Add Account</button>
+          <button id="btn-add-account" class="btn btn-secondary">Add Another Account</button>
           <button id="btn-logout" class="btn btn-danger">Logout</button>
         </div>
       </div>
+
+      <button id="btn-play" class="btn btn-play" style="display:none">&#9654; Play</button>
     </main>
 
     <footer>

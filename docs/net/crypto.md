@@ -90,14 +90,46 @@ the login builder.
 
 ### Login Seeding
 
-During login (at `0x00262e00`):
+During login (in `jag::LoginManager::SendLoginPacketInner` at `0x00262eb0`):
 
 1. Generate 4 random seed ints (from `/dev/urandom` or `std::random_device`)
 2. Create client-to-server Isaac: `Init(isaac_out, seed[0..3])`
 3. Create server-to-client Isaac with modified seed:
-   `seed[i] += constant[i]` where constants are at `0x00dc37d0`
+   `seed[i] += delta[i]` where deltas are at `0x00dc8090`
    (a fixed 4-int delta added to derive the server's key from the client's)
 4. Store `isaac_out` at connection+0x40, `isaac_in` at connection+0x2B8
+
+### ISAAC Delta Constants (VERIFIED — rs2client rev 946)
+
+Address: `0x00dc8090` in `.rodata` (4 consecutive int32 values, little-endian)
+Xref: READ from `SendLoginPacketInner` at `0x00263d42`
+
+| Index | Decimal | Hex |
+|-------|---------|-----|
+| delta[0] | 50 | 0x00000032 |
+| delta[1] | 50 | 0x00000032 |
+| delta[2] | 50 | 0x00000032 |
+| delta[3] | 50 | 0x00000032 |
+
+All four deltas are the same value: **50**. This is the classic RuneScape ISAAC delta.
+
+The Ghidra decompilation shows the seeding as:
+```c
+// First ISAAC: client-to-server (raw XTEA key as seed)
+Isaac::Init(isaac_out, &this->field_0x48);
+
+// Second ISAAC: server-to-client (XTEA key + deltas)
+modified_seed[0] = this->field_0x48 + _DAT_00dc8090;   // + 50
+modified_seed[1] = this->field_0x4c + _UNK_00dc8094;   // + 50
+modified_seed[2] = this->field_0x50 + _UNK_00dc8098;   // + 50
+modified_seed[3] = this->field_0x54 + _UNK_00dc809c;   // + 50
+Isaac::Init(isaac_in, modified_seed);
+```
+
+**Server implementation note:** The server receives the 4 XTEA key ints from
+the RSA-decrypted login block. To create matching ISAAC ciphers:
+- Server recv cipher (decrypts client->server): `Init(seed[0..3])` (raw key)
+- Server send cipher (encrypts server->client): `Init(seed[i] + 50)` (key + delta)
 
 ---
 
@@ -163,7 +195,7 @@ ensure the XTEA operates on big-endian data regardless of platform.
 
 | Address | Function | Context |
 |---------|----------|---------|
-| 0x00262e00 | Login builder (lobby) | Encrypts login credentials |
+| 0x00262eb0 | SendLoginPacketInner (lobby) | Encrypts login credentials |
 | 0x00263e90 | Login builder (game world) | Encrypts login credentials |
 | 0x00249140 | Direct login builder | Encrypts auth data |
 | 0x003779c0 | CS2 opcode handler | Encrypts chat/command messages |

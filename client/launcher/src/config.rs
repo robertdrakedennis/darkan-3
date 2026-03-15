@@ -7,6 +7,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMode {
     Live,
+    Proxy,
     Custom,
 }
 
@@ -68,6 +69,10 @@ pub struct SavedSession {
     pub id_token: String,
     pub refresh_token: String,
     pub expiry: u64,
+    #[serde(default)]
+    pub accounts: Vec<crate::auth::types::Account>,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 pub struct Paths {

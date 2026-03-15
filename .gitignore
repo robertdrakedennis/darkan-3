@@ -69,3 +69,4 @@ worldConfig.json
 world/data/worldConfig.json
 mainlog.txt
 lobby-server.jar
+/capture/

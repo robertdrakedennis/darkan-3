@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeoutOrNull
 import org.darkan.core.EnvVars
+import org.darkan.core.Logger.logFinest
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logTrace
 import org.darkan.core.Logger.logWarn
@@ -35,7 +36,7 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
             if (!handshake(input, output, ip)) return
             requestLoop(input, output, ip)
         } finally {
-            logTrace("JS5 connection closed: $ip")
+            logFinest("JS5 connection closed: $ip")
             limiter.remove(ip)
         }
     }
@@ -114,7 +115,7 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
                     opcodeByte = withTimeoutOrNull(5000) { input.readByte() }
                     if (opcodeByte == null) {
                         val idleSec = (System.currentTimeMillis() - lastRequestTime) / 1000
-                        logInfo("JS5 idle ${idleSec}s after $requestCount requests from $ip")
+                        logFinest("JS5 idle ${idleSec}s after $requestCount requests from $ip")
                     }
                 }
 
@@ -129,7 +130,7 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
                         val index = input.readByte().toInt() and 0xFF
                         val group = input.readInt()
                         input.readInt() // padding
-                        logTrace("JS5 request: index=$index group=$group opcode=$opcode (${if (urgent) "urgent" else "prefetch"} pri=$priority) from $ip")
+                        logFinest("JS5 request: index=$index group=$group opcode=$opcode (${if (urgent) "urgent" else "prefetch"} pri=$priority) from $ip")
                         val ref = (index.toLong() shl 32) or (group.toLong() and 0xFFFFFFFFL)
                         val request = JS5Request(index, group, urgent, priority, ref)
                         val item = JS5QueueItem.FileRequest(request)
@@ -141,12 +142,12 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
                     }
 
                     opcode == RequestOpcode.STATUS_LOGGED_IN -> {
-                        logTrace("JS5 logged in from $ip")
+                        logFinest("JS5 logged in from $ip")
                         readControlPayload(input)
                     }
 
                     opcode == RequestOpcode.STATUS_LOGGED_OUT -> {
-                        logTrace("JS5 logged out from $ip")
+                        logFinest("JS5 logged out from $ip")
                         readControlPayload(input)
                     }
 
@@ -155,13 +156,13 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
                         input.readShort()
                         input.readInt()
                         input.readShort()
-                        logInfo("JS5 XOR key set to $key from $ip")
+                        logFinest("JS5 XOR key set to $key from $ip")
                         // Send to urgent channel so it's applied before any subsequent requests
                         urgentChannel.send(JS5QueueItem.XorKeyUpdate(key))
                     }
 
                     opcode == RequestOpcode.ACKNOWLEDGE -> {
-                        logTrace("JS5 ACK from $ip")
+                        logFinest("JS5 ACK from $ip")
                         readControlPayload(input)
                     }
 

@@ -8,6 +8,7 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import org.darkan.core.EnvVars
+import org.darkan.core.Logger.logFinest
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logTrace
 import org.darkan.core.Logger.logWarn
@@ -28,7 +29,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         server = embeddedServer(Netty, port = EnvVars.configHttpPort) {
             routing {
                 get("/ms") {
-                    logInfo("JS5 HTTP request: ${call.request.local.uri}")
+                    logFinest("JS5 HTTP request: ${call.request.local.uri}")
                     serveJs5Http(call)
                 }
                 post("/nxtclienterror.ws") {
@@ -45,6 +46,29 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
                     }
                     logWarn("=== END CRASH REPORT ===")
                     call.respondText("OK", ContentType.Text.Plain)
+                }
+                // Stub OAuth endpoints — the NXT client validates tokens against these
+                post("/shield/oauth/check_token") {
+                    logInfo("OAuth check_token request from ${call.request.local.remoteHost}")
+                    call.respondText(
+                        """{"valid":true,"token_type":"bearer","scope":"openid","expires_in":3600,"sub":"darkan-player","session_id":"darkan-session"}""",
+                        ContentType.Application.Json
+                    )
+                }
+                post("/game-session/v1/tokens") {
+                    logInfo("Game session token request from ${call.request.local.remoteHost}")
+                    call.respondText(
+                        """{"sessionId":"darkan-session","token":"darkan-game-token","expires":${System.currentTimeMillis() / 1000 + 3600}}""",
+                        ContentType.Application.Json
+                    )
+                }
+                // Catch-all for any other OAuth/auth endpoints the client may hit
+                post("{...}") {
+                    val path = call.request.local.uri
+                    logInfo("Unhandled POST: $path")
+                    val body = call.receiveText()
+                    logTrace("POST body: ${body.take(500)}")
+                    call.respondText("{}", ContentType.Application.Json)
                 }
                 get("{...}") {
                     val path = call.request.local.uri
@@ -96,15 +120,23 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
             call.respondText("Not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
             return
         }
-        // ALL HTTP JS5 responses go through GroupDownloaded which computes CRC over
-        // (responseBody.length - 2), expecting a 2-byte big-endian version suffix at the end.
-        // This applies to both archive indices (a=255) and group data (a!=255).
+        // HTTP JS5 responses must end with a 2-byte big-endian version suffix.
+        // The client computes CRC over (responseBody.length - 2) and verifies against the archive index.
+        //
+        // Some archives were downloaded via HTTP from Jagex, so the stored blob already
+        // contains the 2-byte suffix. Detect this by checking blob size vs container header.
         val version = call.request.queryParameters["v"]?.toIntOrNull() ?: 0
-        val response = ByteArray(data.size + 2)
-        System.arraycopy(data, 0, response, 0, data.size)
-        response[data.size] = ((version shr 8) and 0xFF).toByte()
-        response[data.size + 1] = (version and 0xFF).toByte()
-        logTrace("JS5 HTTP: a=$archive g=$group v=$version -> ${response.size} bytes (container=${data.size})")
+        val alreadyHasSuffix = blobHasVersionSuffix(data)
+        val response = if (alreadyHasSuffix) {
+            data // serve as-is — suffix already present
+        } else {
+            val buf = ByteArray(data.size + 2)
+            System.arraycopy(data, 0, buf, 0, data.size)
+            buf[data.size] = ((version shr 8) and 0xFF).toByte()
+            buf[data.size + 1] = (version and 0xFF).toByte()
+            buf
+        }
+        logFinest("JS5 HTTP: a=$archive g=$group v=$version -> ${response.size} bytes (container=${data.size}, suffix=${if (alreadyHasSuffix) "stored" else "appended"})")
         call.respondBytes(response, ContentType.Application.OctetStream)
     }
 
@@ -112,7 +144,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         val host = "localhost"
         val port = EnvVars.lobbyPort
 
-        fun line(s: String) { append(s); append("\r\n") }
+        fun line(s: String) { append(s); append("\n") }
 
         // General config
         line("title=${EnvVars.serverName}")
@@ -209,7 +241,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=22=")
         line("param=23=false")
         line("param=24=true")
-        line("param=25=0")                                    // ModeWhere=LIVE (HTTP port hardcoded to 80)
+        line("param=25=0")                                    // ModeWhere=LIVE (HTTP port patched by LD_PRELOAD)
         line("param=26=false")
         line("param=27=3")
         line("param=28=265964763")
@@ -236,18 +268,38 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=50=0")
         line("param=51=0")
         line("param=52=0")
-        line("param=53=https://auth.jagex.com/")
+        line("param=53=http://$host:${EnvVars.configHttpPort}/")   // auth base URL (was auth.jagex.com)
         line("param=54=https://payments.jagex.com/")
         line("param=55=")
-        line("param=56=https://social.auth.jagex.com/")
+        line("param=56=http://$host:${EnvVars.configHttpPort}/")   // social auth URL (was social.auth.jagex.com)
         line("param=57=6124")
         line("param=58=https://account.jagex.com/")
-        line("param=59=https://auth.runescape.com/")
+        line("param=59=http://$host:${EnvVars.configHttpPort}/")   // auth RS URL (was auth.runescape.com)
         line("param=60=0")
         line("param=99=${EnvVars.loginRsaModulusHex}")  // hex RSA modulus for client patcher
     }
 
     companion object {
+        /**
+         * Check if a cached JS5 blob already contains a 2-byte version suffix.
+         *
+         * Container format: [1B type][4B compressedSize BE][compressedData][if compressed: 4B decompressedSize]
+         * Expected container size = 5 + compressedSize + (if type != 0: 4 else 0)
+         * If the blob is exactly 2 bytes longer than that, it already has a version suffix
+         * (from being downloaded via HTTP from Jagex).
+         */
+        private fun blobHasVersionSuffix(data: ByteArray): Boolean {
+            if (data.size < 5) return false
+            val compressedSize = ((data[1].toInt() and 0xFF) shl 24) or
+                    ((data[2].toInt() and 0xFF) shl 16) or
+                    ((data[3].toInt() and 0xFF) shl 8) or
+                    (data[4].toInt() and 0xFF)
+            val type = data[0].toInt() and 0xFF
+            val headerSize = if (type != 0) 9 else 5  // compressed types have 4-byte decompressed size
+            val expectedContainerSize = headerSize + compressedSize
+            return data.size == expectedContainerSize + 2
+        }
+
         private fun computeBinaryCrc(path: String): Long {
             val file = java.io.File(path)
             if (!file.exists()) return 0L

@@ -60,6 +60,11 @@ object Logger {
         DARKAN_ROOT_LOGGER.log(Level.FINER, formatMessage(className, methodName, msg))
     }
 
+    fun Any.logFinest(msg: Any) {
+        val (className, methodName) = getCallerInfo()
+        DARKAN_ROOT_LOGGER.log(Level.FINEST, formatMessage(className, methodName, msg))
+    }
+
     @JvmStatic
     fun log(tag: String, message: Any) {
         DARKAN_ROOT_LOGGER.log(Level.INFO, "[$tag] $message")

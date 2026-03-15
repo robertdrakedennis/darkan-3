@@ -47,18 +47,19 @@ fn main() -> Result<()> {
     let runtime = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
     let _guard = runtime.enter();
 
-    // Refresh saved sessions on startup
+    // Refresh saved sessions on startup, then restore into active Session objects
     let creds = runtime.block_on(refresh_saved_sessions(creds, &paths));
+    let sessions = restore_sessions(&creds);
 
     // Channel for commands from IPC/async tasks to the event loop
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<AppCommand>();
 
-    let state = Arc::new(IpcState::new(cfg.clone(), creds, paths.clone(), cmd_tx));
+    let state = Arc::new(IpcState::new(cfg.clone(), creds, paths.clone(), cmd_tx, sessions));
 
     let main_window = WindowBuilder::new()
         .with_title("Bolt RS3")
-        .with_inner_size(tao::dpi::LogicalSize::new(520.0, 480.0))
-        .with_min_inner_size(tao::dpi::LogicalSize::new(400.0, 380.0))
+        .with_inner_size(tao::dpi::LogicalSize::new(520.0, 640.0))
+        .with_min_inner_size(tao::dpi::LogicalSize::new(400.0, 500.0))
         .build(&event_loop)
         .context("Failed to create main window")?;
 
@@ -174,6 +175,59 @@ fn main() -> Result<()> {
             _ => {}
         }
     });
+}
+
+/// Restore saved sessions from disk into active Session objects.
+/// Reconstructs locally from saved data — no Jagex API calls needed.
+fn restore_sessions(creds: &config::Credentials) -> Vec<auth::types::Session> {
+    let mut sessions = Vec::new();
+
+    for saved in &creds.sessions {
+        // Skip sessions that don't have saved accounts (pre-migration creds.json)
+        if saved.accounts.is_empty() {
+            log::warn!(
+                "Skipping session for {} — no saved accounts (re-login required)",
+                saved.display_name
+            );
+            continue;
+        }
+
+        let session_id = match &saved.session_id {
+            Some(id) => id.clone(),
+            None => {
+                log::warn!(
+                    "Skipping session for {} — no saved session_id (re-login required)",
+                    saved.display_name
+                );
+                continue;
+            }
+        };
+
+        log::info!(
+            "Restored session for {} ({} accounts)",
+            saved.display_name,
+            saved.accounts.len()
+        );
+        sessions.push(auth::types::Session {
+            user: auth::types::User {
+                id: None,
+                user_id: saved.user_id.clone(),
+                display_name: saved.display_name.clone(),
+                suffix: String::new(),
+            },
+            accounts: saved.accounts.clone(),
+            tokens: auth::types::AuthTokens {
+                access_token: saved.access_token.clone(),
+                id_token: saved.id_token.clone(),
+                refresh_token: saved.refresh_token.clone(),
+                sub: saved.user_id.clone(),
+                expiry: saved.expiry,
+            },
+            session_id,
+        });
+    }
+
+    sessions
 }
 
 /// Refresh any saved sessions that are near expiry

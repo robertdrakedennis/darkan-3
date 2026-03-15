@@ -81,12 +81,13 @@ impl IpcState {
         credentials: Credentials,
         paths: Arc<Paths>,
         cmd_tx: mpsc::UnboundedSender<AppCommand>,
+        initial_sessions: Vec<Session>,
     ) -> Self {
         Self {
             config: Mutex::new(config),
             credentials: Mutex::new(credentials),
             paths,
-            sessions: Mutex::new(Vec::new()),
+            sessions: Mutex::new(initial_sessions),
             cmd_tx,
         }
     }
@@ -169,6 +170,7 @@ impl IpcState {
         let cmd_tx = self.cmd_tx.clone();
         let close_after = config.close_after_launch;
         let custom_cmd = config.custom_launch_command.clone();
+        let is_proxy = matches!(config.server_mode, crate::config::ServerMode::Proxy);
         let config_uri = config
             .custom_config_uri
             .clone()
@@ -199,6 +201,20 @@ impl IpcState {
 
             let client = reqwest::Client::new();
 
+            // In proxy mode, fetch the proxy's jav_config to extract RSA modulus
+            let proxy_rsa_modulus = if is_proxy {
+                send_status("Proxy mode: fetching config from proxy...");
+                match crate::game::rs3::fetch_jav_config_params(&client, &config_uri).await {
+                    Ok(params) => crate::game::rs3::extract_rsa_modulus(&params),
+                    Err(e) => {
+                        send_error(&format!("Failed to fetch proxy jav_config: {}", e));
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
+
             // Check for updates
             send_status("Checking for updates...");
             let pkg_info = match crate::game::rs3::fetch_package_info(&client).await {
@@ -219,8 +235,9 @@ impl IpcState {
                             Some(&params),
                             &paths.data_dir,
                             custom_cmd.as_deref(),
-                            None, // live mode — no RSA patching
-                            None, // no working_dir for live mode
+                            proxy_rsa_modulus.as_deref(),
+                            None, // no working_dir for live/proxy mode
+                            is_proxy,
                         ) {
                             send_error(&format!("Failed to launch: {}", e));
                         } else {
@@ -283,8 +300,9 @@ impl IpcState {
                 Some(&params),
                 &paths.data_dir,
                 custom_cmd.as_deref(),
-                None, // live mode — no RSA patching
-                None, // no working_dir for live mode
+                proxy_rsa_modulus.as_deref(),
+                None, // no working_dir for live/proxy mode
+                is_proxy,
             ) {
                 Ok(()) => {
                     send_status("Game launched!");
@@ -460,6 +478,7 @@ impl IpcState {
                 custom_cmd.as_deref(),
                 rsa_modulus.as_deref(),
                 Some(&darkan_dir), // CWD = ~/darkan-3
+                false, // not proxy mode — full patching for private server
             ) {
                 Ok(()) => {
                     send_status("Game launched!");
@@ -519,6 +538,8 @@ impl IpcState {
                 id_token: session.tokens.id_token.clone(),
                 refresh_token: session.tokens.refresh_token.clone(),
                 expiry: session.tokens.expiry,
+                accounts: session.accounts.clone(),
+                session_id: Some(session.session_id.clone()),
             });
             let _ = crate::config::save_credentials(&self.paths.creds_file, &creds);
         }

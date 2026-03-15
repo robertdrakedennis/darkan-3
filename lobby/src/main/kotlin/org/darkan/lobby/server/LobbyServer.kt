@@ -13,7 +13,7 @@ import org.darkan.core.net.*
 import world.gregs.voidps.buffer.*
 import java.util.concurrent.Executors
 
-class LobbyServer(val js5: JS5Server) {
+class LobbyServer(val js5: JS5Server, val loginServer: LoginServer = LoginServer()) {
     private lateinit var job: Job
     private lateinit var dispatcher: ExecutorCoroutineDispatcher
     private lateinit var serverSocket: ServerSocket
@@ -70,6 +70,9 @@ class LobbyServer(val js5: JS5Server) {
             try {
                 when (val reqOpcode = input.readByte().toInt()) {
                     RequestOpcode.JS5_INIT -> js5.init(input, output, ip)
+                    RequestOpcode.CONNECT_LOGIN,
+                    RequestOpcode.LOGIN,
+                    RequestOpcode.LOBBY -> loginServer.handleLogin(input, output, ip, reqOpcode)
                     else -> {
                         logInfo("Connection from $ip with unhandled opcode: $reqOpcode (0x${"%02x".format(reqOpcode)})")
                         output.finish(ResponseOpcode.INVALID_LOGIN_SERVER)
