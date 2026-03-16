@@ -12,7 +12,13 @@ import org.darkan.core.Logger.logTrace
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.RequestOpcode
 import org.darkan.core.net.ResponseOpcode
+import org.darkan.core.net.prot.ClientProt
+import org.darkan.core.net.prot.ServerProt
+import org.darkan.core.net.session.GameSession
+import org.darkan.lobby.server.packet.LobbyPacketRegistry
+import org.darkan.lobby.server.packet.encoders.*
 import world.gregs.voidps.buffer.*
+import world.gregs.voidps.buffer.read.BufferReader
 import world.gregs.voidps.cache.secure.RSA
 import world.gregs.voidps.cache.secure.Xtea
 import java.math.BigInteger
@@ -158,7 +164,7 @@ class LoginServer {
         // Initialize ISAAC ciphers
         // Server recv cipher = raw XTEA keys (matches client's send cipher)
         // Server send cipher = XTEA keys + delta (matches client's recv cipher)
-        // VERIFIED from crypto.md — client creates out=raw, in=key+delta
+        // VERIFIED from crypto.md -- client creates out=raw, in=key+delta
         val inCipher = Isaac(isaacKeys.copyOf())
         val outKeys = isaacKeys.copyOf()
         for (i in outKeys.indices) outKeys[i] += EnvVars.ISAAC_DELTA
@@ -175,18 +181,23 @@ class LoginServer {
 
         logInfo("Login complete for $ip (lobby data: ${lobbyData.size} bytes)")
 
+        // Create session and enter lobby
+        val session = GameSession(input, output, inCipher, outCipher, ip)
+
         // Step 6: Send initial lobby packets
-        sendLobbyInitPackets(output, outCipher, ip)
+        sendLobbyInitPackets(session)
 
         // Step 7: Lobby session loop - read ISAAC-encrypted packets from client
-        lobbySessionLoop(input, output, ip, inCipher, outCipher)
+        lobbySessionLoop(session)
     }
 
     /**
      * Build the lobby login data blob.
      *
-     * Format from LoginStepHandleLoginData (step 150) in login-wire-format.md,
+     * Format from LoginStepHandleLoginData (step 150) in lobby-login-data.md,
      * VERIFIED from rs2client rev 946 decompilation.
+     *
+     * Strings use gjStr2 encoding: [1B ver=0x00][string][NUL]
      */
     private fun buildLobbyData(): ByteArray {
         val buf = java.io.ByteArrayOutputStream(128)
@@ -196,43 +207,45 @@ class LoginServer {
         fun p4(v: Int) { buf.write((v shr 24) and 0xFF); buf.write((v shr 16) and 0xFF); buf.write((v shr 8) and 0xFF); buf.write(v and 0xFF) }
         fun p8(v: Long) { p4((v shr 32).toInt()); p4(v.toInt()) }
         fun pStr(s: String) { buf.write(s.toByteArray(Charsets.ISO_8859_1)); buf.write(0) }
+        // gjStr2: versioned string = version byte (0x00) + null-terminated CP1252 string
+        fun pjStr2(s: String) { p1(0x00); pStr(s) }
 
         val nowMs = System.currentTimeMillis()
 
-        p1(0)                     // has_totp_update: no
-        p1(1)                     // membership_type: 1 = member
-        p1(30)                    // membership_days: 30
-        p1(1)                     // email_validated: yes (bool)
-        p3(0)                     // recovery_delay: 0 (medium, signed 24-bit)
-        p1(0)                     // staff_mod_flag: 0 = none
-        p1(0)                     // unknown_flag_1 (bool)
-        p1(0)                     // unknown_flag_2 (bool)
-        p8(nowMs * 1000)          // membership_timestamp (microseconds)
-        p1(0)                     // time_byte (high bits of time offset)
-        p4((nowMs / 1000).toInt()) // time_int (seconds since epoch, low 32 bits)
-        p1(0)                     // flags byte (bit 0 -> +0x29, bit 1 -> +0x28)
-        p4(0)                     // unknown_1
-        p4(0)                     // unknown_2
-        p2(1)                     // player_index
-        p2(0)                     // unknown_3
-        p2(0)                     // unknown_4
-        p4(0)                     // unknown_5
-        p1(0)                     // unknown_6
-        p2(0)                     // unknown_7
-        p2(0)                     // unknown_8
-        p1(1)                     // is_members_world (bool)
-        pStr("Player")            // display_name (null-terminated)
-        p1(0)                     // unknown_9
-        p4(0)                     // unknown_10
-        p2(0xFFFF)                // world_id (0xFFFF = -1 = no default world)
-        pStr("127.0.0.1")         // server_info string (null-terminated)
-        p2(1920)                  // screen_width
-        p2(1080)                  // screen_height
+        p1(0)                      // #1 hasTotpUpdate: no
+        p1(1)                      // #2 membershipType: 1 = member
+        p1(30)                     // #3 membershipDays: 30
+        p1(1)                      // #4 emailValidated: yes (bool)
+        p3(0)                      // #5 recoveryDelay: 0 (signed medium)
+        p1(0)                      // #6 staffModLevel: 0 = none
+        p1(0)                      // #7 unknownFlag1 (bool)
+        p1(0)                      // #8 unknownFlag2 (bool)
+        p8(nowMs)                  // #9 membershipTimestamp: Unix millis (NOT micros)
+        p1(0)                      // #10 timeDaysByte
+        p4((nowMs / 1000).toInt()) // #11 timeMillisInt (seconds since epoch, low 32 bits)
+        p1(0)                      // #12 flagsByte
+        p4(0)                      // #13 lastLoginIP
+        p4(5000)                   // #14 lastLoginDays (5000 = "long ago")
+        p2(1)                      // #15 playerIndex
+        p2(0)                      // #16 unknown3
+        p2(0)                      // #17 unknown4
+        p4(0)                      // #18 unknown5
+        p1(0)                      // #19 unknown6
+        p2(0)                      // #20 unknown7
+        p2(0)                      // #21 unknown8
+        p1(1)                      // #22 isMembersWorld (bool)
+        pjStr2("Player")           // #23 displayName (gjStr2: version + null-terminated)
+        p1(0)                      // #24 unknown9
+        p4(0)                      // #25 unknown10
+        p2(1)                      // #26 worldId (1 = world 1, from jav_config param=39)
+        pjStr2("localhost")        // #27 serverHostname (gjStr2: version + null-terminated)
+        p2(43594)                  // #28 gamePort
+        p2(443)                    // #29 httpsPort
         // CRITICAL: Session tokens MUST be stable across logins!
         // If tokens change, the client clears its entire JS5 disk cache (LoginStepHandleLoginData).
         // Using fixed tokens prevents cache wipe on every login.
-        p8(0x4461726B616E3333L)   // session_token_1 = "Darkan33" as ASCII
-        p8(0x5365727665723033L)   // session_token_2 = "Server03" as ASCII
+        p8(0x4461726B616E3333L)    // #30 sessionToken1 = "Darkan33" as ASCII
+        p8(0x5365727665723033L)    // #31 sessionToken2 = "Server03" as ASCII
 
         return buf.toByteArray()
     }
@@ -240,427 +253,139 @@ class LoginServer {
     /**
      * Send initial lobby packets to get the client to render the lobby UI.
      *
-     * Based on darkan reference pattern (design only, byte encoding from RE docs).
-     * All byte formats VERIFIED from variables.md (rev 946 binary).
+     * Sequence matches the Jagex live server capture (from variables-re.md):
+     * 1. RESET_ALL_VARPS -- clear all varps/varcs
+     * 2. IF_SETGRAPHIC(906) -- open lobby root interface (opcode 126, 19B)
+     * 3. IF_SETPOSITION x21 -- open sub-interfaces on 906's components (opcode 38, 23B)
+     * 4. SET_READY_FLAG -- signal server ready
+     * 5. UPDATE_IGNORELIST -- empty ignore list
+     * 6. SET_RUN_ENERGY -- energy=1
+     * 7. UPDATE_SITESETTINGS -- empty site settings
      */
-    private suspend fun sendLobbyInitPackets(output: ByteWriteChannel, cipher: Isaac, ip: String) {
-        // IF_OPENTOP — opcode 0x6C (108), size 6
-        // Format: g4s_alt2 (LE int, walkType) + g2 (BE ushort, interfaceId)
-        // VERIFIED from RE: entry at 0x016fdae0, handler at 0x00233c90
-        // NOTE: 0xCF was incorrectly identified as IF_OPENTOP — it's actually IF_SETPLAYERMODEL
-        val lobbyInterfaceId = 1477 // Modern RS3 lobby interface (rev 946+)
-        writeServerOpcode(output, IF_OPENTOP, cipher)
-        // walkType as little-endian int (0 = no walk, appropriate for lobby)
-        output.writeByte(0); output.writeByte(0); output.writeByte(0); output.writeByte(0)
-        // interfaceId as big-endian ushort
-        output.writeByte((lobbyInterfaceId shr 8) and 0xFF)
-        output.writeByte(lobbyInterfaceId and 0xFF)
-        logInfo("Sent IF_OPENTOP interface=$lobbyInterfaceId to $ip")
+    private suspend fun sendLobbyInitPackets(session: GameSession) {
+        // 1. RESET_ALL_VARPS
+        session.writeEmpty(ServerProt.RESET_ALL_VARPS)
+        logTrace("Sent RESET_ALL_VARPS to ${session.ip}")
 
-        // Vars from darkan reference lobby init pattern
-        sendVarpInt(output, cipher, 281, 1000)
-        sendVarpSmall(output, cipher, 2528, 1)
-        sendVarpSmall(output, cipher, 2567, 1)
+        // 2. Open lobby root interface
+        session.write(IfOpenTopLobbyEncoder(LOBBY_INTERFACE_ID))
+        logInfo("Sent IF_OPENTOP_LOBBY interface=$LOBBY_INTERFACE_ID to ${session.ip}")
 
-        // Varbits
-        sendVarbitSmall(output, cipher, 10242, 1)
-        sendVarbitSmall(output, cipher, 10243, 12)
-        sendVarbitSmall(output, cipher, 11162, 1)
-
-        // Varc 1919 = 1 (email validated flag)
-        sendVarcInt(output, cipher, 1919, 1)
-
-        // FRIENDLIST_LOADED — opcode 0x42 (66), var_short
-        // Darkan sends this to signal client that friend list is loaded
-        // Send with empty payload (no friends)
-        writeServerOpcode(output, FRIENDLIST_LOADED, cipher)
-        output.writeByte(0) // high byte of length
-        output.writeByte(0) // low byte of length (0 = empty)
-        logInfo("Sent FRIENDLIST_LOADED to $ip")
-
-        // UPDATE_FRIENDLIST — opcode 0xAE (174), var_short
-        // Empty friend list update
-        writeServerOpcode(output, UPDATE_FRIENDLIST, cipher)
-        output.writeByte(0) // high byte of length
-        output.writeByte(0) // low byte of length
-        logInfo("Sent UPDATE_FRIENDLIST to $ip")
-
-        // UPDATE_IGNORELIST — opcode 0x11 (17), var_short
-        // Empty ignore list
-        writeServerOpcode(output, UPDATE_IGNORELIST, cipher)
-        output.writeByte(0)
-        output.writeByte(0)
-        logInfo("Sent UPDATE_IGNORELIST to $ip")
-
-        // CHAT_FILTER_SETTINGS — opcode 0x6B (107), var_byte
-        // Send default chat filter (1 byte: filter setting = 0)
-        writeServerOpcode(output, CHAT_FILTER_SETTINGS, cipher)
-        output.writeByte(1) // payload length
-        output.writeByte(0) // filter setting
-        logInfo("Sent CHAT_FILTER_SETTINGS to $ip")
-
-        output.flush()
-        logInfo("Sent lobby init packets to $ip")
-    }
-
-    /**
-     * SET_VARBIT_SMALL — ServerProt opcode 72 (0x48), fixed 3 bytes.
-     *
-     * Handler reads: ushort BE id + byte value
-     */
-    private suspend fun sendVarbitSmall(output: ByteWriteChannel, cipher: Isaac, varbitId: Int, value: Int) {
-        writeServerOpcode(output, SET_VARBIT_SMALL, cipher)
-        // ushort BE: varbit id
-        output.writeByte((varbitId shr 8) and 0xFF)
-        output.writeByte(varbitId and 0xFF)
-        // byte: value
-        output.writeByte(value and 0xFF)
-    }
-
-    /**
-     * SET_VARC_INT — ServerProt opcode 2 (0x02), varShort.
-     *
-     * Handler reads: ushort BE varc_id + int BE value
-     */
-    private suspend fun sendVarcInt(output: ByteWriteChannel, cipher: Isaac, varcId: Int, value: Int) {
-        writeServerOpcode(output, SET_VARC_INT, cipher)
-        // Write varShort length header (6 bytes payload)
-        output.writeByte(0)  // high byte of length
-        output.writeByte(6)  // low byte of length
-        // ushort BE: varc id
-        output.writeByte((varcId shr 8) and 0xFF)
-        output.writeByte(varcId and 0xFF)
-        // int BE: value
-        output.writeByte((value shr 24) and 0xFF)
-        output.writeByte((value shr 16) and 0xFF)
-        output.writeByte((value shr 8) and 0xFF)
-        output.writeByte(value and 0xFF)
-    }
-
-    // --- ServerProt packet senders ---
-    // All byte formats from docs/net/serverprot/variables.md, VERIFIED from rs2client rev 946.
-
-    /**
-     * SET_VARP_SMALL — ServerProt opcode 14 (0x0E), fixed 3 bytes.
-     *
-     * Client reads:
-     *   varp_id = byte[0] * 256 + (byte[1] + 0x80)
-     *   value   = byte[2] - 0x80 (signed byte)
-     *
-     * Value range: -128..127 (signed byte after transform)
-     */
-    private suspend fun sendVarpSmall(output: ByteWriteChannel, cipher: Isaac, varpId: Int, value: Int) {
-        writeServerOpcode(output, SET_VARP_SMALL, cipher)
-        output.writeByte((varpId shr 8) and 0xFF)           // high byte of varpId
-        output.writeByte(((varpId and 0xFF) - 0x80) and 0xFF)  // low byte with +0x80 transform
-        output.writeByte((value + 0x80) and 0xFF)            // value with +0x80 bias
-    }
-
-    /**
-     * SET_VARP_INT — ServerProt opcode 124 (0x7C), fixed 6 bytes.
-     *
-     * Client reads:
-     *   varp_id = byte[1]*256 + byte[0] (little-endian ushort)
-     *   value   = 4-byte big-endian int
-     */
-    private suspend fun sendVarpInt(output: ByteWriteChannel, cipher: Isaac, varpId: Int, value: Int) {
-        writeServerOpcode(output, SET_VARP_INT, cipher)
-        // varpId as little-endian ushort
-        output.writeByte(varpId and 0xFF)
-        output.writeByte((varpId shr 8) and 0xFF)
-        // value as big-endian int
-        output.writeByte((value shr 24) and 0xFF)
-        output.writeByte((value shr 16) and 0xFF)
-        output.writeByte((value shr 8) and 0xFF)
-        output.writeByte(value and 0xFF)
-    }
-
-    /**
-     * Write an ISAAC-encrypted ServerProt opcode to the channel.
-     *
-     * Encoding (from emulator-guide.md):
-     * - Opcodes 0-127:   1 byte:  (opcode + isaac_val) & 0xFF
-     * - Opcodes 128-216: 2 bytes: ((opcode >> 8) + 128 + isaac_val) & 0xFF, (opcode + isaac_val) & 0xFF
-     *
-     * Lobby phase uses the full game ServerProt table (217 entries, opcodes 0-216).
-     */
-    private suspend fun writeServerOpcode(output: ByteWriteChannel, opcode: Int, cipher: Isaac) {
-        if (opcode >= 128) {
-            output.writeByte(((opcode shr 8) + 128 + cipher.nextInt()) and 0xFF)
-            output.writeByte((opcode + cipher.nextInt()) and 0xFF)
-        } else {
-            output.writeByte((opcode + cipher.nextInt()) and 0xFF)
+        // 3. Open all sub-interfaces
+        for ((parentComponent, subIfId) in LOBBY_SUB_INTERFACES) {
+            session.write(IfOpenSubEncoder(LOBBY_INTERFACE_ID, parentComponent, subIfId))
         }
-    }
+        logInfo("Sent ${LOBBY_SUB_INTERFACES.size}x IF_OPENSUB to ${session.ip}")
 
-    /**
-     * Read an ISAAC-decrypted ClientProt opcode from the channel.
-     *
-     * Decoding:
-     * - Read first byte, subtract isaac value, mask to 0xFF
-     * - If < 128: that's the opcode
-     * - If >= 128: read second byte, subtract another isaac value, combine
-     */
-    private suspend fun readClientOpcode(input: ByteReadChannel, cipher: Isaac): Int {
-        val first = ((input.readByte().toInt() and 0xFF) - cipher.nextInt()) and 0xFF
-        return if (first < 128) {
-            first
-        } else {
-            val second = ((input.readByte().toInt() and 0xFF) - cipher.nextInt()) and 0xFF
-            ((first - 128) shl 8) or second
-        }
+        // 4. SET_READY_FLAG
+        session.writeEmpty(ServerProt.SET_READY_FLAG)
+        logTrace("Sent SET_READY_FLAG to ${session.ip}")
+
+        // 5. UPDATE_IGNORELIST (empty)
+        session.write(UpdateIgnorelistEncoder())
+        logTrace("Sent UPDATE_IGNORELIST (empty) to ${session.ip}")
+
+        // 6. SET_RUN_ENERGY
+        session.write(SetRunEnergyEncoder(1))
+        logTrace("Sent SET_RUN_ENERGY to ${session.ip}")
+
+        // 7. UPDATE_SITESETTINGS (empty)
+        session.write(UpdateSiteSettingsEncoder())
+        logTrace("Sent UPDATE_SITESETTINGS (empty) to ${session.ip}")
+
+        session.flush()
+        logInfo("Sent lobby init packets to ${session.ip}")
     }
 
     /**
      * Read ISAAC-encrypted packets from the client in lobby state.
      *
-     * The lobby phase uses the 130-entry game ClientProt table (opcodes 0-129)
-     * for client→server packets. Verified from rs2client rev 946 binary.
+     * Uses [LobbyPacketRegistry] to dispatch packets to their decoders.
+     * Unregistered opcodes are logged but not fatal.
      */
-    private suspend fun lobbySessionLoop(
-        input: ByteReadChannel,
-        output: ByteWriteChannel,
-        ip: String,
-        inCipher: Isaac,
-        outCipher: Isaac
-    ) {
+    private suspend fun lobbySessionLoop(session: GameSession) {
         var packetCount = 0
         var lastKeepaliveSent = System.currentTimeMillis()
-        val KEEPALIVE_INTERVAL_MS = 15_000L
-        // ServerProt NO_TIMEOUT = opcode 0x92 (146), size 0
-        val SERVER_NO_TIMEOUT = 0x92
 
         try {
-            // Send initial NO_TIMEOUT to let client know we're alive
-            writeServerOpcode(output, SERVER_NO_TIMEOUT, outCipher)
-            output.flush()
-            logTrace("Sent initial NO_TIMEOUT to $ip")
-
-            // EXPERIMENT removed — LOGOUT proved ISAAC works but doesn't disconnect in lobby
+            // Send initial NOOP to let client know we're alive
+            session.writeEmpty(ServerProt.NOOP)
+            session.flush()
+            logTrace("Sent initial NOOP to ${session.ip}")
 
             while (true) {
-                val opcode = readClientOpcode(input, inCipher)
+                val opcode = session.readOpcode()
+                val prot = ClientProt.forOpcode(opcode)
 
-                if (opcode < 0 || opcode >= GAME_CLIENT_PROT_SIZES.size) {
-                    logError("Client opcode $opcode out of range from $ip — desync likely")
+                if (prot == null) {
+                    logError("Client opcode $opcode out of range from ${session.ip} -- desync likely")
                     break
                 }
 
-                val sizeInfo = GAME_CLIENT_PROT_SIZES[opcode]
-                val size = when (sizeInfo) {
-                    0 -> 0
-                    -1 -> input.readByte().toInt() and 0xFF       // VarByte
-                    -2 -> input.readShort().toInt() and 0xFFFF     // VarShort
-                    else -> sizeInfo                                // Fixed size
-                }
-
-                val payload = if (size > 0) {
-                    ByteArray(size).also { input.readFully(it, 0, size) }
-                } else {
-                    ByteArray(0)
-                }
-
+                val payload = session.readPayload(prot)
                 packetCount++
-                when (opcode) {
-                    15, 80 -> {
-                        // NO_TIMEOUT (15) / NO_TIMEOUT_2 (80) — client keepalive
-                        if (packetCount % 50 == 0) {
-                            logTrace("Keepalive #$packetCount from $ip")
-                        }
+
+                val decoder = LobbyPacketRegistry.get(opcode)
+                if (decoder != null) {
+                    decoder.decode(BufferReader(payload), session)
+                    if (packetCount % 50 == 0 && (opcode == ClientProt.NO_TIMEOUT.opcode || opcode == ClientProt.NO_TIMEOUT_2.opcode)) {
+                        logTrace("Keepalive #$packetCount from ${session.ip}")
                     }
-                    110 -> {
-                        // WORLDLIST_FETCH — client requests world list update
-                        // Payload is 4 bytes: int32 checksum of current world list
-                        val checksum = if (payload.size >= 4) {
-                            ((payload[0].toInt() and 0xFF) shl 24) or
-                            ((payload[1].toInt() and 0xFF) shl 16) or
-                            ((payload[2].toInt() and 0xFF) shl 8) or
-                            (payload[3].toInt() and 0xFF)
-                        } else 0
-                        logInfo("WORLDLIST_FETCH from $ip: checksum=0x${"%08x".format(checksum)}")
-                        // TODO: Send world list response
-                    }
-                    else -> {
-                        logInfo("Client packet from $ip: opcode=$opcode (0x${"%02x".format(opcode)}) size=$size payload=${payload.take(32).joinToString(" ") { "%02x".format(it) }}")
-                    }
+                } else {
+                    logInfo("Client packet from ${session.ip}: opcode=$opcode (0x${"%02x".format(opcode)}) size=${payload.size} payload=${payload.take(32).joinToString(" ") { "%02x".format(it) }}")
                 }
 
                 // Send periodic keepalives back to the client
                 val now = System.currentTimeMillis()
                 if (now - lastKeepaliveSent > KEEPALIVE_INTERVAL_MS) {
-                    writeServerOpcode(output, SERVER_NO_TIMEOUT, outCipher)
-                    output.flush()
+                    session.writeEmpty(ServerProt.NOOP)
+                    session.flush()
                     lastKeepaliveSent = now
                 }
 
-                // No experiment — just observe client behavior
-
                 if (packetCount > 100000) {
-                    logError("Too many packets from $ip, disconnecting")
+                    logError("Too many packets from ${session.ip}, disconnecting")
                     break
                 }
             }
         } catch (e: Exception) {
-            logTrace("Lobby session ended for $ip: ${e::class.simpleName}: ${e.message}")
+            logTrace("Lobby session ended for ${session.ip}: ${e::class.simpleName}: ${e.message}")
         }
-        logInfo("Lobby session closed for $ip after $packetCount packets")
+        logInfo("Lobby session closed for ${session.ip} after $packetCount packets")
     }
 
     companion object {
-        /**
-         * Game ClientProt sizes (130 entries, opcodes 0-129).
-         * VERIFIED from rs2client rev 946 binary (clientprot-table.md).
-         *
-         * The lobby phase reuses the game ClientProt table for client→server packets.
-         * Values: 0+ = fixed size, -1 = varByte, -2 = varShort.
-         */
-        private val GAME_CLIENT_PROT_SIZES = intArrayOf(
-            /* 0 */ -2,  // EVENT_APPLET_FOCUS
-            /* 1 */  9,  // EVENT_CAMERA_POSITION
-            /* 2 */  6,  // CAMERA_DIRECTION
-            /* 3 */ -2,  // VERIFIED_STRING_SEND
-            /* 4 */ -1,  // MESSAGE_PUBLIC (with effects)
-            /* 5 */ 15,  // OPNPC_T_LONG
-            /* 6 */  3,  // OPOBJ5
-            /* 7 */ -2,  // RESUME_COUNTDIALOG
-            /* 8 */  4,  // STRTOL_SEND
-            /* 9 */  3,  // OPNPC_T1
-            /* 10 */ -2, // RESUME_PAUSEBUTTON
-            /* 11 */  4, // (unknown)
-            /* 12 */ 16, // IF_BUTTON_T
-            /* 13 */  2, // (unknown)
-            /* 14 */  3, // OPOBJ7
-            /* 15 */  0, // NO_TIMEOUT
-            /* 16 */ 11, // OPLOC_T (long form)
-            /* 17 */ -1, // EVENT_MOUSE_CLICK
-            /* 18 */  8, // IF_BUTTON5
-            /* 19 */  3, // OPNPC_T2
-            /* 20 */  3, // OPOBJ1
-            /* 21 */  0, // MAP_BUILD_COMPLETE
-            /* 22 */  1, // (unknown)
-            /* 23 */  7, // OPNPC3
-            /* 24 */ -1, // CLIENT_CHEAT
-            /* 25 */  7, // OPNPC2
-            /* 26 */  7, // OPNPC1
-            /* 27 */ 12, // OPLOC_T
-            /* 28 */ -1, // DEVICE_INFO
-            /* 29 */ -1, // MESSAGE_PUBLIC
-            /* 30 */  3, // OPOBJ10
-            /* 31 */ -2, // EVENT_CAMERA_POSITION_2
-            /* 32 */ -1, // CS2_CALLBACK
-            /* 33 */  5, // MOVE_GAME (from minimenu)
-            /* 34 */  0, // QUEUED_PACKET
-            /* 35 */  3, // OPNPC_T5
-            /* 36 */  3, // OPNPC_T6
-            /* 37 */ 15, // OPLOC_T (extended form)
-            /* 38 */  9, // OPLOC_T1
-            /* 39 */ -1, // SOCIAL_REQUEST
-            /* 40 */  9, // OPLOC_T3
-            /* 41 */  0, // (unknown)
-            /* 42 */  3, // UNKNOWN_3BYTE_42
-            /* 43 */  9, // OPLOC_T6
-            /* 44 */ -2, // (unknown)
-            /* 45 */ -2, // EVENT_TELEMETRY
-            /* 46 */  3, // OPOBJ2
-            /* 47 */  8, // IF_BUTTON10
-            /* 48 */ -1, // EVENT_KEYBOARD
-            /* 49 */ -2, // DATA_REPORT_VARSHORT
-            /* 50 */  4, // SCENE_GRAPH_REPORT
-            /* 51 */  4, // CAMERA_ANGLE
-            /* 52 */ -2, // MESSAGE_PRIVATE
-            /* 53 */  9, // (unknown)
-            /* 54 */  8, // IF_BUTTON3
-            /* 55 */  1, // (unknown)
-            /* 56 */ -1, // RESUME_NAMEDIALOG
-            /* 57 */  9, // (unknown)
-            /* 58 */ 17, // OPPLAYER_T (extended)
-            /* 59 */  3, // OPOBJ8
-            /* 60 */  3, // OPOBJ6
-            /* 61 */  8, // IF_BUTTON7
-            /* 62 */ -1, // ENCODEDSTRING_SEND
-            /* 63 */  8, // IF_BUTTON9
-            /* 64 */  8, // IF_BUTTON6
-            /* 65 */  4, // SCENE_INTERACTION
-            /* 66 */  4, // EVENT_APPLET_FOCUS_2
-            /* 67 */ -1, // CLAN_JOINCHAT
-            /* 68 */  9, // OPLOC2_T
-            /* 69 */  3, // OPNPC4_T
-            /* 70 */  4, // OPLOC1
-            /* 71 */ -1, // ACTIVE_CHAT_PHRASE_SEND
-            /* 72 */  1, // (unknown)
-            /* 73 */ 18, // (unknown)
-            /* 74 */ -2, // ENCRYPTED_STRING_SEND2
-            /* 75 */ -2, // IF_BUTTON_TARGETMENU
-            /* 76 */  2, // SOUND_SONGEND
-            /* 77 */  7, // OPNPC5
-            /* 78 */ -1, // FRIENDLIST_ADD
-            /* 79 */  1, // (unknown)
-            /* 80 */  0, // NO_TIMEOUT_2
-            /* 81 */ -1, // ACTIVE_CHAT_PHRASE_SENDPRIVATE
-            /* 82 */  3, // WINDOW_STATUS
-            /* 83 */  1, // FOCUS_CHANGED
-            /* 84 */ -1, // OPOBJ_CS2_2
-            /* 85 */  7, // EVENT_MOUSE_MOVE
-            /* 86 */ -1, // MESSAGE_CLAN_CHAT
-            /* 87 */  0, // CLOSE_MODAL
-            /* 88 */  2, // SOUND_SONGSELECT
-            /* 89 */  5, // MOVE_SCRIPTED
-            /* 90 */  7, // OPNPC4
-            /* 91 */  3, // OPOBJ9
-            /* 92 */ 18, // MOVE_GAME (extended form)
-            /* 93 */ -1, // CLAN_LEAVECHAT
-            /* 94 */ -1, // OPLOC_CS2
-            /* 95 */  4, // DETECT_MODIFIED_CLIENT
-            /* 96 */  3, // OPOBJ4
-            /* 97 */  8, // IF_BUTTON1
-            /* 98 */ -1, // OPOBJ_CS2
-            /* 99 */  2, // AFFINEDTRANSFORM_SET
-            /* 100 */ 4, // (unknown)
-            /* 101 */ 9, // OPLOC4_T
-            /* 102 */-2, // MOVE_GAME
-            /* 103 */ 7, // OPNPC6
-            /* 104 */-1, // OPNPC_CS2
-            /* 105 */11, // OPOBJ_T
-            /* 106 */ 6, // DISPLAY_INFO
-            /* 107 */-1, // IF_BUTTONT
-            /* 108 */-2, // (unknown)
-            /* 109 */-1, // IGNORELIST_ADD
-            /* 110 */ 4, // WORLDLIST_FETCH
-            /* 111 */ 9, // OPLOC5_T
-            /* 112 */-1, // (unknown)
-            /* 113 */ 4, // RENDER_REPORT
-            /* 114 */22, // IF_BUTTON_TARGETMENU_SEND
-            /* 115 */ 3, // OPOBJ3
-            /* 116 */-1, // ENCRYPTED_STRING_SEND
-            /* 117 */ 6, // CLOSE_MODAL_COMPONENT
-            /* 118 */ 8, // IF_BUTTON2
-            /* 119 */-1, // OPPLAYER_CS2
-            /* 120 */11, // OPPLAYER_T
-            /* 121 */-1, // FRIENDLIST_DEL
-            /* 122 */16, // INTERFACE_INTERACTION
-            /* 123 */ 1, // BUG_REPORT
-            /* 124 */ 8, // IF_BUTTON8
-            /* 125 */ 3, // OPNPC3_T
-            /* 126 */-1, // (unknown)
-            /* 127 */-1, // ENCODEDSTRING_SEND2
-            /* 128 */ 8, // IF_BUTTON4
-            /* 129 */ 8, // STRTOLL_SEND
-        )
+        private const val KEEPALIVE_INTERVAL_MS = 15_000L
 
-        // --- ServerProt opcodes (from serverprot-table.md, rev 946) ---
-        const val NOOP = 0x92             // 146, size 0 — keepalive/no-op
-        const val SET_VARP_SMALL = 0x0E   // 14, size 3
-        const val SET_VARP_INT = 0x7C     // 124, size 6
-        const val SET_VARBIT_SMALL = 0x48 // 72, size 3 (handler reads: ushort BE id + byte value)
-        const val SET_VARBIT_INT = 0x33   // 51, size 6 (handler reads: int BE value + ushort BE id)
-        const val SET_VARC_INT = 0x02     // 2, var_short (reads: ushort BE id + int BE value)
-        const val IF_OPENTOP = 0x6C      // 108, size 6 (LE int walkType + BE ushort interfaceId) — VERIFIED: entry 0x016fdae0, handler 0x00233c90
-        const val FRIENDLIST_LOADED = 0x42 // 66, var_short — signals friend list loaded
-        const val UPDATE_FRIENDLIST = 0xAE // 174, var_short — friend list data
-        const val UPDATE_IGNORELIST = 0x11 // 17, var_short — ignore list data
-        const val CHAT_FILTER_SETTINGS = 0x6B // 107, var_byte — chat filter settings
-        const val RUN_CLIENTSCRIPT = 0x10 // 16, var_short — execute CS2 script
-        const val SERVER_TICK_END = 0xCB  // 203, size 8 — end of tick marker
-        const val LOGOUT = 0x86           // 134, size 0 — logout from game
+        /** Lobby root interface ID. 906 is used by Jagex live (from capture). */
+        private const val LOBBY_INTERFACE_ID = 906
+
+        /**
+         * Sub-interfaces opened on lobby interface 906 components.
+         * From Jagex live capture. Each pair is (parentComponent, subInterfaceId).
+         */
+        private val LOBBY_SUB_INTERFACES = listOf(
+            44 to 779,
+            45 to 782,
+            46 to 781,
+            48 to 784,
+            47 to 717,
+            49 to 783,
+            144 to 786,
+            145 to 787,
+            146 to 785,
+            154 to 943,
+            148 to 929,
+            149 to 954,
+            100 to 955,
+            101 to 953,
+            99 to 941,
+            151 to 952,
+            147 to 939,
+            51 to 957,
+            139 to 928,
+            171 to 1450,
+            140 to 945,
+        )
     }
 }
