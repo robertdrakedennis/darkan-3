@@ -73,5 +73,6 @@ subprojects {
         implementation("com.trivago:fastutil-concurrent-wrapper:0.2.2")
 
         implementation("io.github.classgraph:classgraph:4.8.179")
+        implementation("org.jetbrains.kotlin:kotlin-reflect:${findProperty("ktVersion")}")
     }
 }

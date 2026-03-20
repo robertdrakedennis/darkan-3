@@ -1,237 +1,67 @@
 package org.darkan.core.net.prot
 
 /**
- * All 217 ServerProt opcodes (0-216) for build 946-5.
- * Sizes verified from rs2client binary at `jag::ServerProt::RegisterAll` (0x00182030).
+ * Marker interface for all server-to-client packets.
  *
- * Size values: positive = fixed bytes, -1 = var_byte, -2 = var_short, 0 = no payload.
+ * Each packet is a data class (or value class for zero-payload packets) that
+ * carries its fields. The Codec registry maps each class to its opcode, size,
+ * and encoder lambda for a given revision.
  */
-enum class ServerProt(val opcode: Int, val size: Int) {
-    SET_UID(0, 28),
-    MESSAGE_GAME(1, -1),
-    SET_VARC_INT(2, -2),
-    OBJ_COUNT(3, 7),
-    IF_SETHIDE(4, 10),
-    MIDI_JINGLE(5, 10),
-    LOC_ANIM_SPECIFIC(6, 10),
-    IF_SETMODEL(7, 29),
-    IF_MOVESUB(8, 6),
-    SET_NPC_OP(9, -1),
-    MESSAGE_QUICKCHAT_CLANCHAT(10, -1),
-    CLANCHANNEL_FULL_CHAT(11, -2),
-    SET_VARC_INT_2(12, 6),
-    SET_PLAYER_OP_3(13, 1),
-    SET_VARP_SMALL(14, 3),
-    MESSAGE_PUBLIC(15, -2),
-    RUN_CLIENTSCRIPT(16, -2),
-    UPDATE_IGNORELIST(17, -2),
-    UPDATE_SITESETTINGS(18, -2),
-    SET_VARC_SMALL_2(19, 3),
-    IF_OPENSUB_ACTIVE(20, -2),
-    IF_SETANGLE(21, 32),
-    SET_TICK_TIMER(22, 2),
-    CAM_TARGET(23, 1),
-    MAP_PROJANIM(24, 20),
-    RESET_ENTITY_LISTS(25, 0),
-    IF_SETOBJECT_NONUM(26, 8),
-    SET_RUN_ENERGY(27, 1),
-    NPC_INFO_DECODE(28, -2),
-    CLANSETTINGS_FULL_2(29, -1),
-    LOC_ADD(30, -1),
-    MESSAGE_QUICKCHAT_CLANCHANNEL(31, -1),
-    RESET_CLIENT_STATE(32, 0),
-    SOUND_STOP_ALL(33, 0),
-    SOUND_MIXBUSS_SETLEVEL(34, 5),
-    SET_READY_FLAG(35, 0),
-    IF_SETPLAYERMODEL_OTHER(36, -2),
-    MESSAGE_QUICKCHAT_PRIVATE(37, -1),
-    IF_SETPOSITION(38, 23),
-    CLANSETTINGS_FULL(39, -2),
-    MESSAGE_FRIENDCHAT(40, -1),
-    LOC_ADD_CHANGE(41, 10),
-    PLAYER_INFO_DECODE(42, -2),
-    UPDATE_ZONE_PARTIAL(43, -2),
-    CAM_MOVETO(44, 6),
-    IF_SETSCROLLPOS(45, 5),
-    MESSAGE_CLANCHANNEL(46, -1),
-    MAP_FLAG_SET_PLAYER(47, 14),
-    IF_SETCOLOUR(48, 5),
-    MIDI_SONG(49, 10),
-    IF_SETOBJECT(50, 4),
-    SET_VARBIT_INT_2(51, 6),
-    CAM_FORCEANGLE(52, 1),
-    CUTSCENE_DATA(53, 35),
-    PROJANIM(54, 25),
-    CAM_SHAKE(55, 4),
-    MESSAGE_FRIENDCHANNEL(56, -1),
-    IF_SETTARGETPARAM(57, -2),
-    CAM_LOOKAT(58, 6),
-    IF_SETTEXT(59, 12),
-    RESET_VARC_SMALL(60, -1),
-    IF_SETTEXTFONT(61, 8),
-    IF_SETRECOL(62, 10),
-    CLANSETTINGS_DELTA(63, -2),
-    LOC_DEL(64, 2),
-    UPDATE_ZONE_FULL_FOLLOWS_2(65, -1),
-    PLAYER_OP(66, -2),
-    IF_SETMODEL_BODYTYPE(67, 25),
-    MESSAGE_QUICKCHAT_FRIENDCHAT(68, -1),
-    CAM_RESET(69, 0),
-    MIDI_SWAP(70, 5),
-    IF_SETPLAYERMODEL_BASECOLOUR(71, 8),
-    SET_VARBIT_SMALL_2(72, 3),
-    SET_PLAYER_CHAT_EFFECTS(73, 2),
-    IF_SETPLAYERMODEL_BODYTYPE(74, 8),
-    IF_SETRETEX(75, 10),
-    SOUND_AREA_SYNTH(76, 8),
-    IF_SETMODEL_ANIMATION(77, 4),
-    LOC_PREFETCH(78, 7),
-    CAM_LOOKAT_ARC(79, 6),
-    SET_MULTIWAY_STATE(80, 1),
-    UPDATE_INV_PARTIAL(81, -2),
-    LOC_CUSTOMISE(82, -1),
-    CLANCHANNEL_FULL(83, -2),
-    DETAIL_OPTIONS(84, -2),
-    SET_DISPLAY_INT(85, 4),
-    NPC_HEADICON_SPECIFIC(86, -1),
-    OBJ_ADD(87, 5),
-    RESET_VARC_SMALL_2(88, 3),
-    IF_SETCLICKMASK(89, 8),
-    UPDATE_ZONE_FULL_FOLLOWS(90, 3),
-    SPOTANIM_SPECIFIC(91, 12),
-    NOOP_UNHANDLED(92, -2),
-    IF_SETPLAYERMODEL(93, 10),
-    NPC_HITMARKS_AND_HEADBARS(94, 19),
-    CLANSETTINGS_DELTA_CHAT(95, -2),
-    CAM_MOVETO_ARC(96, 4),
-    SET_PLAYER_OP_2(97, 2),
-    OBJ_DEL(98, 3),
-    IF_TRIGGER_CLOSE(99, 0),
-    IF_SETNPCMODEL(100, 10),
-    REMOVE_TRACKED_ENTRY(101, 3),
-    SET_NPC_UPDATE_ORIGIN(102, 1),
-    SET_PLAYER_GROUP(103, 10),
-    DESTROY_ZONE_DATA(104, 0),
-    IF_SETPLAYERMODEL_SELF(105, 8),
-    IF_SETANIM(106, 4),
-    CHAT_FILTER_SETTINGS(107, -1),
-    IF_SETOBJECT_ALWAYSNUM(108, 6),
-    REBUILD_NORMAL_HANDLER(109, -2),
-    CAM_UPDATE(110, -2),
-    NOOP_VAR(111, -1),
-    RESET_ALL_VARPS(112, 0),
-    IF_SETMODEL_COLOUR(113, 10),
-    UPDATE_STAT(114, 6),
-    RESET_VARC_INT(115, 6),
-    IF_SETMODEL_RECOLOUR(116, 25),
-    SOUND_GROUP(117, 11),
-    CAM_SMOOTHRESET(118, 0),
-    IF_SETPLAYERMODEL_ANIM(119, 8),
-    UPDATE_ZONE_PARTIAL_FOLLOWS(120, 3),
-    UPDATE_INV_FULL(121, -2),
-    MAP_ANIM(122, 11),
-    CLANCHANNEL_DELTA(123, -1),
-    SET_VARP_INT(124, 6),
-    IF_SETTEXT2(125, 8),
-    IF_SETGRAPHIC(126, 19),
-    OBJ_REVEAL(127, 7),
-    IF_SETOBJECT_ACTIVE(128, 3),
-    SET_MAP_FLAG(129, 6),
-    MESSAGE_PRIVATE(130, -1),
-    LOGOUT_TRANSFER(131, 0),
-    LOC_MERGE(132, 5),
-    CREATE_CHECK_EMAIL_REPLY(133, 1),
-    LOGOUT(134, 0),
-    SET_WEIGHT(135, 1),
-    SOUND_GROUP_STOP(136, 2),
-    IF_SETNPCMODEL_ANIM(137, 9),
-    SET_VARP_LONG(138, 10),
-    SET_PLAYER_GROUP_2(139, 4),
-    IF_SETOBJECT_NONUM_2(140, 5),
-    UPDATE_ZONE_FULL_FOLLOWS_3(141, -2),
-    WORLDENTITY_INFO_V4(142, 1),
-    SET_CAMERA_TARGET(143, 8),
-    SET_SYSUPDATE_TIMER(144, 4),
-    IF_SETHIDE_ACTIVE(145, 8),
-    NOOP(146, 0),
-    PROJANIM_SPECIFIC_HALT(147, 29),
-    UPDATE_PLAYER_CHAT(148, -2),
-    SET_WORLD_TARGET(149, -1),
-    WORLDLIST_FETCH_REPLY(150, -2),
-    MINIMAP_TOGGLE(151, 3),
-    UPDATE_IGNORELIST_2(152, -1),
-    WORLDENTITY_INFO_V2(153, 2),
-    UPDATE_PLAYER_GROUP(154, -2),
-    UPDATE_URL_STRING(155, -1),
-    WORLDENTITY_INFO_V1(156, 6),
-    WORLDENTITY_INFO_V3(157, 3),
-    SYNTH_SOUND(158, 12),
-    MAP_PROJANIM_HALT(159, 28),
-    SOUND_GROUP_SPEED(160, 6),
-    SET_INTERACTION_FLAG_B(161, 1),
-    IF_SETGRAPHIC_ACTIVE(162, -1),
-    REBUILD_PLAYERINFO_POSITIONS(163, -2),
-    SET_CHAT_FILTER_A(164, 1),
-    NPC_ANIM_SPECIFIC(165, 9),
-    MIDI_STOP(166, 0),
-    SKIP_2_BYTES(167, 2),
-    UPDATE_INV_GROUP(168, -2),
-    SET_INTERACTION_FLAG_C(169, 1),
-    NOOP_VAR_2(170, -2),
-    SET_URL_STRING(171, -1),
-    IF_SETNPCMODEL_ACTIVE(172, 5),
-    IF_OPENSUB_2(173, -2),
-    NPC_INFO_2(174, -2),
-    SET_INTERACTION_FLAG_D(175, 3),
-    IF_SETPLAYERMODEL_EXACTMOVE(176, 14),
-    REBUILD_REGION_HANDLER(177, -2),
-    REBUILD_WORLDENTITY(178, -2),
-    FRIENDCHAT_SYSUPDATE(179, 2),
-    IF_CLOSESUB(180, 5),
-    SET_NPC_UPDATE_FLAG(181, 1),
-    IF_OPENSUB(182, 5),
-    SET_VARC_COORD_2(183, 10),
-    SOUND_AREA_SYNTH_2(184, 4),
-    MAP_PROJANIM_2(185, 33),
-    REBUILD_NORMAL(186, -2),
-    SET_TRIGGER_VAR(187, 4),
-    SET_CHAT_FILTER_B(188, 1),
-    PLAYER_INFO_DECODE_2(189, -2),
-    IF_SETTEXT_ACTIVE(190, 3),
-    CLEAR_MAP_FLAG(191, 2),
-    SKIP_DATA(192, -2),
-    SPOTANIM_SPECIFIC_2(193, 15),
-    MAP_ANIM_SPECIFIC(194, 14),
-    IF_SETMODEL_ACTIVE(195, 3),
-    UNUSED_NOOP(196, -2),
-    IF_MOVESUB_ACTIVE(197, 3),
-    SOUND_AREA(198, -1),
-    FRIENDCHAT_JOIN(199, -1),
-    SOUND_MODIFY(200, 4),
-    MESSAGE_PRIVATE_ECHO(201, -1),
-    IF_SETEVENTS(202, 9),
-    SERVER_TICK_END(203, 8),
-    CREATE_CHECK_NAME_REPLY(204, 1),
-    REMOVE_PLAYER_FROM_LIST(205, 1),
-    CLEAR_PENDING_UPDATES(206, 0),
-    IF_OPENTOP(207, 2),
-    WORLDENTITY_INFO_V5(208, 3),
-    VORBIS_PRELOAD(209, 4),
-    IF_SETRECOL_ACTIVE(210, 4),
-    REBUILD_REGION(211, 5),
-    TRIGGER_ONDIALOGABORT_2(212, 0),
-    VORBIS_SONG(213, 6),
-    PROJANIM_SPECIFIC(214, 21),
-    URL_OPEN(215, 3),
-    SOUND_STOP(216, 2),
-    ;
+interface ServerProt
 
-    companion object {
-        private val BY_OPCODE = arrayOfNulls<ServerProt>(217).also { a ->
-            entries.forEach { a[it.opcode] = it }
-        }
+// --- Variables ---
 
-        fun forOpcode(opcode: Int): ServerProt? =
-            if (opcode in BY_OPCODE.indices) BY_OPCODE[opcode] else null
-    }
+data class VarpSmall(val id: Int, val value: Int) : ServerProt
+data class VarpLarge(val id: Int, val value: Int) : ServerProt
+data class VarpLong(val id: Int, val value: Long) : ServerProt
+data class ClientSetVarcSmall(val id: Int, val value: Int) : ServerProt
+data class ClientSetVarcLarge(val id: Int, val value: Int) : ServerProt
+data class UpdateStat(val skillId: Int, val xp: Int, val level: Int) : ServerProt
+
+@JvmInline
+value class ClearVarps(val dummy: Int = 0) : ServerProt
+
+// --- Interfaces ---
+
+data class IfOpenTopLobby(val interfaceId: Int) : ServerProt
+data class IfOpenSubLobby(val parentIfId: Int, val parentComp: Int, val subIfId: Int) : ServerProt
+
+// --- Misc ---
+
+@JvmInline
+value class SetReadyFlag(val dummy: Int = 0) : ServerProt
+
+@JvmInline
+value class KeepAlive(val dummy: Int = 0) : ServerProt
+
+data class RunEnergy(val energy: Int) : ServerProt
+
+@JvmInline
+value class UpdateIgnoreList(val dummy: Int = 0) : ServerProt
+
+// --- Social ---
+
+/**
+ * UPDATE_FRIENDLIST (opcode 18, varShort) — jag::ServerProt::UPDATE_FRIENDLIST.
+ * Sends friend list entries. Each entry has display name, world, rank, flags, notes.
+ * Fields 7-9 (worldName, platform, worldFlags) only present when worldId > 0.
+ * RE-verified from rs2client rev 946 handler at 0x00242840.
+ */
+data class UpdateFriendList(val friends: List<FriendEntry>) : ServerProt {
+    data class FriendEntry(
+        val warnMessage: Int = 0,
+        val displayName: String,
+        val previousName: String = "",
+        val worldId: Int = 0,
+        val fcRank: Int = 0,
+        val flags: Int = 0,
+        val worldName: String = "",
+        val platform: Int = 0,
+        val worldFlags: Int = 0,
+        val notes: String = "",
+    )
 }
+
+// --- World list ---
+
+data class WorldListPacket(val checksum: Int) : ServerProt

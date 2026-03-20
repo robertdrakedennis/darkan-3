@@ -124,6 +124,16 @@ suspend fun ByteWriteChannel.writeRSString(value: String) {
     writeByte(0)
 }
 
+suspend fun ByteWriteChannel.writePrefixedString(value: String) {
+    writeByte(0)
+    writeFully(value.toByteArray())
+    writeByte(0)
+}
+
+suspend fun ByteWriteChannel.skip(count: Int) {
+    repeat(count) { writeByte(0) }
+}
+
 suspend fun ByteWriteChannel.writeJagString(value: String) {
     writeByte(0)
     writeRSString(value)

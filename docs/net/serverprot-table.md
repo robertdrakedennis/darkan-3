@@ -39,7 +39,7 @@ renamed to `jag::ServerProt::<NAME>` (e.g., `jag::ServerProt::IF_OPENTOP` at `0x
 |  15 | 0x0F | var_short | MESSAGE_PUBLIC | Chat | `0x001ee310` |
 |  16 | 0x10 | var_short | RUN_CLIENTSCRIPT | Chat | `0x001e6460` |
 |  17 | 0x11 | var_short | UPDATE_IGNORELIST | Social | `0x00235b20` |
-|  18 | 0x12 | var_short | UPDATE_SITESETTINGS | SiteSettings | `0x00242840` |
+|  18 | 0x12 | var_short | UPDATE_SITESETTINGS | SiteSettings | `0x00242840` | `[VERIFIED]` Friends list update; old name FRIEND_STATUS. See `docs/net/serverprot/update-sitesettings.md` |
 |  19 | 0x13 | 3 | SET_VARC_SMALL_2 | Variables | `0x001c2220` | `[VERIFIED]` handler = SET_VARC_SMALL; was SET_VARC_COORD in 946-3 |
 |  20 | 0x14 | var_short | IF_OPENSUB_ACTIVE | Interfaces | `0x0024ade0` |
 |  21 | 0x15 | 32 | IF_SETANGLE | Interfaces | `0x0027e350` |

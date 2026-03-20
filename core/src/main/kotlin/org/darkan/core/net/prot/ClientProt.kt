@@ -1,150 +1,19 @@
 package org.darkan.core.net.prot
 
 /**
- * All 130 ClientProt opcodes (0-129) for build 946.
- * Sizes verified from rs2client binary and working LoginServer.
+ * Marker interface for all client-to-server packets.
  *
- * Size values: positive = fixed bytes, -1 = var_byte, -2 = var_short, 0 = no payload.
+ * Each packet is a data class (or value class for zero-payload packets) that
+ * carries decoded fields. The Codec registry maps opcodes to their size and
+ * decoder lambda for a given revision.
  */
-enum class ClientProt(val opcode: Int, val size: Int) {
-    EVENT_APPLET_FOCUS(0, -2),
-    EVENT_CAMERA_POSITION(1, 9),
-    CAMERA_DIRECTION(2, 6),
-    VERIFIED_STRING_SEND(3, -2),
-    MESSAGE_PUBLIC_EFFECTS(4, -1),
-    OPNPC_T_LONG(5, 15),
-    OPOBJ5(6, 3),
-    RESUME_COUNTDIALOG(7, -2),
-    STRTOL_SEND(8, 4),
-    OPNPC_T1(9, 3),
-    RESUME_PAUSEBUTTON(10, -2),
-    UNKNOWN_11(11, 4),
-    IF_BUTTON_T(12, 16),
-    UNKNOWN_13(13, 2),
-    OPOBJ7(14, 3),
-    NO_TIMEOUT(15, 0),
-    OPLOC_T_LONG(16, 11),
-    EVENT_MOUSE_CLICK(17, -1),
-    IF_BUTTON5(18, 8),
-    OPNPC_T2(19, 3),
-    OPOBJ1(20, 3),
-    MAP_BUILD_COMPLETE(21, 0),
-    UNKNOWN_22(22, 1),
-    OPNPC3(23, 7),
-    CLIENT_CHEAT(24, -1),
-    OPNPC2(25, 7),
-    OPNPC1(26, 7),
-    OPLOC_T(27, 12),
-    DEVICE_INFO(28, -1),
-    MESSAGE_PUBLIC(29, -1),
-    OPOBJ10(30, 3),
-    EVENT_CAMERA_POSITION_2(31, -2),
-    CS2_CALLBACK(32, -1),
-    MOVE_GAME_MINIMENU(33, 5),
-    QUEUED_PACKET(34, 0),
-    OPNPC_T5(35, 3),
-    OPNPC_T6(36, 3),
-    OPLOC_T_EXTENDED(37, 15),
-    OPLOC_T1(38, 9),
-    SOCIAL_REQUEST(39, -1),
-    OPLOC_T3(40, 9),
-    UNKNOWN_41(41, 0),
-    UNKNOWN_3BYTE_42(42, 3),
-    OPLOC_T6(43, 9),
-    UNKNOWN_44(44, -2),
-    EVENT_TELEMETRY(45, -2),
-    OPOBJ2(46, 3),
-    IF_BUTTON10(47, 8),
-    EVENT_KEYBOARD(48, -1),
-    DATA_REPORT_VARSHORT(49, -2),
-    SCENE_GRAPH_REPORT(50, 4),
-    CAMERA_ANGLE(51, 4),
-    MESSAGE_PRIVATE(52, -2),
-    UNKNOWN_53(53, 9),
-    IF_BUTTON3(54, 8),
-    UNKNOWN_55(55, 1),
-    RESUME_NAMEDIALOG(56, -1),
-    UNKNOWN_57(57, 9),
-    OPPLAYER_T_EXTENDED(58, 17),
-    OPOBJ8(59, 3),
-    OPOBJ6(60, 3),
-    IF_BUTTON7(61, 8),
-    ENCODEDSTRING_SEND(62, -1),
-    IF_BUTTON9(63, 8),
-    IF_BUTTON6(64, 8),
-    SCENE_INTERACTION(65, 4),
-    EVENT_APPLET_FOCUS_2(66, 4),
-    CLAN_JOINCHAT(67, -1),
-    OPLOC2_T(68, 9),
-    OPNPC4_T(69, 3),
-    OPLOC1(70, 4),
-    ACTIVE_CHAT_PHRASE_SEND(71, -1),
-    UNKNOWN_72(72, 1),
-    UNKNOWN_73(73, 18),
-    ENCRYPTED_STRING_SEND2(74, -2),
-    IF_BUTTON_TARGETMENU(75, -2),
-    SOUND_SONGEND(76, 2),
-    OPNPC5(77, 7),
-    FRIENDLIST_ADD(78, -1),
-    UNKNOWN_79(79, 1),
-    NO_TIMEOUT_2(80, 0),
-    ACTIVE_CHAT_PHRASE_SENDPRIVATE(81, -1),
-    WINDOW_STATUS(82, 3),
-    FOCUS_CHANGED(83, 1),
-    OPOBJ_CS2_2(84, -1),
-    EVENT_MOUSE_MOVE(85, 7),
-    MESSAGE_CLAN_CHAT(86, -1),
-    CLOSE_MODAL(87, 0),
-    SOUND_SONGSELECT(88, 2),
-    MOVE_SCRIPTED(89, 5),
-    OPNPC4(90, 7),
-    OPOBJ9(91, 3),
-    MOVE_GAME_EXTENDED(92, 18),
-    CLAN_LEAVECHAT(93, -1),
-    OPLOC_CS2(94, -1),
-    DETECT_MODIFIED_CLIENT(95, 4),
-    OPOBJ4(96, 3),
-    IF_BUTTON1(97, 8),
-    OPOBJ_CS2(98, -1),
-    AFFINEDTRANSFORM_SET(99, 2),
-    UNKNOWN_100(100, 4),
-    OPLOC4_T(101, 9),
-    MOVE_GAME(102, -2),
-    OPNPC6(103, 7),
-    OPNPC_CS2(104, -1),
-    OPOBJ_T(105, 11),
-    DISPLAY_INFO(106, 6),
-    IF_BUTTONT(107, -1),
-    UNKNOWN_108(108, -2),
-    IGNORELIST_ADD(109, -1),
-    WORLDLIST_FETCH(110, 4),
-    OPLOC5_T(111, 9),
-    UNKNOWN_112(112, -1),
-    RENDER_REPORT(113, 4),
-    IF_BUTTON_TARGETMENU_SEND(114, 22),
-    OPOBJ3(115, 3),
-    ENCRYPTED_STRING_SEND(116, -1),
-    CLOSE_MODAL_COMPONENT(117, 6),
-    IF_BUTTON2(118, 8),
-    OPPLAYER_CS2(119, -1),
-    OPPLAYER_T(120, 11),
-    FRIENDLIST_DEL(121, -1),
-    INTERFACE_INTERACTION(122, 16),
-    BUG_REPORT(123, 1),
-    IF_BUTTON8(124, 8),
-    OPNPC3_T(125, 3),
-    UNKNOWN_126(126, -1),
-    ENCODEDSTRING_SEND2(127, -1),
-    IF_BUTTON4(128, 8),
-    STRTOLL_SEND(129, 8),
-    ;
+interface ClientProt
 
-    companion object {
-        private val BY_OPCODE = arrayOfNulls<ClientProt>(130).also { a ->
-            entries.forEach { a[it.opcode] = it }
-        }
+@JvmInline
+value class Ping(val dummy: Int = 0) : ClientProt
 
-        fun forOpcode(opcode: Int): ClientProt? =
-            if (opcode in BY_OPCODE.indices) BY_OPCODE[opcode] else null
-    }
-}
+data class RequestWorldList(val worldlistVersion: Int) : ClientProt
+
+/** Catch-all for opcodes we haven't implemented handlers for yet. */
+@JvmInline
+value class UnhandledClientProt(val dummy: Int = 0) : ClientProt

@@ -15,3 +15,12 @@ val currentTimeTicks get() = System.currentTimeMillis() / 600L
 fun String.formatPlayerNameForProtocol(): String {
     return this.lowercase().replace(" ", "_")
 }
+
+fun getClasses(packageName: String): List<Class<*>> =
+    io.github.classgraph.ClassGraph()
+        .enableClassInfo()
+        .acceptPackages(packageName)
+        .scan().use { scanResult ->
+            scanResult.allClasses
+                .map { it.loadClass() }
+        }

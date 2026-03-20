@@ -38,6 +38,8 @@ object EnvVars {
     val configHttpPort: Int = dotenv.get("CONFIG_HTTP_PORT", "8829").toInt()
     val clientBinaryPath: String = dotenv.get("CLIENT_BINARY_PATH", "./data/client/rs2client")
     val logLevel: String = dotenv.get("LOG_LEVEL", "TRACE")
+    val packetQueueCapacity: Int = dotenv.get("PACKET_QUEUE_CAPACITY", "100").toInt()
+    val packetValidateSizes: Boolean = dotenv.get("PACKET_VALIDATE_SIZES", "true").toBooleanStrict()
 
     // ISAAC delta: added to XTEA key ints to derive server->client cipher seed
     // VERIFIED from rs2client rev 946 at 0x00dc8090 — all four values are 50
