@@ -14,6 +14,5 @@ value class Ping(val dummy: Int = 0) : ClientProt
 
 data class RequestWorldList(val worldlistVersion: Int) : ClientProt
 
-/** Catch-all for opcodes we haven't implemented handlers for yet. */
-@JvmInline
-value class UnhandledClientProt(val dummy: Int = 0) : ClientProt
+/** Catch-all for opcodes we haven't implemented handlers for yet. Carries opcode for logging. */
+data class UnhandledClientProt(val opcode: Int, val name: String, val size: Int) : ClientProt

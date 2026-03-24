@@ -41,7 +41,7 @@ fun main() {
 
     var liveHost: String? = null
     var liveToken: String? = null
-    var liveMajor = 946
+    var liveMajor = 947
     var liveMinor = 1
 
     if (configText != null) {
@@ -69,7 +69,7 @@ fun main() {
         val sv = config["server_version"]
         if (sv != null) {
             val parts = sv.split(".")
-            liveMajor = parts.getOrNull(0)?.toIntOrNull() ?: 946
+            liveMajor = parts.getOrNull(0)?.toIntOrNull() ?: 947
             liveMinor = parts.getOrNull(1)?.toIntOrNull() ?: 1
         }
         println("Live: host=$liveHost, version=$liveMajor.$liveMinor, token=$liveToken")
@@ -79,7 +79,7 @@ fun main() {
     println("\n${"=".repeat(70)}")
     println("Connecting to LOCAL server (localhost:43594)...")
     val localResults = try {
-        captureFiles("localhost", 43594, 946, 1, "ev9+VAp5/tMKeNR/7MOuH6lKWS+rGkHK", FILES_TO_COMPARE)
+        captureFiles("localhost", 43594, 947, 1, "ev9+VAp5/tMKeNR/7MOuH6lKWS+rGkHK", FILES_TO_COMPARE)
     } catch (e: Exception) {
         println("ERROR connecting to local: ${e.message}")
         emptyMap()

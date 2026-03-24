@@ -5,6 +5,7 @@ import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logWarn
 import org.darkan.core.getClasses
 import org.darkan.core.net.prot.ClientProt
+import org.darkan.core.net.prot.UnhandledClientProt
 import java.lang.reflect.ParameterizedType
 
 interface PacketHandler<T, K : ClientProt> {
@@ -48,9 +49,13 @@ object PacketHandlers {
      */
     @Suppress("UNCHECKED_CAST")
     fun <T> handleBlocking(player: T, packet: ClientProt) {
+        if (packet is UnhandledClientProt) {
+            logWarn("Unhandled ClientProt: opcode=${packet.opcode} name=${packet.name} size=${packet.size}")
+            return
+        }
         val handler = PACKET_HANDLERS[packet::class.java] as? PacketHandler<T, ClientProt>
         if (handler == null) {
-            logWarn("No handler found for packet: ${packet::class.java.simpleName} (${packet::class.java.name}), registered keys: ${PACKET_HANDLERS.keys.map { it.simpleName }}")
+            logWarn("No handler for ${packet::class.java.simpleName}")
             return
         }
         runBlocking { handler.handle(player, packet) }

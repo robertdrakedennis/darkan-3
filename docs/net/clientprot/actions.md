@@ -1,5 +1,7 @@
 # ClientProt: Action Packets
 
+> **Rev 947-1**: Opcodes and many sizes changed significantly from 946. See `clientprot-table.md` for the 947-1 table.
+
 Entity interaction packets sent when the player interacts with game objects (locations), NPCs, other players, or ground items.
 
 ## OPLOC (Location/Object Actions)

@@ -1,13 +1,20 @@
-# ServerProt: UPDATE_SITESETTINGS (Opcode 18)
+# ServerProt: UPDATE_FRIENDLIST
+
+> **Name correction**: This packet was previously mislabeled `UPDATE_SITESETTINGS`.
+> The verified Jagex name is `jag::ServerProt::UPDATE_FRIENDLIST` (from librs2client.so).
 
 ## Summary
 
 | Field | Value |
 |-------|-------|
-| **Opcode** | 18 (0x12) |
+| **Opcode (rev 946)** | 18 (0x12) |
+| **Opcode (rev 947)** | 102 (0x66) |
 | **Size** | var_short |
-| **Handler Address** | `0x00242840` (rs2client rev 946) |
-| **Data Address** | `0x016e91c0` |
+| **Handler Address (946)** | `0x00242840` (rs2client rev 946) |
+| **Handler Address (947)** | `0x00247a60` (rs2client rev 947) |
+| **Handler Wrapper (947)** | `FUN_00191190` (thin wrapper calling `UPDATE_SITESETTINGS`) |
+| **ProtEntry Address (947)** | `DAT_016ec820` |
+| **Data Address** | `0x016e91c0` (946) |
 | **Category** | SiteSettings |
 | **Client Subsystem** | `__DT_SYMTAB[0x49a]` (RelationshipManager / SiteSettings) |
 | **Direction** | Server -> Client |
@@ -187,7 +194,8 @@ writeString("")           // notes
 
 | Source | Name | Notes |
 |--------|------|-------|
-| rs2client (rev 946, NXT) | UPDATE_SITESETTINGS | Handler at `0x00242840`, Ghidra-verified |
+| rs2client (rev 946, NXT) | UPDATE_SITESETTINGS | Handler at `0x00242840`, opcode 18, Ghidra-verified |
+| rs2client (rev 947, NXT) | UPDATE_SITESETTINGS | Handler at `0x00247a60`, opcode 102, Ghidra-verified |
 | cheddarcheese (old Java client deob) | FRIEND_STATUS | Opcode 74, same format minus `notes` field |
 | Darkan 2 server | FRIEND_STATUS | `FriendStatus.java` encoder, same format minus `notes` |
 | librs2client.so (rev ~890) | `jag::packethandlers::Friends` | 3 handler lambdas for friends packets |
@@ -195,10 +203,13 @@ writeString("")           // notes
 ## Verified Against
 
 - **rs2client** (rev 946, stripped) on Ghidra port 8082 -- handler fully decompiled and traced
+- **rs2client** (rev 947, stripped) on Ghidra port 8083 -- handler decompiled, structurally identical to 946, opcode verified via ProtEntry at `DAT_016ec820`
 - **cheddarcheese** Java client deob -- `PacketDecoder.java` FRIEND_STATUS handler (lines 1951-2051)
 - **Darkan 2 server** -- `FriendStatus.java` encoder (confirms server-side field order)
 
 ## Key Ghidra Functions
+
+### Rev 946 (rs2client.946-5, port 8082)
 
 | Address | Name | Purpose |
 |---------|------|---------|
@@ -209,3 +220,34 @@ writeString("")           // notes
 | `0x00327d00` | eastl::string::assign | String copy/assign |
 | `0x001c5cb0` | string compare | Compares eastl::string to C string |
 | `0x001e7210` | UI trigger dispatch | Notifies listeners of friends list change |
+
+### Rev 947 (rs2client.947-1, port 8083)
+
+| Address | Name | Purpose |
+|---------|------|---------|
+| `0x00247a60` | UPDATE_SITESETTINGS handler | Main packet handler (structurally identical to 946) |
+| `0x00191190` | Handler wrapper | Thin wrapper calling UPDATE_SITESETTINGS |
+| `0x00cd5710` | gStringCP1252ToUTF8 | Reads null-terminated CP1252 string |
+| `0x001c1480` | gT<unsigned_int> | Reads big-endian unsigned int |
+| `0x002ac2f0` | eastl::string::assign | String copy/assign |
+| `0x001c10a0` | string compare | Compares eastl::string to C string |
+| `0x001e9ee0` | UI trigger dispatch | Notifies listeners of friends list change |
+
+## Rev 947 Opcode Derivation
+
+The opcode was determined by tracing the handler registration chain:
+
+1. `jag::packethandlers::SiteSettings::UPDATE_SITESETTINGS` at `0x00247a60` is the inner handler
+2. `FUN_00191190` at `0x00191190` is a thin wrapper that calls it
+3. In `BindHandlers` at `0x001185aa`, the wrapper is stored at `DAT_016ec848` (ProtEntry base + 0x28)
+4. The ProtEntry base is `DAT_016ec820`, created by `InitEntry(&DAT_016ec820, 0x66, -2)`
+5. First arg = address, second = opcode (0x66 = 102), third = size (-2 = var_short)
+
+ProtEntry structure layout (0x40 bytes):
+- `+0x00`: opcode (int32)
+- `+0x04`: size (int32, -1 = var_byte, -2 = var_short)
+- `+0x08`: name string pointer
+- `+0x10`: chain/back pointer (set by BindHandlers)
+- `+0x18`: auxiliary data
+- `+0x20`: setup function pointer
+- `+0x28`: handler function pointer

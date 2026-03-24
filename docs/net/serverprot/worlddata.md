@@ -1,5 +1,7 @@
 # ServerProt: WorldData Category
 
+> **Rev 947-1**: Opcodes reshuffled from 946. See `serverprot-table.md` for current opcode/size table.
+
 ## Overview
 
 The WorldData packet handler category contains a single handler for setting the game world target (hostname and ports for world switching). Registered inline in `BindHandlers` (0x0011852a), not via a separate constructor call.

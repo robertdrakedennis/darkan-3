@@ -55,6 +55,10 @@ pub fn extract_rs3_binary(deb_bytes: &[u8], output: &Path) -> Result<()> {
                 .read_to_end(&mut buf)
                 .context("Failed to read game binary from tar")?;
 
+            // Unlink first to avoid ETXTBSY if a previous instance is still running.
+            if output.exists() {
+                let _ = std::fs::remove_file(output);
+            }
             std::fs::write(output, &buf).context("Failed to write game binary")?;
 
             #[cfg(unix)]

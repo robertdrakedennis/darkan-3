@@ -1,5 +1,7 @@
 # ServerProt: ZoneUpdates Category
 
+> **Rev 947-1**: Opcodes reshuffled from 946. See `serverprot-table.md` for current opcode/size table.
+
 Packet handlers for zone-specific map updates. These handlers are registered by
 `jag::packethandlers::ZoneUpdates::ZoneUpdates(jag::Client &)` at address `0x0014c4c8`.
 

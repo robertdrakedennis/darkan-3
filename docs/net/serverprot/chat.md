@@ -1,5 +1,11 @@
 # Chat ServerProt Handlers
 
+> **Rev 947-1 update**: All opcodes reshuffled. Key verified 947 opcodes:
+> MESSAGE_GAME=105, MESSAGE_PUBLIC=45, MESSAGE_PRIVATE=151, MESSAGE_PRIVATE_ECHO=129,
+> RUNCLIENTSCRIPT=101, CHAT_FILTER_SETTINGS=39, MESSAGE_CLANCHANNEL_SYSTEM=125,
+> MESSAGE_FRIENDCHANNEL=7, FRIENDCHAT_JOIN=179.
+> See `serverprot-table.md` for the full 947-1 opcode/size table.
+
 Category: `jag::packethandlers::Chat`
 Symbol dump: 14 lambdas (E_ through E12_) in `jag::packethandlers::Chat::Chat(jag::Client &)`
 Additional: 2 lambdas in `jag::packethandlers::FriendChat::FriendChat(jag::Client &)`

@@ -11,6 +11,13 @@ class Codec {
     val clientProtsByOpcode = mutableMapOf<Int, ClientProtCodec<*>>()
     private val opcodeToClassMap = mutableMapOf<Int, KClass<out ClientProt>>()
 
+    /** Opcode-indexed metadata for ALL server prots (name + size), for proxy/debug use. */
+    val serverProtInfo = mutableMapOf<Int, ProtInfo>()
+    /** Opcode-indexed metadata for ALL client prots (name + size), for proxy/debug use. */
+    val clientProtInfo = mutableMapOf<Int, ProtInfo>()
+
+    data class ProtInfo(val name: String, val size: ProtSize)
+
     data class ServerProtCodec(
         val opcode: Int,
         val size: ProtSize,
@@ -33,6 +40,7 @@ class Codec {
             size = size,
             encoder = encoder?.let { { output -> (this as T).it(output) } }
         )
+        serverProtInfo[opcode] = ProtInfo(T::class.simpleName ?: "UNKNOWN_$opcode", size)
     }
 
     internal inline fun <reified T : ServerProt> serverProt(
@@ -40,26 +48,33 @@ class Codec {
         size: Int,
         noinline encoder: (suspend T.(ByteWriteChannel) -> Unit)? = null
     ) {
+        val protSize = ProtSize.Fixed(size)
         serverProts[T::class] = ServerProtCodec(
             opcode = opcode,
-            size = ProtSize.Fixed(size),
+            size = protSize,
             encoder = encoder?.let { { output -> (this as T).it(output) } }
         )
+        serverProtInfo[opcode] = ProtInfo(T::class.simpleName ?: "UNKNOWN_$opcode", protSize)
     }
 
     internal inline fun <reified T : ClientProt> clientProt(opcodes: IntArray, size: ProtSize = ProtSize.Fixed(0), noinline decoder: (suspend Source.(Int) -> T)? = null) {
         val codec = ClientProtCodec(size, decoder, T::class)
+        val name = T::class.simpleName ?: "UNKNOWN"
         opcodes.forEach { opcode ->
             clientProtsByOpcode[opcode] = codec
             opcodeToClassMap[opcode] = T::class
+            clientProtInfo[opcode] = ProtInfo(name, size)
         }
     }
 
     internal inline fun <reified T : ClientProt> clientProt(opcodes: IntArray, size: Int, noinline decoder: (suspend Source.(Int) -> T)? = null) {
-        val codec = ClientProtCodec(ProtSize.Fixed(size), decoder, T::class)
+        val protSize = ProtSize.Fixed(size)
+        val codec = ClientProtCodec(protSize, decoder, T::class)
+        val name = T::class.simpleName ?: "UNKNOWN"
         opcodes.forEach { opcode ->
             clientProtsByOpcode[opcode] = codec
             opcodeToClassMap[opcode] = T::class
+            clientProtInfo[opcode] = ProtInfo(name, protSize)
         }
     }
 
@@ -108,6 +123,27 @@ class Codec {
         }
         return constructor.callBy(args)
     }
+
+    /** Register opcode metadata (name + size) without an encoder. For proxy/debug framing. */
+    internal fun serverProtStub(opcode: Int, name: String, size: ProtSize) {
+        serverProtInfo.putIfAbsent(opcode, ProtInfo(name, size))
+    }
+
+    internal fun serverProtStub(opcode: Int, name: String, size: Int) {
+        serverProtInfo.putIfAbsent(opcode, ProtInfo(name, ProtSize.Fixed(size)))
+    }
+
+    /** Get the size (as int: fixed=N, varByte=-1, varShort=-2) for a server opcode. */
+    fun serverProtSize(opcode: Int): Int = serverProtInfo[opcode]?.size?.toInt() ?: 0
+
+    /** Get the name for a server opcode. */
+    fun serverProtName(opcode: Int): String = serverProtInfo[opcode]?.name ?: "UNKNOWN_$opcode"
+
+    /** Get the size (as int) for a client opcode. */
+    fun clientProtSize(opcode: Int): Int = clientProtInfo[opcode]?.size?.toInt() ?: 0
+
+    /** Get the name for a client opcode. */
+    fun clientProtName(opcode: Int): String = clientProtInfo[opcode]?.name ?: "UNKNOWN_$opcode"
 
     companion object {
         private val codecs = mutableMapOf<Int, Codec>()

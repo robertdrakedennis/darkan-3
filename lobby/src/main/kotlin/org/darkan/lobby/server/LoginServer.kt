@@ -15,6 +15,7 @@ import org.darkan.core.Logger.logTrace
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.RequestOpcode
 import org.darkan.core.net.ResponseOpcode
+import org.darkan.core.model.IFEvents
 import org.darkan.core.net.prot.*
 import org.darkan.core.net.prot.handler.PacketHandlers
 import org.darkan.core.net.session.GameSession
@@ -176,7 +177,7 @@ class LoginServer {
         logInfo("Login complete for $ip (lobby data: ${lobbyData.size} bytes)")
 
         // Create session with codec
-        val codec = Codec.get(946) ?: error("Rev946 codec not registered!")
+        val codec = Codec.get(947) ?: error("Rev947 codec not registered!")
         val session = GameSession(output, inCipher, outCipher, ip, codec)
 
         // Step 6: Send initial lobby packets
@@ -242,7 +243,7 @@ class LoginServer {
         logTrace("Sent ${DEFAULT_STATS.size}x UPDATE_STAT to ${session.ip}")
 
         // 2. RESET_ALL_VARPS
-        session.send(ClearVarps())
+        session.send(ResetClientVarcache())
 
         // 3. SET_VARP — all varps from Jagex live capture
         for ((id, value) in lobbyVarps) {
@@ -272,8 +273,13 @@ class LoginServer {
         }
         logTrace("Sent ${preInterfaceVarcs.size + postInterfaceVarcs.size}x SET_VARC to ${session.ip}")
 
-        // 7. SET_RUN_ENERGY → SET_READY_FLAG → UPDATE_IGNORELIST → UPDATE_SITESETTINGS
-        session.send(RunEnergy(1))
+        // 7. IF_SETEVENTS — from 947-1 capture: settings=0, comp varies, ifId=907, fromSlot=1, settings=2
+        for (comp in LOBBY_SETEVENTS_COMPONENTS) {
+            session.send(IfSetEvents(IFEvents(LOBBY_SETEVENTS_INTERFACE, comp, 1, 0, LOBBY_SETEVENTS_SETTINGS)))
+        }
+
+        // 8. SET_RUN_ENERGY → SET_READY_FLAG → UPDATE_IGNORELIST → UPDATE_FRIENDLIST
+        session.send(UpdateRunenergy(1))
         session.send(SetReadyFlag())
         session.send(UpdateIgnoreList())
         session.send(UpdateFriendList(TEST_FRIENDS))
@@ -301,7 +307,7 @@ class LoginServer {
 
         try {
             // Send initial keepalive
-            session.send(KeepAlive())
+            session.send(NoTimeout())
             session.flush()
             logTrace("Sent initial NOOP to ${session.ip}")
 
@@ -318,7 +324,7 @@ class LoginServer {
                 // Send periodic keepalives
                 val now = System.currentTimeMillis()
                 if (now - lastKeepaliveSent > KEEPALIVE_INTERVAL_MS) {
-                    session.send(KeepAlive())
+                    session.send(NoTimeout())
                     session.flush()
                     lastKeepaliveSent = now
                 }
@@ -339,28 +345,29 @@ class LoginServer {
 
         private const val LOBBY_INTERFACE_ID = 906
 
+        // Sub-interface IDs from live Jagex 947-1 capture (2026-03-23)
         private val LOBBY_SUB_INTERFACES = listOf(
-            44 to 779,
-            45 to 782,
-            46 to 781,
-            48 to 784,
-            47 to 717,
-            49 to 783,
-            144 to 786,
-            145 to 787,
-            146 to 785,
-            154 to 943,
-            148 to 929,
-            149 to 954,
-            100 to 955,
-            101 to 953,
-            99 to 941,
-            151 to 952,
-            147 to 939,
-            51 to 957,
-            139 to 928,
-            171 to 1450,
-            140 to 945,
+            44 to 907,
+            45 to 910,
+            46 to 909,
+            48 to 912,
+            47 to 589,
+            49 to 911,
+            144 to 914,
+            145 to 915,
+            146 to 913,
+            154 to 815,
+            148 to 803,
+            149 to 822,
+            100 to 825,
+            101 to 821,
+            99 to 808,
+            151 to 820,
+            147 to 811,
+            51 to 826,
+            139 to 801,
+            171 to 1322,
+            140 to 814,
         )
 
         private val DEFAULT_STATS: List<Triple<Int, Int, Int>> = buildList {
@@ -369,6 +376,11 @@ class LoginServer {
                 else add(Triple(i, 0, 1))
             }
         }
+
+        /** Components on interface 907 that receive IF_SETEVENTS during lobby init (from 947-1 capture). */
+        private const val LOBBY_SETEVENTS_INTERFACE = 907
+        private val LOBBY_SETEVENTS_COMPONENTS = intArrayOf(39, 75, 46, 101)
+        private const val LOBBY_SETEVENTS_SETTINGS = 0x0002  // from capture: last 2 bytes = 02 00 LE = 2
 
         /** Hardcoded test friends for lobby development. */
         private val TEST_FRIENDS = listOf(

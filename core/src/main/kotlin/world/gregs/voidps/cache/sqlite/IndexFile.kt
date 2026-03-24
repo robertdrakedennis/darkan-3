@@ -100,6 +100,23 @@ class IndexFile(path: Path) : Closeable {
         }
     }
 
+    /** Returns map of archiveId -> (version, crc) for all stored archives. */
+    fun allVersions(): Map<Int, Pair<Int, Int>> {
+        return try {
+            connection?.prepareStatement("SELECT KEY, VERSION, CRC FROM cache")?.use { stmt ->
+                stmt.executeQuery().use { result ->
+                    val map = mutableMapOf<Int, Pair<Int, Int>>()
+                    while (result.next()) {
+                        map[result.getInt(1)] = result.getInt(2) to result.getInt(3)
+                    }
+                    map
+                }
+            } ?: emptyMap()
+        } catch (e: SQLException) {
+            emptyMap()
+        }
+    }
+
     fun putRaw(archiveId: Int, data: ByteArray, version: Int, crc: Int) {
         try {
             connection?.prepareStatement(

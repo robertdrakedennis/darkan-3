@@ -4,7 +4,7 @@ import kotlinx.coroutines.runBlocking
 import org.darkan.core.EnvVars
 import org.darkan.core.Logger
 import org.darkan.core.net.prot.handler.PacketHandlers
-import org.darkan.core.net.prot.revision.rev946.register946
+import org.darkan.core.net.prot.revision.rev947.register947
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.file.FileProvider
 import world.gregs.voidps.cache.file.prefetchKeys
@@ -23,8 +23,8 @@ fun main() {
     Logger.log("Main", "Log level: ${EnvVars.logLevel}")
 
     // Register protocol codec and packet handlers
-    register946()
-    Logger.log("Main", "Registered rev946 codec")
+    register947()
+    Logger.log("Main", "Registered rev947 codec")
     PacketHandlers.loadHandlersFromPackage("org.darkan.lobby.server.packet")
 
     Logger.log("Main", "Loading cache...")

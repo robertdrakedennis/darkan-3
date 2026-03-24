@@ -1,5 +1,7 @@
 # Audio ServerProt Handlers
 
+> **Rev 947-1**: Opcodes reshuffled from 946. See `serverprot-table.md` for current opcode/size table.
+
 Category: `jag::packethandlers::Audio`
 Symbol dump: 16 lambdas (E_ through E14_) in `jag::packethandlers::Audio::Audio(jag::Client &)`
 Client subsystem reference: `__DT_SYMTAB[0x4a2]` (SoundManager object)

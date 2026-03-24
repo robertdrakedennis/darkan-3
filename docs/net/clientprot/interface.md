@@ -1,5 +1,7 @@
 # ClientProt: Interface Packets
 
+> **Rev 947-1**: Opcodes and many sizes changed significantly from 946. See `clientprot-table.md` for the 947-1 table.
+
 Packets related to interface (UI) interactions, button clicks, dialog responses, and modal management.
 
 ## IF_BUTTON System

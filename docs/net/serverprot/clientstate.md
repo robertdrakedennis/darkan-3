@@ -1,5 +1,7 @@
 # ServerProt: ClientState Category
 
+> **Rev 947-1**: Opcodes reshuffled from 946. See `serverprot-table.md` for current opcode/size table.
+
 ## Overview
 
 The ClientState packet handler category manages map rebuilds, world entity operations, minimap toggling, zone data lifecycle, and connection state flags. The primary constructor is at `0x0014d50c` (`jag::packethandlers::ClientState::ClientState`), which binds 12 lambda handlers to ServerProt globals in the address range `0x016f41e0` - `0x016f44a0`. An additional 4 ClientState handlers (CLEAR_PENDING_UPDATES, DESTROY_ZONE_DATA, RESET_CLIENT_STATE, UPDATE_ZONE_PARTIAL) are registered by the Variables constructor at `0x0014ce1e`. Two more handlers (SET_TICK_TIMER, SET_READY_FLAG) are registered inline in `BindHandlers` (0x0011852a).

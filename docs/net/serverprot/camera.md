@@ -1,5 +1,7 @@
 # Camera ServerProt Handlers
 
+> **Rev 947-1**: Opcodes reshuffled from 946. See `serverprot-table.md` for current opcode/size table.
+
 Category: `jag::packethandlers::Camera`
 Symbol dump: 10 lambdas (E_ through E8_) in `jag::packethandlers::Camera::Camera(jag::Client &)`
 Client subsystem reference: `__DT_SYMTAB[0x491]` (Camera object)

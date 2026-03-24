@@ -1,8 +1,11 @@
 # ServerProt: Variables Category
 
+> **Rev 947-1 update**: Opcodes reshuffled, some byte transforms changed. See `serverprot-947-matched.md`
+> for detailed byte transform changes (UPDATE_STAT, VARP_SMALL, VARP_LARGE, CLIENT_SETVARC_LARGE all changed).
+> See `serverprot-table.md` for the canonical 947-1 opcode/size table.
+
 Packet handlers for all variable-related server protocol opcodes. These handlers
-are registered by `jag::packethandlers::Variables::Variables(jag::Client &)` at
-address `0x0014ce1e`.
+are registered by the Variables constructor at `0x0014d28c` (947-1).
 
 The constructor also registers several `ClientState` handlers and `StatTable::UpdateStat`
 alongside the variable handlers. All are documented below.

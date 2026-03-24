@@ -1,5 +1,7 @@
 # ClientProt: Miscellaneous Packets
 
+> **Rev 947-1**: Opcodes and many sizes changed significantly from 946. See `clientprot-table.md` for the 947-1 table.
+
 All client-to-server packets not categorized under Actions, Interface, or Movement.
 
 ## Event Packets

@@ -1,37 +1,33 @@
-# Lobby ServerProt Handler Mapping (Build 946)
+# Lobby ServerProt Handler Mapping (Build 947-1)
 
-Binary: rs2client (rev 946, STRIPPED) — verified in Ghidra on port 8080.
-Cross-referenced with: librs2client.so (rev ~890, HAS SYMBOLS) on port 8081.
+> **Name convention update**: Some names in this doc use fabricated RE names.
+> See `serverprot-table.md` for canonical names.
+
+Binary: rs2client (rev 947-1, STRIPPED) — verified in Ghidra on port 8083.
+Cross-referenced with: rs2client (rev 946-5) on port 8082, librs2client.so (rev ~890) on port 8080.
 
 ## Architecture: Lobby Handlers Share the Game ServerProt Table
 
-**Critical finding:** Lobby handlers are NOT in a separate protocol table. They share the same `g_serverProtVector` (216 entries at `0x016ea080`) used during game phase. The `BindHandlers` function at `0x0011a400` binds handler functions to ServerProt entries, and the same entries serve both lobby and game phases.
-
-The 18 entries in `g_clientProtVector` at `0x016e9fc0` are **zone update sub-opcodes** (LOC_ANIM, OBJ_ADD, LOC_DEL, etc.), NOT lobby entries. They are dispatched by `UPDATE_ZONE_PARTIAL` during game phase.
+**Critical finding:** Lobby handlers are NOT in a separate protocol table. They share the same `g_serverProtVector` (218 entries at `0x016ee0a0`) used during game phase. The `BindHandlers` function at `0x001185aa` binds handler functions to ServerProt entries, and the same entries serve both lobby and game phases.
 
 ### How Lobby Packets Work
 
-During the lobby phase, the client uses TcpIn to dispatch incoming packets through `g_serverProtVector`, the exact same dispatch path as game-phase packets. Lobby-specific handlers are among the 216 ServerProt entries. There is no separate "lobby ServerProt table."
+During the lobby phase, the client uses TcpIn to dispatch incoming packets through `g_serverProtVector`, the exact same dispatch path as game-phase packets. Lobby-specific handlers are among the 218 ServerProt entries. There is no separate "lobby ServerProt table."
 
-This means the server must register all 216 ServerProt opcodes even during the lobby phase (or at minimum, the client expects valid entries for all opcodes that could arrive during lobby).
+This means the server must register all 218 ServerProt opcodes even during the lobby phase (or at minimum, the client expects valid entries for all opcodes that could arrive during lobby).
 
-## Confirmed Lobby Handler Mappings (rev 946)
+## Confirmed Lobby Handler Mappings (rev 947-1)
 
-These handlers were identified by decompiling unnamed `_M_invoke` functions from `BindHandlers` and matching their behavior patterns to the 8 known lobby handlers from the old binary (`jag::packethandlers::Lobby::Lobby` in librs2client.so).
+Handlers identified from BindHandlers at `0x001185aa` with named handler functions, cross-referenced with RegisterAll at `0x00181e10` for opcodes/sizes.
 
-### Definitively Matched (3 of 8)
+### Definitively Matched
 
-| Rev 946 Opcode | Size | Entry Base | Invoke Function | Handler Name | Matching Signature |
-|----------------|------|------------|-----------------|--------------|-------------------|
-| 0x92 | 0 (fixed) | `0x016e8000` | `FUN_00212df0` | **NO_TIMEOUT** | `return &DAT_016e94e0;` (trivial return = PacketError::NONE) |
-| 0x85 | 1 (fixed) | `0x016e8240` | `FUN_00212d90` | **CREATE_CHECK_EMAIL_REPLY** | Reads 1 byte, bitmask `0x1800063`, check `< 0x19`, writes to struct offset `+0x34` |
-| 0xCC | 1 (fixed) | `0x016e7580` | `FUN_00212c80` | **CREATE_CHECK_NAME_REPLY** | Reads 1 byte, bitmask `0xfe3`, check `< 0xc`, writes to struct offset `+0x38` |
-
-### Probable Match (1 of 8)
-
-| Rev 946 Opcode | Size | Entry Base | Invoke Function | Handler Name | Evidence |
-|----------------|------|------------|-----------------|--------------|---------|
-| 0x11 | varShort (-2) | `0x016e9200` | `FUN_00235bd0` | **CHANGE_LOBBY** (restructured) | Reads multiple CP1252 strings from packet in a loop, builds vector entries with 3 strings + boolean per entry. In old binary, CHANGE_LOBBY read 1 string + 3 ushorts. The rev 946 version appears restructured to support a list of lobby/world entries rather than a single entry. |
+| Rev 947 Opcode | Size | Handler Name | Notes |
+|----------------|------|--------------|-------|
+| 0xD8 (216) | 0 (fixed) | **NO_TIMEOUT** | Trivial return handler (keepalive) |
+| 0x1E (30) | varShort | **CHANGE_LOBBY** | handler: Lobby::CHANGE_LOBBY |
+| 0x41 (65) | 0 (fixed) | **SET_READY_FLAG** | handler: ClientState::SET_READY_FLAG |
+| 0x30 (48) | 0 (fixed) | **RESET_CLIENT_VARCACHE** | handler: ClientState::RESET_ALL_VARPS |
 
 ### Not Found in rev 946 (4 of 8)
 

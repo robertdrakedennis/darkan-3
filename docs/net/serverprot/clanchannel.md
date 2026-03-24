@@ -1,5 +1,7 @@
 # ServerProt: ClanChannel Category
 
+> **Rev 947-1**: Opcodes reshuffled from 946. See `serverprot-table.md` for current opcode/size table.
+
 ## Overview
 
 The ClanChannel packet handler category manages full and incremental clan channel data updates. Two handlers are registered inline in `BindHandlers` (0x0011852a), not via a separate constructor call. Both handlers manage clan channel member lists stored in vectors of 0x50-byte entries.

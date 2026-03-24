@@ -1,5 +1,7 @@
 # ServerProt: Social Category
 
+> **Rev 947-1**: Opcodes reshuffled from 946. See `serverprot-table.md` for current opcode/size table.
+
 ## Overview
 
 The Social packet handler category manages friend chat channel data and friend list updates. Two handlers are registered inline in `BindHandlers` (0x0011852a), not via a separate constructor call. Both are large, complex handlers dealing with variable-length social data structures.

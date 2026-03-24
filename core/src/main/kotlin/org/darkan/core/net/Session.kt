@@ -117,7 +117,12 @@ open class Session(
                 val packet = input.readPacket(size)
 
                 val packetData = try {
-                    clientProt.decoder?.invoke(packet, opcode) ?: codec.createInstanceForOpcode<ClientProt>(opcode)
+                    clientProt.decoder?.invoke(packet, opcode)
+                        ?: if (clientProt.protClass == UnhandledClientProt::class) {
+                            UnhandledClientProt(opcode, codec.clientProtName(opcode), size)
+                        } else {
+                            codec.createInstanceForOpcode<ClientProt>(opcode)
+                        }
                 } catch (e: Exception) {
                     logError("Decoder exception for opcode $opcode (${clientProt.protClass.simpleName}, size=$size): ${e::class.simpleName}: ${e.message}")
                     continue

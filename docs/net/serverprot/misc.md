@@ -1,8 +1,12 @@
 # ServerProt: Miscellaneous (Uncategorized) Handlers
 
+> **Rev 947-1 update**: All opcodes reshuffled. See `serverprot-table.md` for the 947-1 opcode/size table.
+> Key verified 947 opcodes: NO_TIMEOUT=216, LOGOUT=147, LOGOUT_TRANSFER=209, UPDATE_REBOOT_TIMER=132,
+> SERVER_TICK_END=171, UPDATE_RUNENERGY=19, JCOINS_UPDATE=59, RESET_ENTITY_LISTS=43.
+
 ## Overview
 
-This document covers the 74 ServerProt handlers that are registered inline in `BindHandlers` (0x0011852a) but do not belong to any of the 12 named packet handler categories (Audio, Camera, Chat, ClanChannel, ClanSettings, ClientState, Interfaces, NPCInfo, Social, Variables, WorldData, ZoneUpdates). These include critical handlers such as PLAYER_INFO, LOGOUT, UPDATE_STAT, UPDATE_REBOOT_TIMER, and various entity/state management packets.
+This document covers the miscellaneous ServerProt handlers that are registered in `BindHandlers` (0x001185aa in 947-1) but do not belong to any of the named packet handler categories. These include critical handlers such as PLAYER_INFO, LOGOUT, UPDATE_STAT, UPDATE_REBOOT_TIMER, and various entity/state management packets.
 
 All handlers follow the standard ServerProt invocation pattern:
 - Called via `ServerProt.invokePtr(ServerProt.callableData, Packet*, &packetSize)`

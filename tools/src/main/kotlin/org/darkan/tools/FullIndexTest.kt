@@ -20,7 +20,7 @@ import java.util.zip.CRC32
 
 private const val HOST = "localhost"
 private const val PORT = 43594
-private const val MAJOR_VERSION = 946
+private const val MAJOR_VERSION = 947
 private const val MINOR_VERSION = 1
 private const val JS5_TOKEN = "ev9+VAp5/tMKeNR/7MOuH6lKWS+rGkHK"
 private const val BLOCK_SIZE = 102_400

@@ -1,5 +1,7 @@
 # ClientProt: Movement Packets
 
+> **Rev 947-1**: Opcodes and many sizes changed significantly from 946. See `clientprot-table.md` for the 947-1 table.
+
 Packets related to player movement, including minimap clicks and game-world walking.
 
 ## MOVE_GAME (Primary Movement)

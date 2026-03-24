@@ -37,17 +37,19 @@ use std::fs;
 use std::ptr;
 
 /// First 32 chars of the rs2client login RSA modulus hex string (1024-bit key).
-/// Found via Ghidra in FUN_001879c0 (.init_array), loaded into DAT_016e7340.
+/// Found via Ghidra in .init_array, loaded into a global BigInteger.
 /// Used by jag::LoginManager::CreateLoginRSAPacket via jag::math::BigInteger::ModPow.
-const RS2CLIENT_MODULUS_PREFIX: &[u8] = b"9cbc5f910c473c629a26baf5f9a1d01d";
+/// Updated for rev 947-1 (Jagex rotated login RSA key).
+const RS2CLIENT_MODULUS_PREFIX: &[u8] = b"8f389edb4b56fdafc410be11bd0b4dd2";
 
 /// Full length of the rs2client login RSA modulus hex string (1024-bit = 128 bytes = 256 hex chars).
 const RS2CLIENT_MODULUS_HEX_LEN: usize = 256;
 
 /// First 32 chars of the rs2client JS5 RSA modulus hex string (4096-bit key).
-/// Found via Ghidra in FUN_001879c0 (.init_array), loaded into DAT_016e7330.
+/// Found via Ghidra in .init_array, loaded into a global BigInteger.
 /// Used by jag::Js5MasterIndex::Js5MasterIndex for version table signature verification.
-const RS2CLIENT_JS5_MODULUS_PREFIX: &[u8] = b"e9b6a139afb361a6438c46cdade9e7ae";
+/// Updated for rev 947-1 (Jagex rotated JS5 RSA key).
+const RS2CLIENT_JS5_MODULUS_PREFIX: &[u8] = b"87300ccecc0674194a79ac92a9e18f10";
 
 /// Full length of the rs2client JS5 RSA modulus hex string (4096-bit = 512 bytes = 1024 hex chars).
 const RS2CLIENT_JS5_MODULUS_HEX_LEN: usize = 1024;
@@ -160,8 +162,9 @@ fn patch_rsa() {
         }
     };
 
-    // Only scan regions belonging to the current binary — scanning all regions
-    // can SIGBUS on memory-mapped files that aren't fully backed
+    // Scan regions belonging to the current binary first, then fall back to all
+    // readable file-backed regions if the pattern isn't found (the ctor may run
+    // before all segments are mapped under the expected binary name).
     let binary_name = if is_rs3linux { "rs3linux" } else { "rs2client" };
     let mut regions = parse_maps_for_binary(&maps, binary_name);
     if !regions.is_empty() {
@@ -173,6 +176,14 @@ fn patch_rsa() {
         if !regions.is_empty() {
             eprintln!("[darkan-patcher] Found {} {} regions to scan (fallback)", regions.len(), alt);
         }
+    }
+
+    // If binary-specific scan fails for any pattern, we'll retry with all file-backed regions
+    let all_regions = parse_all_file_backed_regions(&maps);
+    eprintln!("[darkan-patcher] All file-backed regions: {} (fallback pool)", all_regions.len());
+    for (i, r) in regions.iter().enumerate() {
+        eprintln!("[darkan-patcher]   binary region[{}]: 0x{:x}-0x{:x} ({} bytes, prot={})",
+            i, r.start, r.end, r.end - r.start, r.prot);
     }
 
     // --- Patch 1: rs2client binary RSA modulus (256-char hex ASCII string) ---
@@ -204,21 +215,25 @@ fn patch_rsa() {
             debug_assert_eq!(replacement_bytes.len(), RS2CLIENT_MODULUS_HEX_LEN);
 
             let mut patched = false;
-            for region in &regions {
-                if let Some(offset) = scan_for_pattern(region.start, region.end, RS2CLIENT_MODULUS_PREFIX) {
-                    eprintln!(
-                        "[darkan-patcher] Found rs2client RSA modulus hex string at address 0x{:x}",
-                        offset,
-                    );
+            // Try binary-specific regions first, then all file-backed regions
+            for scan_regions in [&regions, &all_regions] {
+                for region in scan_regions.iter() {
+                    if let Some(offset) = scan_for_pattern(region.start, region.end, RS2CLIENT_MODULUS_PREFIX) {
+                        eprintln!(
+                            "[darkan-patcher] Found rs2client RSA modulus hex string at address 0x{:x}",
+                            offset,
+                        );
 
-                    if patch_memory(offset, replacement_bytes, region.prot) {
-                        eprintln!("[darkan-patcher] Successfully patched rs2client RSA modulus ({} hex chars)", RS2CLIENT_MODULUS_HEX_LEN);
-                        patched = true;
-                        break;
-                    } else {
-                        eprintln!("[darkan-patcher] ERROR: Failed to patch rs2client RSA modulus at 0x{:x}", offset);
+                        if patch_memory(offset, replacement_bytes, region.prot) {
+                            eprintln!("[darkan-patcher] Successfully patched rs2client RSA modulus ({} hex chars)", RS2CLIENT_MODULUS_HEX_LEN);
+                            patched = true;
+                            break;
+                        } else {
+                            eprintln!("[darkan-patcher] ERROR: Failed to patch rs2client RSA modulus at 0x{:x}", offset);
+                        }
                     }
                 }
+                if patched { break; }
             }
 
             if !patched {
@@ -252,21 +267,24 @@ fn patch_rsa() {
             let replacement_bytes = padded.as_bytes();
 
             let mut patched = false;
-            for region in &regions {
-                if let Some(offset) = scan_for_pattern(region.start, region.end, RS2CLIENT_JS5_MODULUS_PREFIX) {
-                    eprintln!(
-                        "[darkan-patcher] Found rs2client JS5 RSA modulus hex string at address 0x{:x}",
-                        offset,
-                    );
+            for scan_regions in [&regions, &all_regions] {
+                for region in scan_regions.iter() {
+                    if let Some(offset) = scan_for_pattern(region.start, region.end, RS2CLIENT_JS5_MODULUS_PREFIX) {
+                        eprintln!(
+                            "[darkan-patcher] Found rs2client JS5 RSA modulus hex string at address 0x{:x}",
+                            offset,
+                        );
 
-                    if patch_memory(offset, replacement_bytes, region.prot) {
-                        eprintln!("[darkan-patcher] Successfully patched rs2client JS5 RSA modulus ({} hex chars)", RS2CLIENT_JS5_MODULUS_HEX_LEN);
-                        patched = true;
-                        break;
-                    } else {
-                        eprintln!("[darkan-patcher] ERROR: Failed to patch rs2client JS5 RSA modulus at 0x{:x}", offset);
+                        if patch_memory(offset, replacement_bytes, region.prot) {
+                            eprintln!("[darkan-patcher] Successfully patched rs2client JS5 RSA modulus ({} hex chars)", RS2CLIENT_JS5_MODULUS_HEX_LEN);
+                            patched = true;
+                            break;
+                        } else {
+                            eprintln!("[darkan-patcher] ERROR: Failed to patch rs2client JS5 RSA modulus at 0x{:x}", offset);
+                        }
                     }
                 }
+                if patched { break; }
             }
 
             if !patched {
@@ -453,6 +471,27 @@ fn patch_rsa() {
             eprintln!("[darkan-patcher] LZMA flag pattern not found (not rs3linux process?)");
         }
     }
+}
+
+/// Parse /proc/self/maps for ALL readable file-backed regions (fallback scanner).
+/// Skips anonymous/heap/stack/vdso regions to reduce SIGBUS risk.
+fn parse_all_file_backed_regions(maps: &str) -> Vec<Region> {
+    let mut regions = Vec::new();
+    for line in maps.lines() {
+        // File-backed regions have a path (6th field) starting with '/'
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 6 || !parts[5].starts_with('/') {
+            continue;
+        }
+        // Skip special filesystems
+        if parts[5].starts_with("/dev/") || parts[5].starts_with("/proc/") || parts[5].starts_with("/sys/") {
+            continue;
+        }
+        if let Some(region) = parse_map_line(line) {
+            regions.push(region);
+        }
+    }
+    regions
 }
 
 /// Parse /proc/self/maps for regions belonging to a specific binary name.

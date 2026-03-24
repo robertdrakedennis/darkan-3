@@ -1,5 +1,7 @@
 # ServerProt: ClanSettings Category
 
+> **Rev 947-1**: Opcodes reshuffled from 946. See `serverprot-table.md` for current opcode/size table.
+
 ## Overview
 
 The ClanSettings packet handler category manages full and incremental clan settings updates. Two handlers are registered inline in `BindHandlers` (0x0011852a), not via a separate constructor call. ClanSettings objects are 0xF0 bytes and managed as shared pointers with reference counting.

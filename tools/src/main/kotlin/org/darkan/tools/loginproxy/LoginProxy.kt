@@ -1,7 +1,10 @@
 package org.darkan.tools.loginproxy
 
+import org.darkan.core.model.IFEvents
 import org.darkan.core.EnvVars
 import org.darkan.core.net.Isaac
+import org.darkan.core.net.prot.Codec
+import org.darkan.core.net.prot.revision.rev947.register947
 import world.gregs.voidps.cache.secure.RSA
 import com.sun.net.httpserver.HttpServer
 import java.io.*
@@ -50,11 +53,21 @@ private const val DEFAULT_LISTEN_PORT = 43594
 private const val DEFAULT_HTTP_PORT = 8081
 private const val DEFAULT_CAPTURE_DIR = "capture"
 private const val FALLBACK_LOBBY_HOST = "lobby1.runescape.com"
+private const val FALLBACK_WORLD_HOST = "world1.runescape.com"
 private const val FALLBACK_PORT = 43594
+
+/** World hostnames captured from WORLDLIST_FETCH_REPLY. Shared across sessions. */
+private val worldHostnames = java.util.concurrent.ConcurrentHashMap<Int, String>()
 
 // No hex dump limit for POST_LOGIN -- we want full packet captures
 private const val MAX_HEX_DUMP_BYTES_DEFAULT = 256
 private const val MAX_HEX_DUMP_BYTES_POSTLOGIN = Int.MAX_VALUE
+
+/** Server opcodes to suppress from logs (keepalives, ticks, etc.) */
+private val SUPPRESS_S2C = setOf(146) // NO_TIMEOUT
+
+/** Client opcodes to suppress from logs (keepalives, pings, mouse, camera, etc.) */
+private val SUPPRESS_C2S = setOf(15, 80, 1, 2, 17, 85, 31, 51) // NO_TIMEOUT, NO_TIMEOUT_2, EVENT_CAMERA_POSITION, CAMERA_DIRECTION, EVENT_MOUSE_CLICK, EVENT_MOUSE_MOVE, EVENT_CAMERA_POSITION_2, CAMERA_ANGLE
 
 // ---- Connection type opcodes ----
 
@@ -126,621 +139,13 @@ private enum class Phase {
     CLOSED,               // Connection ended
 }
 
-// ---- ServerProt size table (217 entries, opcodes 0-216) ----
-// From docs/net/serverprot-table.md (Build 946-3)
-// Values: 0+ = fixed size, -1 = varByte, -2 = varShort
 
-private val SERVER_PROT_SIZES = intArrayOf(
-    /* 0   SET_UID */                  28,
-    /* 1   MESSAGE_GAME */             -1,
-    /* 2   SET_VARC_INT */             -2,
-    /* 3   OBJ_COUNT */                 7,
-    /* 4   IF_SETHIDE */               10,
-    /* 5   MIDI_JINGLE */              10,
-    /* 6   LOC_ANIM_SPECIFIC */        10,
-    /* 7   IF_SETMODEL */              29,
-    /* 8   IF_MOVESUB */                6,
-    /* 9   SET_NPC_OP */               -1,
-    /* 10  MSG_QUICKCHAT_CLANCHAT */   -1,
-    /* 11  CLANCHANNEL_FULL_CHAT */    -2,
-    /* 12  SET_VARC_SMALL */            6,
-    /* 13  SET_PLAYER_OP_3 */           1,
-    /* 14  SET_VARP_SMALL */            3,
-    /* 15  MESSAGE_PUBLIC */           -2,
-    /* 16  RUN_CLIENTSCRIPT */         -2,
-    /* 17  UPDATE_IGNORELIST */        -2,
-    /* 18  UPDATE_SITESETTINGS */      -2,
-    /* 19  SET_VARC_COORD */            3,
-    /* 20  IF_OPENSUB_ACTIVE */        -2,
-    /* 21  IF_SETANGLE */              32,
-    /* 22  SET_TICK_TIMER */            2,
-    /* 23  CAM_TARGET */                1,
-    /* 24  MAP_PROJANIM */             20,
-    /* 25  RESET_ENTITY_LISTS */        0,
-    /* 26  IF_SETOBJECT_NONUM */        8,
-    /* 27  SET_RUN_ENERGY */            1,
-    /* 28  UPDATE_FRIENDLIST_2 */      -2,
-    /* 29  CLANSETTINGS_FULL_2 */      -1,
-    /* 30  LOC_ADD */                   -1,
-    /* 31  MSG_QUICKCHAT_CLANCHANNEL */ -1,
-    /* 32  RESET_ALL_VARPS */           0,
-    /* 33  SOUND_STOP_ALL */            0,
-    /* 34  SOUND_MIXBUSS_SETLEVEL */    5,
-    /* 35  SET_READY_FLAG */            0,
-    /* 36  IF_SETPLAYERMODEL_OTHER */  -2,
-    /* 37  MSG_QUICKCHAT_PRIVATE */    -1,
-    /* 38  IF_SETPOSITION */           23,
-    /* 39  CLANSETTINGS_FULL */        -2,
-    /* 40  MESSAGE_FRIENDCHAT */       -1,
-    /* 41  LOC_ADD_CHANGE */           10,
-    /* 42  PLAYER_INFO_DECODE */       -2,
-    /* 43  UPDATE_ZONE_PARTIAL */      -2,
-    /* 44  CAM_MOVETO */                6,
-    /* 45  IF_SETSCROLLPOS */           5,
-    /* 46  MESSAGE_CLANCHANNEL */      -1,
-    /* 47  MAP_FLAG_SET_PLAYER */      14,
-    /* 48  IF_SETCOLOUR */              5,
-    /* 49  MIDI_SONG */                10,
-    /* 50  IF_SETOBJECT */              4,
-    /* 51  SET_VARBIT_SMALL */          6,
-    /* 52  CAM_FORCEANGLE */            1,
-    /* 53  CUTSCENE_DATA */            35,
-    /* 54  PROJANIM */                 25,
-    /* 55  CAM_SHAKE */                 4,
-    /* 56  MESSAGE_PRIVATE_SYSTEM */   -1,
-    /* 57  IF_SETTARGETPARAM */        -2,
-    /* 58  CAM_LOOKAT */                6,
-    /* 59  IF_SETTEXT */               12,
-    /* 60  RESET_VARC_SMALL */         -1,
-    /* 61  IF_SETTEXTFONT */            8,
-    /* 62  IF_SETRECOL */              10,
-    /* 63  CLANSETTINGS_DELTA */       -2,
-    /* 64  LOC_DEL */                    2,
-    /* 65  UPDATE_ZONE_FULL_FOLLOWS_2 */ -1,
-    /* 66  FRIENDLIST_LOADED */        -2,
-    /* 67  IF_SETMODEL_BODYTYPE */     25,
-    /* 68  MSG_QUICKCHAT_FRIENDCHAT */ -1,
-    /* 69  CAM_RESET */                 0,
-    /* 70  MIDI_SWAP */                 5,
-    /* 71  IF_SETPLAYERMODEL_BASECOL */  8,
-    /* 72  SET_VARBIT_INT */            3,
-    /* 73  SET_PLAYER_CHAT_EFFECTS */   2,
-    /* 74  IF_SETPLAYERMODEL_BODYTYPE */ 8,
-    /* 75  IF_SETRETEX */              10,
-    /* 76  SOUND_AREA_SYNTH */          8,
-    /* 77  IF_SETMODEL_ANIMATION */     4,
-    /* 78  LOC_PREFETCH */              7,
-    /* 79  CAM_LOOKAT_ARC */            6,
-    /* 80  SET_MULTIWAY_STATE */        1,
-    /* 81  UPDATE_INV_PARTIAL */       -2,
-    /* 82  LOC_CUSTOMISE */            -1,
-    /* 83  CLANCHANNEL_FULL */         -2,
-    /* 84  DETAIL_OPTIONS */           -2,
-    /* 85  SET_DISPLAY_INT */           4,
-    /* 86  NPC_HEADICON_SPECIFIC */    -1,
-    /* 87  OBJ_ADD */                    5,
-    /* 88  (no handler) */              3,
-    /* 89  IF_SETCLICKMASK */           8,
-    /* 90  UPDATE_ZONE_FULL_FOLLOWS */  3,
-    /* 91  SPOTANIM_SPECIFIC */        12,
-    /* 92  (no handler) */             -2,
-    /* 93  IF_SETPLAYERMODEL */        10,
-    /* 94  NPC_HITMARKS_HEADBARS */    19,
-    /* 95  CLANSETTINGS_DELTA_CHAT */  -2,
-    /* 96  CAM_MOVETO_ARC */            4,
-    /* 97  SET_PLAYER_OP_2 */           2,
-    /* 98  OBJ_DEL */                   3,
-    /* 99  (no handler) */              0,
-    /* 100 IF_SETNPCMODEL */           10,
-    /* 101 REMOVE_TRACKED_ENTRY */      3,
-    /* 102 SET_NPC_UPDATE_ORIGIN */     1,
-    /* 103 SET_PLAYER_GROUP */         10,
-    /* 104 RESET_CLIENT_STATE */        0,
-    /* 105 IF_SETPLAYERMODEL_SELF */    8,
-    /* 106 IF_SETANIM */                4,
-    /* 107 CHAT_FILTER_SETTINGS */     -1,
-    /* 108 IF_SETOBJECT_ALWAYSNUM */    6,
-    /* 109 REBUILD_NORMAL_HANDLER */   -2,
-    /* 110 CAM_UPDATE */               -2,
-    /* 111 NOOP_VAR */                 -1,
-    /* 112 UPDATE_STAT */               0,
-    /* 113 IF_SETMODEL_COLOUR */       10,
-    /* 114 SET_VARC_STR_SMALL */        6,
-    /* 115 (no handler) */              6,
-    /* 116 IF_SETMODEL_RECOLOUR */     25,
-    /* 117 SOUND_GROUP */              11,
-    /* 118 CAM_SMOOTHRESET */           0,
-    /* 119 IF_SETPLAYERMODEL_ANIM */    8,
-    /* 120 UPDATE_ZONE_PARTIAL_FOL */   3,
-    /* 121 UPDATE_INV_FULL */          -2,
-    /* 122 MAP_ANIM */                 11,
-    /* 123 CLANCHANNEL_DELTA */        -1,
-    /* 124 SET_VARP_INT */              6,
-    /* 125 IF_SETTEXT2 */               8,
-    /* 126 IF_SETGRAPHIC */            19,
-    /* 127 OBJ_REVEAL */                7,
-    /* 128 IF_SETANGLE_ACTIVE */        3,
-    /* 129 SET_MAP_FLAG */              6,
-    /* 130 MESSAGE_PRIVATE */          -1,
-    /* 131 LOGOUT_TRANSFER */           0,
-    /* 132 LOC_MERGE */                 5,
-    /* 133 SET_CHAT_FILTER_D */         1,
-    /* 134 LOGOUT */                    0,
-    /* 135 SET_WEIGHT */                1,
-    /* 136 SOUND_GROUP_STOP */          2,
-    /* 137 IF_SETNPCMODEL_ANIM */       9,
-    /* 138 SET_VARP_LONG */            10,
-    /* 139 PLAYER_OP */                 4,
-    /* 140 IF_SETOBJECT_NONUM_2 */      5,
-    /* 141 UPD_ZONE_FULL_FOLLOWS_3 */  -2,
-    /* 142 MINIMAP_FLAG_SET */          1,
-    /* 143 SET_CAMERA_TARGET */         8,
-    /* 144 SET_SYSUPDATE_TIMER */       4,
-    /* 145 IF_SETHIDE_ACTIVE */         8,
-    /* 146 NOOP */                      0,
-    /* 147 PROJANIM_SPECIFIC_HALT */   29,
-    /* 148 UPDATE_PLAYER_CHAT */       -2,
-    /* 149 SET_WORLD_TARGET */         -1,
-    /* 150 UPDATE_FRIENDCHAT_CHAN */    -2,
-    /* 151 RESET_ANIMS */               3,
-    /* 152 UPDATE_IGNORELIST */        -1,
-    /* 153 RUNCLIENTSCRIPT */           2,
-    /* 154 UPDATE_PLAYER_GROUP */      -2,
-    /* 155 UPDATE_URL_STRING */        -1,
-    /* 156 CLANCHANNEL_DELTA_CS */      6,
-    /* 157 SET_PLAYER_OP */             3,
-    /* 158 SYNTH_SOUND */              12,
-    /* 159 MAP_PROJANIM_HALT */        28,
-    /* 160 SOUND_GROUP_SPEED */         6,
-    /* 161 SET_INTERACTION_FLAG_B */     1,
-    /* 162 IF_SETGRAPHIC_ACTIVE */     -1,
-    /* 163 REBUILD_PINFO_POS */        -2,
-    /* 164 SET_CHAT_FILTER_C */         1,
-    /* 165 NPC_INFO */                  9,
-    /* 166 MIDI_STOP */                 0,
-    /* 167 SKIP_2_BYTES */              2,
-    /* 168 UPDATE_INV_GROUP */         -2,
-    /* 169 SET_INTERACTION_FLAG_C */     1,
-    /* 170 NOOP_VAR */                 -2,
-    /* 171 SET_URL_STRING */           -1,
-    /* 172 IF_SETNPCMODEL_ACTIVE */     5,
-    /* 173 IF_SETMODEL_ACTIVE */       -2,
-    /* 174 UPDATE_FRIENDLIST */        -2,
-    /* 175 SET_INTERACTION_FLAG_D */     3,
-    /* 176 IF_SETPLMODEL_EXACTMOVE */  14,
-    /* 177 REBUILD_REGION_HANDLER */   -2,
-    /* 178 REBUILD_REGION */           -2,
-    /* 179 FRIENDCHAT_SYSUPDATE */      2,
-    /* 180 IF_CLOSESUB */               5,
-    /* 181 SET_NPC_UPDATE_FLAG */        1,
-    /* 182 IF_OPENSUB */                5,
-    /* 183 (no handler) */             10,
-    /* 184 SOUND_AREA_SYNTH */          4,
-    /* 185 MAP_PROJANIM */             33,
-    /* 186 REBUILD_NORMAL */           -2,
-    /* 187 PLAYER_GROUP_DELTA */        4,
-    /* 188 SET_CHAT_FILTER_B */         1,
-    /* 189 PLAYER_INFO_DECODE */       -2,
-    /* 190 IF_MOVESUB_ACTIVE */         3,
-    /* 191 TRIGGER_ONDIALOGABORT */     2,
-    /* 192 SKIP_DATA */                -2,
-    /* 193 MAP_FLAG_SET */             15,
-    /* 194 MAP_ANIM_SPECIFIC */        14,
-    /* 195 IF_SETPOSITION_ACTIVE */     3,
-    /* 196 OCULUS_SYNC */              -2,
-    /* 197 IF_SETCLICKMASK_ACTIVE */    3,
-    /* 198 SOUND_AREA */               -1,
-    /* 199 FRIENDCHAT_JOIN */          -1,
-    /* 200 SOUND_MODIFY */              4,
-    /* 201 MESSAGE_PRIVATE_ECHO */     -1,
-    /* 202 IF_SETEVENTS */              9,
-    /* 203 SERVER_TICK_END */            8,
-    /* 204 SET_CHAT_FILTER_A */         1,
-    /* 205 REMOVE_PLAYER_FROM_LIST */   1,
-    /* 206 DESTROY_ZONE_DATA */         0,
-    /* 207 IF_OPENTOP */                2,
-    /* 208 UPDATE_REBOOT_TIMER */       3,
-    /* 209 VORBIS_PRELOAD */            4,
-    /* 210 IF_SETRECOL_ACTIVE */        4,
-    /* 211 SET_HEATMAP */               5,
-    /* 212 TRIGGER_ONDIALOGABORT_2 */   0,
-    /* 213 VORBIS_SONG */               6,
-    /* 214 PROJANIM_SPECIFIC */        21,
-    /* 215 URL_OPEN */                  3,
-    /* 216 SOUND_STOP */                2,
-)
-
-// ---- ServerProt names (for logging) ----
-
-// Names updated to 946-5 (from docs/net/serverprot-table.md + capture verification)
-private val SERVER_PROT_NAMES = arrayOf(
-    /* 0 */   "SET_UID",
-    /* 1 */   "MESSAGE_GAME",
-    /* 2 */   "SET_VARC_INT",
-    /* 3 */   "OBJ_COUNT",
-    /* 4 */   "IF_SETHIDE",
-    /* 5 */   "MIDI_JINGLE",
-    /* 6 */   "LOC_ANIM_SPECIFIC",
-    /* 7 */   "IF_SETMODEL",
-    /* 8 */   "IF_MOVESUB",
-    /* 9 */   "SET_NPC_OP",
-    /* 10 */  "MSG_QUICKCHAT_CLANCHAT",
-    /* 11 */  "CLANCHANNEL_FULL_CHAT",
-    /* 12 */  "SET_VARC_INT_2",              // was SET_VARC_SMALL in 946-3
-    /* 13 */  "SET_PLAYER_OP_3",
-    /* 14 */  "SET_VARP_SMALL",
-    /* 15 */  "MESSAGE_PUBLIC",
-    /* 16 */  "RUN_CLIENTSCRIPT",
-    /* 17 */  "UPDATE_IGNORELIST",
-    /* 18 */  "UPDATE_SITESETTINGS",
-    /* 19 */  "SET_VARC_SMALL_2",            // was SET_VARC_COORD in 946-3
-    /* 20 */  "IF_OPENSUB_ACTIVE",
-    /* 21 */  "IF_SETANGLE",
-    /* 22 */  "SET_TICK_TIMER",
-    /* 23 */  "CAM_TARGET",
-    /* 24 */  "MAP_PROJANIM",
-    /* 25 */  "RESET_ENTITY_LISTS",
-    /* 26 */  "IF_SETOBJECT_NONUM",
-    /* 27 */  "SET_RUN_ENERGY",
-    /* 28 */  "NPC_INFO_DECODE",              // was UPDATE_FRIENDLIST_2 in 946-3
-    /* 29 */  "CLANSETTINGS_FULL_2",
-    /* 30 */  "LOC_ADD",
-    /* 31 */  "MSG_QUICKCHAT_CLANCHANNEL",
-    /* 32 */  "RESET_CLIENT_STATE",           // was RESET_ALL_VARPS in 946-3
-    /* 33 */  "SOUND_STOP_ALL",
-    /* 34 */  "SOUND_MIXBUSS_SETLEVEL",
-    /* 35 */  "SET_READY_FLAG",
-    /* 36 */  "CHANGE_LOBBY",                 // was IF_SETPLAYERMODEL_OTHER; capture: lobby news/banners
-    /* 37 */  "MSG_QUICKCHAT_PRIVATE",
-    /* 38 */  "IF_OPENSUB",                  // was IF_SETPOSITION; capture: opens sub-interfaces on lobby 906
-    /* 39 */  "CLANSETTINGS_FULL",
-    /* 40 */  "MESSAGE_FRIENDCHAT",
-    /* 41 */  "LOC_ADD_CHANGE",
-    /* 42 */  "PLAYER_INFO_DECODE",
-    /* 43 */  "UPDATE_ZONE_PARTIAL",
-    /* 44 */  "CAM_MOVETO",
-    /* 45 */  "IF_SETSCROLLPOS",
-    /* 46 */  "MESSAGE_CLANCHANNEL",
-    /* 47 */  "MAP_FLAG_SET_PLAYER",
-    /* 48 */  "IF_SETCOLOUR",
-    /* 49 */  "MIDI_SONG",
-    /* 50 */  "IF_SETOBJECT",
-    /* 51 */  "SET_VARBIT_INT_2",             // was SET_VARBIT_SMALL in 946-3
-    /* 52 */  "CAM_FORCEANGLE",
-    /* 53 */  "CUTSCENE_DATA",
-    /* 54 */  "PROJANIM",
-    /* 55 */  "CAM_SHAKE",
-    /* 56 */  "MESSAGE_FRIENDCHANNEL",        // was MESSAGE_PRIVATE_SYSTEM in 946-3
-    /* 57 */  "IF_SETTARGETPARAM",
-    /* 58 */  "CAM_LOOKAT",
-    /* 59 */  "IF_SETTEXT",
-    /* 60 */  "RESET_VARC_SMALL",
-    /* 61 */  "IF_SETTEXTFONT",
-    /* 62 */  "IF_SETRECOL",
-    /* 63 */  "CLANSETTINGS_DELTA",
-    /* 64 */  "LOC_DEL",
-    /* 65 */  "UPDATE_ZONE_FULL_FOLLOWS_2",
-    /* 66 */  "PLAYER_OP",                    // was FRIENDLIST_LOADED in 946-3
-    /* 67 */  "IF_SETMODEL_BODYTYPE",
-    /* 68 */  "MSG_QUICKCHAT_FRIENDCHAT",
-    /* 69 */  "CAM_RESET",
-    /* 70 */  "MIDI_SWAP",
-    /* 71 */  "IF_SETPLAYERMODEL_BASECOLOUR",
-    /* 72 */  "SET_VARBIT_SMALL_2",           // was SET_VARBIT_INT in 946-3
-    /* 73 */  "SET_PLAYER_CHAT_EFFECTS",
-    /* 74 */  "IF_SETPLAYERMODEL_BODYTYPE",
-    /* 75 */  "IF_SETRETEX",
-    /* 76 */  "SOUND_AREA_SYNTH",
-    /* 77 */  "IF_SETMODEL_ANIMATION",
-    /* 78 */  "LOC_PREFETCH",
-    /* 79 */  "CAM_LOOKAT_ARC",
-    /* 80 */  "SET_MULTIWAY_STATE",
-    /* 81 */  "UPDATE_INV_PARTIAL",
-    /* 82 */  "LOC_CUSTOMISE",
-    /* 83 */  "CLANCHANNEL_FULL",
-    /* 84 */  "DETAIL_OPTIONS",
-    /* 85 */  "SET_DISPLAY_INT",
-    /* 86 */  "NPC_HEADICON_SPECIFIC",
-    /* 87 */  "OBJ_ADD",
-    /* 88 */  "RESET_VARC_SMALL_2",           // was unidentified in 946-3
-    /* 89 */  "IF_SETCLICKMASK",
-    /* 90 */  "UPDATE_ZONE_FULL_FOLLOWS",
-    /* 91 */  "SPOTANIM_SPECIFIC",
-    /* 92 */  "NOOP_UNHANDLED",               // was unidentified in 946-3
-    /* 93 */  "IF_SETPLAYERMODEL",
-    /* 94 */  "NPC_HITMARKS_AND_HEADBARS",
-    /* 95 */  "CLANSETTINGS_DELTA_CHAT",
-    /* 96 */  "CAM_MOVETO_ARC",
-    /* 97 */  "SET_PLAYER_OP_2",
-    /* 98 */  "OBJ_DEL",
-    /* 99 */  "IF_TRIGGER_CLOSE",             // was unidentified in 946-3
-    /* 100 */ "IF_SETNPCMODEL",
-    /* 101 */ "REMOVE_TRACKED_ENTRY",
-    /* 102 */ "SET_NPC_UPDATE_ORIGIN",
-    /* 103 */ "SET_PLAYER_GROUP",
-    /* 104 */ "DESTROY_ZONE_DATA",            // was RESET_CLIENT_STATE in 946-3
-    /* 105 */ "IF_SETPLAYERMODEL_SELF",
-    /* 106 */ "IF_SETANIM",
-    /* 107 */ "CHAT_FILTER_SETTINGS",
-    /* 108 */ "IF_SETOBJECT_ALWAYSNUM",
-    /* 109 */ "REBUILD_NORMAL_HANDLER",
-    /* 110 */ "CAM_UPDATE",
-    /* 111 */ "NOOP_VAR",
-    /* 112 */ "RESET_ALL_VARPS",              // was UPDATE_STAT in 946-3
-    /* 113 */ "IF_SETMODEL_COLOUR",
-    /* 114 */ "UPDATE_STAT",                  // was SET_VARC_STR_SMALL in 946-3
-    /* 115 */ "RESET_VARC_INT",               // was unidentified in 946-3
-    /* 116 */ "IF_SETMODEL_RECOLOUR",
-    /* 117 */ "SOUND_GROUP",
-    /* 118 */ "CAM_SMOOTHRESET",
-    /* 119 */ "IF_SETPLAYERMODEL_ANIM",
-    /* 120 */ "UPDATE_ZONE_PARTIAL_FOLLOWS",
-    /* 121 */ "UPDATE_INV_FULL",
-    /* 122 */ "MAP_ANIM",
-    /* 123 */ "CLANCHANNEL_DELTA",
-    /* 124 */ "SET_VARP_INT",
-    /* 125 */ "IF_SETTEXT2",
-    /* 126 */ "IF_OPENTOP",                  // was IF_SETGRAPHIC; capture: opens top-level interface 906
-    /* 127 */ "OBJ_REVEAL",
-    /* 128 */ "IF_SETOBJECT_ACTIVE",          // was IF_SETANGLE_ACTIVE in 946-3
-    /* 129 */ "SET_MAP_FLAG",
-    /* 130 */ "MESSAGE_PRIVATE",
-    /* 131 */ "LOGOUT_TRANSFER",
-    /* 132 */ "LOC_MERGE",
-    /* 133 */ "CREATE_CHECK_EMAIL_REPLY",     // was SET_CHAT_FILTER_D in 946-3
-    /* 134 */ "LOGOUT",
-    /* 135 */ "SET_WEIGHT",
-    /* 136 */ "SOUND_GROUP_STOP",
-    /* 137 */ "IF_SETNPCMODEL_ANIM",
-    /* 138 */ "SET_VARP_LONG",
-    /* 139 */ "SET_PLAYER_GROUP_2",           // was PLAYER_OP in 946-3
-    /* 140 */ "IF_SETOBJECT_NONUM_2",
-    /* 141 */ "UPDATE_ZONE_FULL_FOLLOWS_3",
-    /* 142 */ "WORLDENTITY_INFO_V4",          // was MINIMAP_FLAG_SET in 946-3
-    /* 143 */ "SET_CAMERA_TARGET",
-    /* 144 */ "SET_SYSUPDATE_TIMER",
-    /* 145 */ "IF_SETHIDE_ACTIVE",
-    /* 146 */ "NOOP",
-    /* 147 */ "PROJANIM_SPECIFIC_HALT",
-    /* 148 */ "UPDATE_PLAYER_CHAT",
-    /* 149 */ "SET_WORLD_TARGET",
-    /* 150 */ "WORLDLIST_FETCH_REPLY",        // was UPDATE_FRIENDCHAT_CHANNEL; capture: world list data
-    /* 151 */ "MINIMAP_TOGGLE",               // was RESET_ANIMS in 946-3
-    /* 152 */ "UPDATE_IGNORELIST_2",
-    /* 153 */ "WORLDENTITY_INFO_V2",          // was RUNCLIENTSCRIPT in 946-3
-    /* 154 */ "UPDATE_PLAYER_GROUP",
-    /* 155 */ "UPDATE_URL_STRING",
-    /* 156 */ "WORLDENTITY_INFO_V1",          // was CLANCHANNEL_DELTA_CS in 946-3
-    /* 157 */ "WORLDENTITY_INFO_V3",          // was SET_PLAYER_OP in 946-3
-    /* 158 */ "SYNTH_SOUND",
-    /* 159 */ "MAP_PROJANIM_HALT",
-    /* 160 */ "SOUND_GROUP_SPEED",
-    /* 161 */ "SET_INTERACTION_FLAG_B",
-    /* 162 */ "IF_SETGRAPHIC_ACTIVE",
-    /* 163 */ "REBUILD_PLAYERINFO_POSITIONS",
-    /* 164 */ "SET_CHAT_FILTER_A",            // was SET_CHAT_FILTER_C in 946-3
-    /* 165 */ "NPC_ANIM_SPECIFIC",            // was NPC_INFO in 946-3
-    /* 166 */ "MIDI_STOP",
-    /* 167 */ "SKIP_2_BYTES",
-    /* 168 */ "UPDATE_INV_GROUP",
-    /* 169 */ "SET_INTERACTION_FLAG_C",
-    /* 170 */ "NOOP_VAR_2",
-    /* 171 */ "SET_URL_STRING",
-    /* 172 */ "IF_SETNPCMODEL_ACTIVE",
-    /* 173 */ "IF_OPENSUB_2",                 // was IF_SETMODEL_ACTIVE in 946-3
-    /* 174 */ "NPC_INFO_2",                   // was UPDATE_FRIENDLIST in 946-3
-    /* 175 */ "SET_INTERACTION_FLAG_D",
-    /* 176 */ "IF_SETPLAYERMODEL_EXACTMOVE",
-    /* 177 */ "REBUILD_REGION_HANDLER",
-    /* 178 */ "REBUILD_WORLDENTITY",           // was REBUILD_REGION in 946-3
-    /* 179 */ "FRIENDCHAT_SYSUPDATE",
-    /* 180 */ "IF_CLOSESUB",
-    /* 181 */ "SET_NPC_UPDATE_FLAG",
-    /* 182 */ "IF_OPENSUB",
-    /* 183 */ "SET_VARC_COORD_2",             // was unidentified in 946-3
-    /* 184 */ "SOUND_AREA_SYNTH_2",
-    /* 185 */ "MAP_PROJANIM_2",
-    /* 186 */ "REBUILD_NORMAL",
-    /* 187 */ "SET_TRIGGER_VAR",              // was PLAYER_GROUP_DELTA in 946-3
-    /* 188 */ "SET_CHAT_FILTER_B",
-    /* 189 */ "PLAYER_INFO_DECODE_2",
-    /* 190 */ "IF_SETTEXT_ACTIVE",            // was IF_MOVESUB_ACTIVE in 946-3
-    /* 191 */ "CLEAR_MAP_FLAG",               // was TRIGGER_ONDIALOGABORT in 946-3
-    /* 192 */ "SKIP_DATA",
-    /* 193 */ "SPOTANIM_SPECIFIC_2",          // was MAP_FLAG_SET in 946-3
-    /* 194 */ "MAP_ANIM_SPECIFIC",
-    /* 195 */ "IF_SETMODEL_ACTIVE",           // was IF_SETPOSITION_ACTIVE in 946-3
-    /* 196 */ "UNUSED_NOOP",                  // was OCULUS_SYNC in 946-3
-    /* 197 */ "IF_MOVESUB_ACTIVE",            // was IF_SETCLICKMASK_ACTIVE in 946-3
-    /* 198 */ "SOUND_AREA",
-    /* 199 */ "FRIENDCHAT_JOIN",
-    /* 200 */ "SOUND_MODIFY",
-    /* 201 */ "MESSAGE_PRIVATE_ECHO",
-    /* 202 */ "IF_SETEVENTS",
-    /* 203 */ "SERVER_TICK_END",
-    /* 204 */ "CREATE_CHECK_NAME_REPLY",      // was SET_CHAT_FILTER_A in 946-3
-    /* 205 */ "REMOVE_PLAYER_FROM_LIST",
-    /* 206 */ "CLEAR_PENDING_UPDATES",        // was DESTROY_ZONE_DATA in 946-3
-    /* 207 */ "IF_OPENTOP",
-    /* 208 */ "WORLDENTITY_INFO_V5",          // was UPDATE_REBOOT_TIMER in 946-3
-    /* 209 */ "VORBIS_PRELOAD",
-    /* 210 */ "IF_SETRECOL_ACTIVE",
-    /* 211 */ "REBUILD_REGION",               // was SET_HEATMAP in 946-3
-    /* 212 */ "TRIGGER_ONDIALOGABORT_2",
-    /* 213 */ "VORBIS_SONG",
-    /* 214 */ "PROJANIM_SPECIFIC",
-    /* 215 */ "URL_OPEN",
-    /* 216 */ "SOUND_STOP",
-)
-
-// ---- ClientProt names (for logging) ----
-
-private val CLIENT_PROT_NAMES = arrayOf(
-    /* 0 */   "EVENT_APPLET_FOCUS",
-    /* 1 */   "EVENT_CAMERA_POSITION",
-    /* 2 */   "CAMERA_DIRECTION",
-    /* 3 */   "VERIFIED_STRING_SEND",
-    /* 4 */   "MESSAGE_PUBLIC",
-    /* 5 */   "OPNPC_T_LONG",
-    /* 6 */   "OPOBJ5",
-    /* 7 */   "RESUME_COUNTDIALOG",
-    /* 8 */   "STRTOL_SEND",
-    /* 9 */   "OPNPC_T1",
-    /* 10 */  "RESUME_PAUSEBUTTON",
-    /* 11 */  "OPCODE_11",
-    /* 12 */  "IF_BUTTON_T",
-    /* 13 */  "OPCODE_13",
-    /* 14 */  "OPOBJ7",
-    /* 15 */  "NO_TIMEOUT",
-    /* 16 */  "OPLOC_T_LONG",
-    /* 17 */  "EVENT_MOUSE_CLICK",
-    /* 18 */  "IF_BUTTON5",
-    /* 19 */  "OPNPC_T2",
-    /* 20 */  "OPOBJ1",
-    /* 21 */  "MAP_BUILD_COMPLETE",
-    /* 22 */  "OPCODE_22",
-    /* 23 */  "OPNPC3",
-    /* 24 */  "CLIENT_CHEAT",
-    /* 25 */  "OPNPC2",
-    /* 26 */  "OPNPC1",
-    /* 27 */  "OPLOC_T",
-    /* 28 */  "DEVICE_INFO",
-    /* 29 */  "MESSAGE_PUBLIC",
-    /* 30 */  "OPOBJ10",
-    /* 31 */  "EVENT_CAMERA_POSITION_2",
-    /* 32 */  "CS2_CALLBACK",
-    /* 33 */  "MOVE_GAME_MINI",
-    /* 34 */  "QUEUED_PACKET",
-    /* 35 */  "OPNPC_T5",
-    /* 36 */  "OPNPC_T6",
-    /* 37 */  "OPLOC_T_EXT",
-    /* 38 */  "OPLOC_T1",
-    /* 39 */  "SOCIAL_REQUEST",
-    /* 40 */  "OPLOC_T3",
-    /* 41 */  "OPCODE_41",
-    /* 42 */  "UNKNOWN_3BYTE_42",
-    /* 43 */  "OPLOC_T6",
-    /* 44 */  "OPCODE_44",
-    /* 45 */  "EVENT_TELEMETRY",
-    /* 46 */  "OPOBJ2",
-    /* 47 */  "IF_BUTTON10",
-    /* 48 */  "EVENT_KEYBOARD",
-    /* 49 */  "DATA_REPORT_VARSHORT",
-    /* 50 */  "SCENE_GRAPH_REPORT",
-    /* 51 */  "CAMERA_ANGLE",
-    /* 52 */  "MESSAGE_PRIVATE",
-    /* 53 */  "OPCODE_53",
-    /* 54 */  "IF_BUTTON3",
-    /* 55 */  "OPCODE_55",
-    /* 56 */  "RESUME_NAMEDIALOG",
-    /* 57 */  "OPCODE_57",
-    /* 58 */  "OPPLAYER_T_EXT",
-    /* 59 */  "OPOBJ8",
-    /* 60 */  "OPOBJ6",
-    /* 61 */  "IF_BUTTON7",
-    /* 62 */  "ENCODEDSTRING_SEND",
-    /* 63 */  "IF_BUTTON9",
-    /* 64 */  "IF_BUTTON6",
-    /* 65 */  "SCENE_INTERACTION",
-    /* 66 */  "EVENT_APPLET_FOCUS_2",
-    /* 67 */  "CLAN_JOINCHAT",
-    /* 68 */  "OPLOC2_T",
-    /* 69 */  "OPNPC4_T",
-    /* 70 */  "OPLOC1",
-    /* 71 */  "ACTIVE_CHAT_PHRASE_SEND",
-    /* 72 */  "OPCODE_72",
-    /* 73 */  "OPCODE_73",
-    /* 74 */  "ENCRYPTED_STRING_SEND2",
-    /* 75 */  "IF_BUTTON_TARGETMENU",
-    /* 76 */  "SOUND_SONGEND",
-    /* 77 */  "OPNPC5",
-    /* 78 */  "FRIENDLIST_ADD",
-    /* 79 */  "OPCODE_79",
-    /* 80 */  "NO_TIMEOUT_2",
-    /* 81 */  "ACTIVE_CHAT_PHRASE_SENDPRIVATE",
-    /* 82 */  "WINDOW_STATUS",
-    /* 83 */  "FOCUS_CHANGED",
-    /* 84 */  "OPOBJ_CS2_2",
-    /* 85 */  "EVENT_MOUSE_MOVE",
-    /* 86 */  "MESSAGE_CLAN_CHAT",
-    /* 87 */  "CLOSE_MODAL",
-    /* 88 */  "SOUND_SONGSELECT",
-    /* 89 */  "MOVE_SCRIPTED",
-    /* 90 */  "OPNPC4",
-    /* 91 */  "OPOBJ9",
-    /* 92 */  "MOVE_GAME_EXT",
-    /* 93 */  "CLAN_LEAVECHAT",
-    /* 94 */  "OPLOC_CS2",
-    /* 95 */  "DETECT_MODIFIED_CLIENT",
-    /* 96 */  "OPOBJ4",
-    /* 97 */  "IF_BUTTON1",
-    /* 98 */  "OPOBJ_CS2",
-    /* 99 */  "AFFINEDTRANSFORM_SET",
-    /* 100 */ "OPCODE_100",
-    /* 101 */ "OPLOC4_T",
-    /* 102 */ "MOVE_GAME",
-    /* 103 */ "OPNPC6",
-    /* 104 */ "OPNPC_CS2",
-    /* 105 */ "OPOBJ_T",
-    /* 106 */ "DISPLAY_INFO",
-    /* 107 */ "IF_BUTTONT",
-    /* 108 */ "OPCODE_108",
-    /* 109 */ "IGNORELIST_ADD",
-    /* 110 */ "WORLDLIST_FETCH",
-    /* 111 */ "OPLOC5_T",
-    /* 112 */ "OPCODE_112",
-    /* 113 */ "RENDER_REPORT",
-    /* 114 */ "IF_BUTTON_TARGETMENU_SEND",
-    /* 115 */ "OPOBJ3",
-    /* 116 */ "ENCRYPTED_STRING_SEND",
-    /* 117 */ "CLOSE_MODAL_COMPONENT",
-    /* 118 */ "IF_BUTTON2",
-    /* 119 */ "OPPLAYER_CS2",
-    /* 120 */ "OPPLAYER_T",
-    /* 121 */ "FRIENDLIST_DEL",
-    /* 122 */ "INTERFACE_INTERACTION",
-    /* 123 */ "BUG_REPORT",
-    /* 124 */ "IF_BUTTON8",
-    /* 125 */ "OPNPC3_T",
-    /* 126 */ "OPCODE_126",
-    /* 127 */ "ENCODEDSTRING_SEND2",
-    /* 128 */ "IF_BUTTON4",
-    /* 129 */ "STRTOLL_SEND",
-)
-
-// ---- ClientProt sizes (130 entries, opcodes 0-129) ----
-// Duplicated from LoginServer.kt for the proxy's own use
-
-private val CLIENT_PROT_SIZES = intArrayOf(
-    /* 0 */ -2,  /* 1 */  9,  /* 2 */  6,  /* 3 */ -2,  /* 4 */ -1,
-    /* 5 */ 15,  /* 6 */  3,  /* 7 */ -2,  /* 8 */  4,  /* 9 */  3,
-    /* 10 */ -2, /* 11 */  4, /* 12 */ 16, /* 13 */  2, /* 14 */  3,
-    /* 15 */  0, /* 16 */ 11, /* 17 */ -1, /* 18 */  8, /* 19 */  3,
-    /* 20 */  3, /* 21 */  0, /* 22 */  1, /* 23 */  7, /* 24 */ -1,
-    /* 25 */  7, /* 26 */  7, /* 27 */ 12, /* 28 */ -1, /* 29 */ -1,
-    /* 30 */  3, /* 31 */ -2, /* 32 */ -1, /* 33 */  5, /* 34 */  0,
-    /* 35 */  3, /* 36 */  3, /* 37 */ 15, /* 38 */  9, /* 39 */ -1,
-    /* 40 */  9, /* 41 */  0, /* 42 */  3, /* 43 */  9, /* 44 */ -2,
-    /* 45 */ -2, /* 46 */  3, /* 47 */  8, /* 48 */ -1, /* 49 */ -2,
-    /* 50 */  4, /* 51 */  4, /* 52 */ -2, /* 53 */  9, /* 54 */  8,
-    /* 55 */  1, /* 56 */ -1, /* 57 */  9, /* 58 */ 17, /* 59 */  3,
-    /* 60 */  3, /* 61 */  8, /* 62 */ -1, /* 63 */  8, /* 64 */  8,
-    /* 65 */  4, /* 66 */  4, /* 67 */ -1, /* 68 */  9, /* 69 */  3,
-    /* 70 */  4, /* 71 */ -1, /* 72 */  1, /* 73 */ 18, /* 74 */ -2,
-    /* 75 */ -2, /* 76 */  2, /* 77 */  7, /* 78 */ -1, /* 79 */  1,
-    /* 80 */  0, /* 81 */ -1, /* 82 */  3, /* 83 */  1, /* 84 */ -1,
-    /* 85 */  7, /* 86 */ -1, /* 87 */  0, /* 88 */  2, /* 89 */  5,
-    /* 90 */  7, /* 91 */  3, /* 92 */ 18, /* 93 */ -1, /* 94 */ -1,
-    /* 95 */  4, /* 96 */  3, /* 97 */  8, /* 98 */ -1, /* 99 */  2,
-    /* 100 */ 4, /* 101 */ 9, /* 102 */-2, /* 103 */ 7, /* 104 */-1,
-    /* 105 */11, /* 106 */ 6, /* 107 */-1, /* 108 */-2, /* 109 */-1,
-    /* 110 */ 4, /* 111 */ 9, /* 112 */-1, /* 113 */ 4, /* 114 */22,
-    /* 115 */ 3, /* 116 */-1, /* 117 */ 6, /* 118 */ 8, /* 119 */-1,
-    /* 120 */11, /* 121 */-1, /* 122 */16, /* 123 */ 1, /* 124 */ 8,
-    /* 125 */ 3, /* 126 */-1, /* 127 */-1, /* 128 */ 8, /* 129 */ 8,
-)
+// Prot names and sizes come from the Codec (Rev946ServerProtStubs / Rev946ClientProtStubs).
 
 // ---- Entry Point ----
+
+/** Protocol codec — initialized once at startup, used for opcode names/sizes. */
+private val codec: Codec = register947()
 
 fun main(args: Array<String>) {
     val listenPort = findArg(args, "--listen-port")?.toIntOrNull() ?: DEFAULT_LISTEN_PORT
@@ -822,16 +227,37 @@ private class ProxySession(
     // Output stream to Jagex -- needed by c2s thread to write modified login packet
     @Volatile private var targetOutput: OutputStream? = null
 
+    // Output stream to client -- needed by s2c thread for login data rewriting
+    @Volatile private var clientOutput: OutputStream? = null
+
+    // Active target socket — swapped when switching from lobby to world
+    @Volatile private var activeTargetSocket: Socket? = null
+
+    // Buffer for login response rewriting (LOGIN_RESULT through LOGIN_DATA)
+    private val loginResponseBuffer = ByteArrayOutputStream()
+    @Volatile private var bufferingLoginResponse = false
+
+    // Session key from the server's FIRST_RESPONSE — needed for game login session key swap
+    @Volatile private var serverSessionKey: Long = 0
+
     // Partial 2-byte S2C opcode state: when we decode the first byte of a 2-byte
     // opcode but the second byte hasn't arrived yet, we store the decoded first byte
     // here. -1 means no partial opcode pending.
     @Volatile private var s2cPartialOpcodeFirstByte = -1
+
+    // Track the raw byte position of the varShort size field for the WORLDLIST_FETCH_REPLY packet.
+    // Set by parseServerPostLogin when it encounters opcode 150, used by processAndForwardPostLogin.
+    @Volatile private var worldlistSizeFieldPos = -1  // position in the s2cAccum byte array
+    @Volatile private var worldlistPayloadStart = -1  // first payload byte
+    @Volatile private var worldlistPayloadEnd = -1    // byte after last payload byte
 
     // S2C pending packet state: when we've ISAAC-decoded an opcode (and possibly
     // read the size) but the payload hasn't fully arrived, we save the decoded
     // state here to avoid consuming another ISAAC value on the next TCP read.
     @Volatile private var s2cPendingOpcode = -1   // decoded opcode, or -1 if none
     @Volatile private var s2cPendingSize = -1     // decoded size, or -1 if size not yet read
+    private val s2cRecentPackets = ArrayDeque<String>(12) // ring buffer for desync debug
+    private var s2cLastIsaacDebug = "" // ISAAC state at last opcode decode
 
     // C2S pending packet state (same pattern)
     @Volatile private var c2sPendingOpcode = -1
@@ -852,22 +278,55 @@ private class ProxySession(
     }
 
     fun run() {
-        val targetSocket: Socket
-        try {
-            targetSocket = Socket(targetHost, targetPort)
-            log("CTRL", "Connected to Jagex at $targetHost:$targetPort")
-        } catch (e: Exception) {
-            log("CTRL", "FAILED to connect to Jagex: ${e.message}")
+        val clientIn = clientSocket.getInputStream()
+        val clientOut = clientSocket.getOutputStream()
+
+        // Read the first byte (connection type) BEFORE connecting to the target.
+        // This tells us whether to route to the lobby or a game world.
+        val firstByte = try { clientIn.read() } catch (e: Exception) { -1 }
+        if (firstByte == -1) {
+            log("CTRL", "Client disconnected before sending connection type")
             clientSocket.close()
             closeLog()
             return
         }
 
-        val clientIn = clientSocket.getInputStream()
-        val clientOut = clientSocket.getOutputStream()
+        connectionType = firstByte
+        val typeName = CONNECTION_TYPE_NAMES[connectionType] ?: "UNKNOWN"
+        log("C->S", "[1B] CONNECTION_TYPE = $connectionType ($typeName)")
+
+        // All connections initially go to the lobby server.
+        // If this turns out to be a game login (opcode 16), handleGameLogin() will
+        // close the lobby connection and switch to the world server.
+        val actualHost = targetHost
+        val actualPort = targetPort
+        if (connectionType == 15) {
+            phase = Phase.JS5
+        } else {
+            phase = Phase.FIRST_RESPONSE
+        }
+
+        val targetSocket: Socket
+        try {
+            targetSocket = Socket(actualHost, actualPort)
+            log("CTRL", "Connected to Jagex at $actualHost:$actualPort")
+        } catch (e: Exception) {
+            log("CTRL", "FAILED to connect to Jagex at $actualHost:$actualPort: ${e.message}")
+            clientSocket.close()
+            closeLog()
+            return
+        }
+
+        activeTargetSocket = targetSocket
         val targetIn = targetSocket.getInputStream()
         val targetOut = targetSocket.getOutputStream()
         targetOutput = targetOut
+        clientOutput = clientOut
+
+        // Forward the connection type byte we already read
+        targetOut.write(firstByte)
+        targetOut.flush()
+        synchronized(c2sRaw) { c2sRaw.write(firstByte); c2sRaw.flush() }
 
         val c2sThread = Thread({
             relayClientToServer(clientIn, targetOut)
@@ -936,26 +395,28 @@ private class ProxySession(
                                 log("C->S", "[${accum.size}B] LOGIN_PACKET: opcode=$loginOpcode ($opName), varShort size=$varShortSize")
                                 logHex("C->S", accum, 0, accum.size)
 
-                                // Perform RSA MITM
-                                val modifiedPacket = performRsaMitm(accum, loginOpcode, varShortSize)
-
-                                if (modifiedPacket != null) {
-                                    output.write(modifiedPacket)
-                                    output.flush()
-                                    log("C->S", "MITM: Forwarded modified login packet (${modifiedPacket.size}B)")
+                                if (loginOpcode == 16) {
+                                    // GAME LOGIN — switch to world server
+                                    handleGameLogin(accum, loginOpcode, varShortSize)
                                 } else {
-                                    // MITM failed -- forward original
-                                    output.write(accum, 0, totalExpected)
-                                    output.flush()
-                                    log("C->S", "MITM: FAILED -- forwarded original packet")
-                                }
+                                    // LOBBY LOGIN or other — forward to current target
+                                    val modifiedPacket = performRsaMitm(accum, loginOpcode, varShortSize)
+                                    if (modifiedPacket != null) {
+                                        output.write(modifiedPacket)
+                                        output.flush()
+                                        log("C->S", "MITM: Forwarded modified login packet (${modifiedPacket.size}B)")
+                                    } else {
+                                        output.write(accum, 0, totalExpected)
+                                        output.flush()
+                                        log("C->S", "MITM: FAILED -- forwarded original packet")
+                                    }
 
-                                // Forward any excess bytes beyond the login packet
-                                if (accum.size > totalExpected) {
-                                    val excess = accum.copyOfRange(totalExpected, accum.size)
-                                    output.write(excess)
-                                    output.flush()
-                                    log("C->S", "Forwarded ${excess.size}B excess after login packet")
+                                    if (accum.size > totalExpected) {
+                                        val excess = accum.copyOfRange(totalExpected, accum.size)
+                                        output.write(excess)
+                                        output.flush()
+                                        log("C->S", "Forwarded ${excess.size}B excess after login packet")
+                                    }
                                 }
 
                                 phase = Phase.LOGIN_RESULT
@@ -970,15 +431,17 @@ private class ProxySession(
                     Phase.POST_LOGIN -> {
                         // Decode ISAAC-encrypted packets
                         parseClientPostLogin(buf, n)
-                        // Always forward raw bytes
-                        output.write(buf, 0, n)
-                        output.flush()
+                        // Forward to current target (may have switched from lobby to world)
+                        val out = targetOutput ?: output
+                        out.write(buf, 0, n)
+                        out.flush()
                     }
 
                     else -> {
                         // Passthrough with logging
-                        output.write(buf, 0, n)
-                        output.flush()
+                        val out = targetOutput ?: output
+                        out.write(buf, 0, n)
+                        out.flush()
                         parseClientData(buf, n)
                     }
                 }
@@ -1002,10 +465,6 @@ private class ProxySession(
                 val n = input.read(buf)
                 if (n == -1) break
 
-                // Forward immediately
-                output.write(buf, 0, n)
-                output.flush()
-
                 // Save raw bytes
                 synchronized(s2cRaw) {
                     s2cRaw.write(buf, 0, n)
@@ -1013,12 +472,253 @@ private class ProxySession(
                 }
 
                 totalBytes += n
-                parseServerData(buf, n)
+
+                if (bufferingLoginResponse ||
+                    phase == Phase.LOGIN_RESULT ||
+                    phase == Phase.LOGIN_DATA_LEN ||
+                    phase == Phase.LOGIN_DATA
+                ) {
+                    // Buffer the entire login response (result + data) for hostname rewriting.
+                    // Must catch ALL login response phases because the flag gets set too late
+                    // if we only check bufferingLoginResponse (data is forwarded before flag is set).
+                    bufferingLoginResponse = true
+                    loginResponseBuffer.write(buf, 0, n)
+                    parseServerData(buf, n)
+                    if (phase == Phase.POST_LOGIN) {
+                        val buffered = loginResponseBuffer.toByteArray()
+                        loginResponseBuffer.reset()
+                        bufferingLoginResponse = false
+
+                        // The buffer may contain POST_LOGIN bytes AFTER the login data.
+                        // Split: rewrite the login response portion, then process POST_LOGIN portion separately.
+                        // loginDataLen was set during LOGIN_DATA_LEN phase.
+                        // Buffer layout: [1B result][1B dataLen][dataLen bytes login data][POST_LOGIN bytes...]
+                        val loginResponseEnd = 2 + loginDataLen
+                        val loginPart = buffered.copyOfRange(0, minOf(loginResponseEnd, buffered.size))
+                        val modified = rewriteLoginResponseHostname(loginPart)
+                        output.write(modified)
+                        output.flush()
+                        log("CTRL", "Forwarded rewritten login response (${modified.size}B)")
+
+                        // Forward any remaining POST_LOGIN bytes through the decoder
+                        if (buffered.size > loginResponseEnd) {
+                            val postLoginPart = buffered.copyOfRange(loginResponseEnd, buffered.size)
+                            val rewritten = decodeAndRewritePostLogin(postLoginPart, postLoginPart.size)
+                            output.write(rewritten)
+                            output.flush()
+                        }
+                    }
+                } else if (phase == Phase.POST_LOGIN) {
+                    // Decode packets and rewrite worldlist hostnames
+                    val modified = decodeAndRewritePostLogin(buf, n)
+                    output.write(modified)
+                    output.flush()
+                } else {
+                    // Forward immediately
+                    output.write(buf, 0, n)
+                    output.flush()
+                    parseServerData(buf, n)
+                }
             }
         } catch (e: Exception) {
             log("S->C", "Stream ended: ${e::class.simpleName}: ${e.message}")
         }
         log("S->C", "Total: $totalBytes bytes")
+    }
+
+    // ---- Game Login (World Switch) ----
+
+    /**
+     * Handle a GAME_LOGIN (opcode 16) by switching from the lobby to the world server.
+     * 1. Close the lobby connection
+     * 2. Connect to the world server
+     * 3. Perform the handshake (send type 14, read session key)
+     * 4. Decrypt the client's RSA block, swap the session key, re-encrypt
+     * 5. Forward the modified login packet to the world
+     * 6. Relay the world's response back to the client
+     * 7. Continue relaying on the world connection
+     */
+    private fun handleGameLogin(packet: ByteArray, loginOpcode: Int, varShortSize: Int) {
+        val worldHost = worldHostnames.values.firstOrNull() ?: FALLBACK_WORLD_HOST
+        log("CTRL", "GAME_LOGIN detected — switching to world server $worldHost:$targetPort")
+
+        // 1. Close the lobby connection (this will cause the s2c thread to exit)
+        try { activeTargetSocket?.close() } catch (_: Exception) {}
+
+        // 2. Connect to the world server
+        val worldSocket: Socket
+        try {
+            worldSocket = Socket(worldHost, targetPort)
+            log("CTRL", "Connected to world server at $worldHost:$targetPort")
+        } catch (e: Exception) {
+            log("CTRL", "FAILED to connect to world server: ${e.message}")
+            return
+        }
+
+        activeTargetSocket = worldSocket
+        val worldOut = worldSocket.getOutputStream()
+        val worldIn = worldSocket.getInputStream()
+        targetOutput = worldOut
+
+        // 3. Handshake: send connection type 14, read 9-byte response
+        worldOut.write(14)
+        worldOut.flush()
+        log("C->S", "Sent CONNECTION_TYPE=14 to world server")
+
+        val resp = ByteArray(9)
+        var read = 0
+        while (read < 9) {
+            val n = worldIn.read(resp, read, 9 - read)
+            if (n == -1) {
+                log("CTRL", "World server closed during handshake")
+                return
+            }
+            read += n
+        }
+        val responseCode = resp[0].toInt() and 0xFF
+        val worldSessionKey = ByteBuffer.wrap(resp, 1, 8).long
+        log("S->C", "World FIRST_RESPONSE: code=$responseCode session_key=0x${"%016X".format(worldSessionKey)}")
+
+        if (responseCode != 0) {
+            log("CTRL", "World handshake failed with code $responseCode")
+            return
+        }
+
+        // 4. RSA MITM with session key swap
+        val modifiedPacket = performRsaMitmWithKeySwap(packet, loginOpcode, varShortSize, worldSessionKey)
+
+        if (modifiedPacket != null) {
+            worldOut.write(modifiedPacket)
+            worldOut.flush()
+            log("C->S", "MITM: Forwarded game login to world (${modifiedPacket.size}B, session key swapped)")
+        } else {
+            log("C->S", "MITM: FAILED — cannot forward game login")
+            return
+        }
+
+        // 5. Read world's login result and relay to client
+        val clientOut = clientOutput ?: return
+        try {
+            // Relay everything from world to client (login result + login data + post-login)
+            val buf = ByteArray(65536)
+            while (true) {
+                val n = worldIn.read(buf)
+                if (n == -1) break
+
+                synchronized(s2cRaw) { s2cRaw.write(buf, 0, n); s2cRaw.flush() }
+
+                if (bufferingLoginResponse) {
+                    loginResponseBuffer.write(buf, 0, n)
+                    parseServerData(buf, n)
+                    if (phase == Phase.POST_LOGIN) {
+                        val modified = rewriteLoginResponseHostname(loginResponseBuffer.toByteArray())
+                        clientOut.write(modified)
+                        clientOut.flush()
+                        loginResponseBuffer.reset()
+                        bufferingLoginResponse = false
+                    }
+                } else {
+                    clientOut.write(buf, 0, n)
+                    clientOut.flush()
+                    parseServerData(buf, n)
+                }
+            }
+        } catch (e: Exception) {
+            log("S->C", "World relay ended: ${e::class.simpleName}: ${e.message}")
+        }
+
+        // Also relay any further client data to the world
+        // (the main c2s loop will continue reading from clientIn and forwarding)
+        // But the output reference needs to point to the world
+        targetOutput = worldOut
+    }
+
+    /**
+     * RSA MITM with session key swap: decrypt, replace session key, re-encrypt.
+     */
+    private fun performRsaMitmWithKeySwap(packet: ByteArray, loginOpcode: Int, varShortSize: Int, newSessionKey: Long): ByteArray? {
+        try {
+            val payload = packet.copyOfRange(3, 3 + varShortSize)
+            var pos = 0
+            pos += 8 // skip version (2x g4)
+            if (loginOpcode == 16) pos++ // skip disconnect flag
+
+            val rsaSize = ((payload[pos].toInt() and 0xFF) shl 8) or (payload[pos + 1].toInt() and 0xFF)
+            pos += 2
+            val rsaBlockStart = pos
+            val rsaCiphertext = payload.copyOfRange(pos, pos + rsaSize)
+            pos += rsaSize
+            val postRsaData = payload.copyOfRange(pos, payload.size)
+            val preRsaData = payload.copyOfRange(0, rsaBlockStart - 2)
+
+            // Decrypt
+            val decrypted = RSA.crypt(rsaCiphertext, ourRsaMod, ourRsaExp)
+            var dpos = 0
+            if (decrypted.isNotEmpty() && decrypted[0] != 10.toByte() && decrypted.size > 1 && decrypted[1] == 10.toByte()) {
+                dpos = 1
+            }
+            val magicPos = dpos
+            if ((decrypted[dpos].toInt() and 0xFF) != 10) {
+                log("MITM", "ERROR: RSA magic mismatch in game login!")
+                return null
+            }
+            dpos++ // magic
+            dpos += 16 // 4 ISAAC keys
+
+            // SWAP the session key (8 bytes at dpos)
+            val oldSessionKey = ByteBuffer.wrap(decrypted, dpos, 8).long
+            log("MITM", "Session key swap: lobby=0x${"%016X".format(oldSessionKey)} → world=0x${"%016X".format(newSessionKey)}")
+            val keyBytes = ByteBuffer.allocate(8).putLong(newSessionKey).array()
+            System.arraycopy(keyBytes, 0, decrypted, dpos, 8)
+
+            // Extract ISAAC keys (at magicPos+1)
+            var kpos = magicPos + 1
+            val keys = IntArray(4)
+            for (i in 0..3) {
+                keys[i] = ((decrypted[kpos].toInt() and 0xFF) shl 24) or
+                        ((decrypted[kpos + 1].toInt() and 0xFF) shl 16) or
+                        ((decrypted[kpos + 2].toInt() and 0xFF) shl 8) or
+                        (decrypted[kpos + 3].toInt() and 0xFF)
+                kpos += 4
+            }
+            isaacKeys = keys.copyOf()
+            initializeIsaacCiphers(keys)
+
+            // Re-encrypt
+            val rsaPlaintext = decrypted.copyOfRange(magicPos, decrypted.size)
+            val reEncrypted = RSA.crypt(rsaPlaintext, jagexRsaMod, jagexRsaExp)
+
+            // Build the re-encrypted block with leading zero
+            val reEncBlock: ByteArray
+            if (reEncrypted.isNotEmpty() && (reEncrypted[0].toInt() and 0x80) != 0) {
+                reEncBlock = ByteArray(reEncrypted.size + 1)
+                reEncBlock[0] = 0
+                System.arraycopy(reEncrypted, 0, reEncBlock, 1, reEncrypted.size)
+            } else {
+                reEncBlock = reEncrypted
+            }
+
+            val newRsaSize = reEncBlock.size
+            val newPayload = ByteArrayOutputStream()
+            newPayload.write(preRsaData)
+            newPayload.write((newRsaSize shr 8) and 0xFF)
+            newPayload.write(newRsaSize and 0xFF)
+            newPayload.write(reEncBlock)
+            newPayload.write(postRsaData)
+
+            val newPayloadBytes = newPayload.toByteArray()
+            val result = ByteArray(3 + newPayloadBytes.size)
+            result[0] = loginOpcode.toByte()
+            result[1] = ((newPayloadBytes.size shr 8) and 0xFF).toByte()
+            result[2] = (newPayloadBytes.size and 0xFF).toByte()
+            System.arraycopy(newPayloadBytes, 0, result, 3, newPayloadBytes.size)
+
+            return result
+        } catch (e: Exception) {
+            log("MITM", "ERROR during game login RSA MITM: ${e::class.simpleName}: ${e.message}")
+            e.printStackTrace()
+            return null
+        }
     }
 
     // ---- RSA MITM ----
@@ -1245,22 +945,13 @@ private class ProxySession(
     private fun parseClientData(buf: ByteArray, len: Int) {
         when (phase) {
             Phase.CONNECTION_TYPE -> {
-                connectionType = buf[0].toInt() and 0xFF
-                val typeName = CONNECTION_TYPE_NAMES[connectionType] ?: "UNKNOWN"
-                log("C->S", "[${len}B] CONNECTION_TYPE = $connectionType ($typeName)")
+                // Should not happen — connection type is handled in run() before relay starts
+                log("C->S", "[${len}B] CONNECTION_TYPE (unexpected in relay)")
                 logHex("C->S", buf, 0, len)
-
-                if (connectionType == 15) {
-                    phase = Phase.JS5
-                    log("C->S", "JS5 connection -- switching to raw relay mode")
-                } else {
-                    phase = Phase.FIRST_RESPONSE
-                }
             }
 
             Phase.JS5 -> {
-                log("C->S", "[${len}B] JS5 data")
-                logHex("C->S", buf, 0, len, MAX_HEX_DUMP_BYTES_DEFAULT)
+                // JS5 data — silent passthrough, no logging
             }
 
             else -> {
@@ -1279,7 +970,7 @@ private class ProxySession(
      *   raw_byte = read_byte()
      *   opcode = (raw_byte - isaac_next()) & 0xFF
      *
-     * Then read size based on CLIENT_PROT_SIZES table, then payload.
+     * Then read size based on codec, then payload.
      */
     private fun parseClientPostLogin(buf: ByteArray, len: Int) {
         val cipher = c2sIsaac
@@ -1306,7 +997,7 @@ private class ProxySession(
                 c2sPendingSize = -1
 
                 if (size < 0) {
-                    val sizeInfo = CLIENT_PROT_SIZES[opcode]
+                    val sizeInfo = codec.clientProtSize(opcode)
                     when (sizeInfo) {
                         0 -> size = 0
                         -1 -> {
@@ -1326,7 +1017,7 @@ private class ProxySession(
                 pos++
                 opcode = (rawByte - cipher.nextInt()) and 0xFF
 
-                if (opcode < 0 || opcode >= CLIENT_PROT_SIZES.size) {
+                if (opcode < 0 || opcode >= 130) {
                     log("C->S", "POST_LOGIN DESYNC: decoded opcode $opcode out of range at byte ${pos - 1}")
                     logHex("C->S", data, maxOf(0, pos - 3), minOf(32, data.size - maxOf(0, pos - 3)))
                     c2sAccum.reset()
@@ -1335,7 +1026,7 @@ private class ProxySession(
             }
 
             if (size < 0) {
-                val sizeInfo = CLIENT_PROT_SIZES[opcode]
+                val sizeInfo = codec.clientProtSize(opcode)
                 when (sizeInfo) {
                     0 -> size = 0
                     -1 -> {
@@ -1361,10 +1052,12 @@ private class ProxySession(
             val payload = data.copyOfRange(pos, pos + size)
             pos += size
 
-            val name = if (opcode < CLIENT_PROT_NAMES.size) CLIENT_PROT_NAMES[opcode] else "OPCODE_$opcode"
-            log("C->S", "PKT opcode=$opcode (0x${"%02X".format(opcode)}) $name size=$size")
-            if (!prettyPrintClientPkt(opcode, payload, size)) {
-                if (size > 0) logHex("C->S", payload, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN)
+            if (opcode !in SUPPRESS_C2S) {
+                val name = codec.clientProtName(opcode)
+                log("C->S", "PKT opcode=$opcode (0x${"%02X".format(opcode)}) $name size=$size")
+                if (!prettyPrintClientPkt(opcode, payload, size)) {
+                    if (size > 0) logHex("C->S", payload, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN)
+                }
             }
         }
 
@@ -1387,6 +1080,7 @@ private class ProxySession(
                 if (accum.size >= 9) {
                     val responseCode = accum[0].toInt() and 0xFF
                     val sessionKey = ByteBuffer.wrap(accum, 1, 8).long
+                    serverSessionKey = sessionKey
                     log("S->C", "[${accum.size}B] FIRST_RESPONSE: response_code=$responseCode, session_key=0x${"%016X".format(sessionKey)}")
                     logHex("S->C", accum, 0, accum.size)
 
@@ -1507,7 +1201,7 @@ private class ProxySession(
 
                 when (resultCode) {
                     2 -> {
-                        log("S->C", "  -> Login SUCCESS! Waiting for login data length...")
+                        log("S->C", "  -> Login SUCCESS!")
                         phase = Phase.LOGIN_DATA_LEN
                         if (len > 1) {
                             parseServerData(buf.copyOfRange(1, len), len - 1)
@@ -1572,7 +1266,14 @@ private class ProxySession(
             }
 
             Phase.POST_LOGIN -> {
-                parseServerPostLogin(buf, len)
+                if (bufferingLoginResponse) {
+                    // Don't process POST_LOGIN data during login response buffering —
+                    // the bytes will be handled later by decodeAndRewritePostLogin.
+                    // Also clear s2cAccum so stale data doesn't corrupt the decoder.
+                    s2cAccum.reset()
+                } else {
+                    parseServerPostLogin(buf, len)
+                }
             }
 
             else -> {
@@ -1595,8 +1296,405 @@ private class ProxySession(
      *       decoded2 = (raw_byte2 - isaac_next()) & 0xFF
      *       opcode = (decoded1 - 128) * 256 + decoded2 (2 ISAAC values consumed)
      *
-     * Then look up size from SERVER_PROT_SIZES table.
+     * Then look up size from codec.
      */
+    /**
+     * Process POST_LOGIN S2C data: rewrite worldlist hostnames to "localhost", then forward.
+     *
+     * ISAAC only encrypts opcode bytes. Size prefixes and payloads are cleartext.
+     * We replace ".runescape.com" hostnames with "localhost" and adjust the containing
+     * packet's varShort size field.
+     */
+    private fun processAndForwardPostLogin(buf: ByteArray, len: Int): ByteArray {
+        parseServerPostLogin(buf, len)
+
+        val data = buf.copyOfRange(0, len)
+        val marker = ".runescape.com".toByteArray(Charsets.ISO_8859_1)
+
+        // Quick check: does this chunk contain any worldlist hostnames?
+        var hasMarker = false
+        for (i in 0..data.size - marker.size) {
+            var m = true
+            for (j in marker.indices) { if (data[i + j] != marker[j]) { m = false; break } }
+            if (m) { hasMarker = true; break }
+        }
+        if (!hasMarker) return data
+
+        // Replace hostnames and track total byte delta
+        val localhost = "localhost".toByteArray(Charsets.ISO_8859_1)
+        val result = ByteArrayOutputStream(data.size)
+        var readPos = 0
+        var totalDelta = 0
+        // Track which output positions correspond to which input positions for size field fixup
+        // sizeFieldInputPos = position of the varShort size field in the ORIGINAL data
+        var sizeFieldInputPos = -1
+
+        // First: find the varShort size field position.
+        // The worldlist packet (opcode 150, >127 so 2-byte opcode) is:
+        //   [2B encrypted opcode][2B BE size][payload...]
+        // The first hostname is somewhere inside the payload. Walk backwards from the first
+        // hostname occurrence to find the size field: it's the 2-byte BE value immediately
+        // before the payload starts. The payload starts right after the size field.
+        // We identify the size field by reading the 2-byte value and checking if
+        // sizeFieldPos + 2 + size == end_of_data_or_next_packet.
+        // Simpler heuristic: search backwards from the first hostname for the size field.
+        for (i in 0..data.size - marker.size) {
+            var m = true
+            for (j in marker.indices) { if (data[i + j] != marker[j]) { m = false; break } }
+            if (m) {
+                // Found first hostname at position i. Walk backwards to find the packet start.
+                // The worldlist payload starts with a frame byte (0x00 or 0x01), preceded by
+                // the 2-byte size field, preceded by the 2-byte encrypted opcode.
+                // The frame byte is the first byte of the payload.
+                // Let's scan backwards for a position where [pos] and [pos+1] form a valid
+                // varShort size that spans to the end of known data.
+                var searchPos = i - 1
+                while (searchPos >= 4) { // need at least 4 bytes before (2 opcode + 2 size)
+                    val candidateSize = ((data[searchPos - 1].toInt() and 0xFF) shl 8) or
+                            (data[searchPos].toInt() and 0xFF)
+                    val payloadStart = searchPos + 1
+                    // Check if this size is reasonable (positive and within buffer range)
+                    if (candidateSize in 100..60000 && payloadStart + candidateSize <= data.size + 1000) {
+                        sizeFieldInputPos = searchPos - 1
+                        break
+                    }
+                    searchPos--
+                }
+                break
+            }
+        }
+
+        // Build the output with hostnames replaced
+        while (readPos < data.size) {
+            var isMarker = false
+            if (readPos + marker.size <= data.size) {
+                isMarker = true
+                for (j in marker.indices) { if (data[readPos + j] != marker[j]) { isMarker = false; break } }
+            }
+
+            if (isMarker) {
+                var hostStart = readPos
+                while (hostStart > 0 && data[hostStart - 1] != 0.toByte()) hostStart--
+                var nullPos = readPos + marker.size
+                while (nullPos < data.size && data[nullPos] != 0.toByte()) nullPos++
+
+                val oldHostLen = nullPos - hostStart
+                totalDelta += oldHostLen - localhost.size
+
+                // Rewind: we already wrote bytes up to readPos. We need to erase from hostStart.
+                // This is tricky with a stream. Let me just rebuild more carefully.
+                // Actually since we're writing byte-by-byte, hostStart < readPos means we already
+                // wrote the hostname prefix bytes. We need a different approach.
+                break // bail out and use the two-pass approach below
+            } else {
+                readPos++
+            }
+        }
+
+        // TWO-PASS approach: first compute delta, then rebuild
+        result.reset()
+        readPos = 0
+        totalDelta = 0
+
+        // Pass 1: compute total delta
+        var tmpPos = 0
+        while (tmpPos < data.size) {
+            var isMarker = false
+            if (tmpPos + marker.size <= data.size) {
+                isMarker = true
+                for (j in marker.indices) { if (data[tmpPos + j] != marker[j]) { isMarker = false; break } }
+            }
+            if (isMarker) {
+                var hostStart = tmpPos
+                while (hostStart > 0 && data[hostStart - 1] != 0.toByte()) hostStart--
+                var nullPos = tmpPos + marker.size
+                while (nullPos < data.size && data[nullPos] != 0.toByte()) nullPos++
+                totalDelta += (nullPos - hostStart) - localhost.size
+                tmpPos = nullPos + 1
+            } else {
+                tmpPos++
+            }
+        }
+
+        if (totalDelta == 0) return data // hostnames are already "localhost" length? Just return
+
+        // Pass 2: rebuild with replacements
+        readPos = 0
+        var bytesBeforeFirstHost = 0
+        var foundFirst = false
+        while (readPos < data.size) {
+            var isMarker = false
+            if (readPos + marker.size <= data.size) {
+                isMarker = true
+                for (j in marker.indices) { if (data[readPos + j] != marker[j]) { isMarker = false; break } }
+            }
+
+            if (isMarker) {
+                // Erase back to hostname start
+                var hostStart = readPos
+                while (hostStart > 0 && data[hostStart - 1] != 0.toByte()) hostStart--
+                var nullPos = readPos + marker.size
+                while (nullPos < data.size && data[nullPos] != 0.toByte()) nullPos++
+
+                if (!foundFirst) {
+                    bytesBeforeFirstHost = hostStart
+                    foundFirst = true
+                    // Rewind the result to hostStart
+                    val current = result.toByteArray()
+                    result.reset()
+                    result.write(current, 0, hostStart)
+                }
+
+                result.write(localhost)
+                result.write(0)
+                readPos = nullPos + 1
+            } else {
+                result.write(data[readPos].toInt())
+                readPos++
+            }
+        }
+
+        val output = result.toByteArray()
+
+        // Fix the varShort size field
+        if (sizeFieldInputPos >= 0 && sizeFieldInputPos + 1 < output.size) {
+            val oldSize = ((output[sizeFieldInputPos].toInt() and 0xFF) shl 8) or
+                    (output[sizeFieldInputPos + 1].toInt() and 0xFF)
+            val newSize = oldSize - totalDelta
+            output[sizeFieldInputPos] = ((newSize shr 8) and 0xFF).toByte()
+            output[sizeFieldInputPos + 1] = (newSize and 0xFF).toByte()
+            log("CTRL", "Worldlist rewrite: ${data.size}→${output.size}B, varShort size $oldSize→$newSize (delta=$totalDelta)")
+        } else {
+            log("CTRL", "WARNING: Could not find worldlist size field (delta=$totalDelta)")
+        }
+
+        return output
+    }
+
+    /**
+     * Decode POST_LOGIN S2C packets, rewrite WORLDLIST_FETCH_REPLY hostnames, return bytes to forward.
+     *
+     * For each complete packet:
+     * - If WORLDLIST_FETCH_REPLY (opcode 150): replace ".runescape.com" hostnames with "localhost"
+     *   in the cleartext payload, recompute the varShort size, keep original encrypted opcode bytes.
+     * - All other packets: forward the original raw bytes unchanged.
+     *
+     * This works because ISAAC only encrypts opcode bytes. Size and payload are cleartext.
+     */
+    private fun decodeAndRewritePostLogin(buf: ByteArray, len: Int): ByteArray {
+        val cipher = s2cIsaac
+        if (cipher == null) {
+            return buf.copyOfRange(0, len)
+        }
+
+        // NOTE: do NOT call parseServerPostLogin here — this function does its own
+        // ISAAC decoding. Calling both would consume ISAAC values twice → desync.
+        s2cAccum.write(buf, 0, len)
+        val data = s2cAccum.toByteArray()
+        var pos = 0
+        val output = ByteArrayOutputStream(data.size + 64)
+
+        while (pos < data.size) {
+            val packetStart = pos // raw byte position of this packet's start
+            val opcode: Int
+            var size = -1
+
+            // --- Decode opcode (same logic as parseServerPostLogin) ---
+            if (s2cPendingOpcode >= 0) {
+                opcode = s2cPendingOpcode
+                size = s2cPendingSize
+                s2cPendingOpcode = -1
+                s2cPendingSize = -1
+                if (size < 0) {
+                    val sizeInfo = codec.serverProtSize(opcode)
+                    when (sizeInfo) {
+                        0 -> size = 0
+                        -1 -> { if (pos >= data.size) { s2cPendingOpcode = opcode; s2cPendingSize = -1; break }; size = data[pos].toInt() and 0xFF; pos++ }
+                        -2 -> { if (pos + 1 >= data.size) { s2cPendingOpcode = opcode; s2cPendingSize = -1; break }; size = ((data[pos].toInt() and 0xFF) shl 8) or (data[pos + 1].toInt() and 0xFF); pos += 2 }
+                        else -> size = sizeInfo
+                    }
+                }
+            } else if (s2cPartialOpcodeFirstByte >= 0) {
+                val decoded = s2cPartialOpcodeFirstByte
+                s2cPartialOpcodeFirstByte = -1
+                if (pos >= data.size) { s2cPartialOpcodeFirstByte = decoded; break }
+                val rawSecondByte = data[pos].toInt() and 0xFF; pos++
+                val decodedSecond = (rawSecondByte - cipher.nextInt()) and 0xFF
+                opcode = (decoded - 128) * 256 + decodedSecond
+            } else {
+                if (pos >= data.size) break
+                val rawByte = data[pos].toInt() and 0xFF; pos++
+                val isaacVal = cipher.nextInt()
+                val decoded = (rawByte - isaacVal) and 0xFF
+                if (decoded < 128) {
+                    opcode = decoded
+                } else {
+                    if (pos >= data.size) { s2cPartialOpcodeFirstByte = decoded; break }
+                    val rawSecondByte = data[pos].toInt() and 0xFF; pos++
+                    val isaacVal2 = cipher.nextInt()
+                    val decodedSecond = (rawSecondByte - isaacVal2) and 0xFF
+                    opcode = (decoded - 128) * 256 + decodedSecond
+                }
+                // Log last 3 opcodes decoded for desync debugging
+                if (s2cRecentPackets.size >= 8) {
+                    s2cLastIsaacDebug = "raw=0x${"%02X".format(rawByte)} isaac=${isaacVal} decoded=$decoded pos=${pos-1}"
+                }
+            }
+
+            if (opcode < 0 || opcode >= 218) {
+                log("S->C", "POST_LOGIN DESYNC: opcode $opcode out of range at byte ${pos - 1}")
+                log("S->C", "  ISAAC debug: $s2cLastIsaacDebug")
+                log("S->C", "  Last 10 packets before desync:")
+                for (entry in s2cRecentPackets) log("S->C", "    $entry")
+                logHex("S->C", data, maxOf(0, pos - 16), minOf(32, data.size - maxOf(0, pos - 16)))
+                s2cAccum.reset()
+                s2cIsaac = null
+                // Flush remaining raw data as-is
+                output.write(data, packetStart, data.size - packetStart)
+                return output.toByteArray()
+            }
+
+            // --- Read size ---
+            val sizeFieldStart = pos
+            if (size < 0) {
+                val sizeInfo = codec.serverProtSize(opcode)
+                when (sizeInfo) {
+                    0 -> size = 0
+                    -1 -> { if (pos >= data.size) { s2cPendingOpcode = opcode; s2cPendingSize = -1; break }; size = data[pos].toInt() and 0xFF; pos++ }
+                    -2 -> { if (pos + 1 >= data.size) { s2cPendingOpcode = opcode; s2cPendingSize = -1; break }; size = ((data[pos].toInt() and 0xFF) shl 8) or (data[pos + 1].toInt() and 0xFF); pos += 2 }
+                    else -> size = sizeInfo
+                }
+            }
+
+            val payloadStart = pos
+
+            if (pos + size > data.size) {
+                // Partial payload — save state, buffer only the unread payload bytes.
+                // The opcode and size have already been consumed (ISAAC advanced, size parsed).
+                // Don't include them in the accumulator — they're saved in pending state.
+                s2cPendingOpcode = opcode
+                s2cPendingSize = size
+                s2cAccum.reset()
+                if (pos < data.size) {
+                    s2cAccum.write(data, pos, data.size - pos)  // only unconsumed bytes
+                }
+                // Write the original raw opcode+size bytes to output (passthrough)
+                output.write(data, packetStart, pos - packetStart)
+                return output.toByteArray()
+            }
+
+            val payload = data.copyOfRange(pos, pos + size)
+            pos += size
+
+            // Track recent packets for desync debugging
+            val sizeMode = codec.serverProtSize(opcode)
+            val sizeModeStr = when (sizeMode) { -1 -> "varByte"; -2 -> "varShort"; else -> "fixed($sizeMode)" }
+            val entry = "op=$opcode (${codec.serverProtName(opcode)}) $sizeModeStr data=$size bytes @byte${packetStart}"
+            if (s2cRecentPackets.size >= 10) s2cRecentPackets.removeFirst()
+            s2cRecentPackets.addLast(entry)
+
+            // --- Log (suppress keepalives) ---
+            if (opcode !in SUPPRESS_S2C) {
+                val name = codec.serverProtName(opcode)
+                log("S->C", "PKT opcode=$opcode (0x${"%02X".format(opcode)}) $name size=$size")
+                if (!prettyPrintServerPkt(opcode, payload, size)) {
+                    if (size > 0) logHex("S->C", payload, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN)
+                }
+            }
+
+            // --- Rewrite or passthrough ---
+            if (opcode == 159 && size > 0) {  // WORLDLIST_FETCH_REPLY (947: 159)
+                // WORLDLIST_FETCH_REPLY — rewrite hostnames
+                val newPayload = rewriteWorldlistPayload(payload)
+                if (newPayload !== payload) {
+                    // Write original encrypted opcode bytes
+                    output.write(data, packetStart, sizeFieldStart - packetStart)
+                    // Write new varShort size
+                    output.write((newPayload.size shr 8) and 0xFF)
+                    output.write(newPayload.size and 0xFF)
+                    // Write modified payload
+                    output.write(newPayload)
+                    log("CTRL", "Worldlist rewrite: payload $size → ${newPayload.size}")
+                } else {
+                    // No changes — write original bytes
+                    output.write(data, packetStart, pos - packetStart)
+                }
+            } else {
+                // Forward original raw bytes for this packet
+                output.write(data, packetStart, pos - packetStart)
+            }
+        }
+
+        // All data consumed
+        s2cAccum.reset()
+        return output.toByteArray()
+    }
+
+    /**
+     * Rewrite hostnames in a WORLDLIST_FETCH_REPLY payload.
+     * Replaces all null-terminated strings containing ".runescape.com" with "localhost".
+     * Returns a new byte array if any changes were made, or the same array if not.
+     */
+    private fun rewriteWorldlistPayload(payload: ByteArray): ByteArray {
+        val marker = ".runescape.com".toByteArray(Charsets.ISO_8859_1)
+        val localhost = "localhost".toByteArray(Charsets.ISO_8859_1)
+
+        // Check if there are any hostnames to rewrite
+        var hasMatch = false
+        for (i in 0..payload.size - marker.size) {
+            var m = true
+            for (j in marker.indices) { if (payload[i + j] != marker[j]) { m = false; break } }
+            if (m) { hasMatch = true; break }
+        }
+        if (!hasMatch) return payload
+
+        // Rebuild payload with hostname replacements
+        val out = ByteArrayOutputStream(payload.size)
+        var i = 0
+        while (i < payload.size) {
+            // Check for ".runescape.com" at current position
+            var isMarker = false
+            if (i + marker.size <= payload.size) {
+                isMarker = true
+                for (j in marker.indices) { if (payload[i + j] != marker[j]) { isMarker = false; break } }
+            }
+
+            if (isMarker) {
+                // Walk backwards to hostname start (after preceding null byte)
+                var hostStart = i
+                while (hostStart > 0 && payload[hostStart - 1] != 0.toByte()) hostStart--
+                // Walk forward past ".runescape.com" to find null terminator
+                var hostEnd = i + marker.size
+                while (hostEnd < payload.size && payload[hostEnd] != 0.toByte()) hostEnd++
+
+                // Erase the hostname bytes we already wrote to output (rewind)
+                val written = out.toByteArray()
+                out.reset()
+                out.write(written, 0, written.size - (i - hostStart))
+
+                // Write replacement
+                out.write(localhost)
+                out.write(0) // null terminator
+
+                // Also store in worldHostnames map for routing
+                val oldHost = String(payload, hostStart, hostEnd - hostStart, Charsets.ISO_8859_1)
+                // Extract world ID from "worldNN.runescape.com" pattern
+                val worldMatch = Regex("world(\\d+)").find(oldHost)
+                if (worldMatch != null) {
+                    worldHostnames[worldMatch.groupValues[1].toInt()] = oldHost
+                }
+
+                i = hostEnd + 1 // skip past null terminator
+            } else {
+                out.write(payload[i].toInt())
+                i++
+            }
+        }
+
+        return out.toByteArray()
+    }
+
+    @Suppress("unused") // kept for reference — the new decodeAndRewritePostLogin replaces this
     private fun parseServerPostLogin(buf: ByteArray, len: Int) {
         val cipher = s2cIsaac
         if (cipher == null) {
@@ -1626,7 +1724,7 @@ private class ProxySession(
                     // just need payload bytes
                 } else {
                     // We have the opcode but still need the size byte(s)
-                    val sizeInfo = SERVER_PROT_SIZES[opcode]
+                    val sizeInfo = codec.serverProtSize(opcode)
                     when (sizeInfo) {
                         0 -> size = 0
                         -1 -> {
@@ -1684,8 +1782,8 @@ private class ProxySession(
                 }
             }
 
-            if (opcode < 0 || opcode >= SERVER_PROT_SIZES.size) {
-                log("S->C", "POST_LOGIN DESYNC: decoded opcode $opcode out of range [0,${SERVER_PROT_SIZES.size}) at byte ${pos - 1}")
+            if (opcode < 0 || opcode >= 218) {
+                log("S->C", "POST_LOGIN DESYNC: decoded opcode $opcode out of range [0,218) at byte ${pos - 1}")
                 logHex("S->C", data, maxOf(0, pos - 3), minOf(64, data.size - maxOf(0, pos - 3)))
                 s2cAccum.reset()
                 log("S->C", "POST_LOGIN: ISAAC desync -- disabling ISAAC decoding for remainder")
@@ -1695,7 +1793,7 @@ private class ProxySession(
 
             // If size not yet determined (normal path, not resumed from pending)
             if (size < 0) {
-                val sizeInfo = SERVER_PROT_SIZES[opcode]
+                val sizeInfo = codec.serverProtSize(opcode)
                 when (sizeInfo) {
                     0 -> size = 0
                     -1 -> {
@@ -1736,10 +1834,12 @@ private class ProxySession(
             val payload = data.copyOfRange(pos, pos + size)
             pos += size
 
-            val name = if (opcode < SERVER_PROT_NAMES.size) SERVER_PROT_NAMES[opcode] else "OPCODE_$opcode"
-            log("S->C", "PKT opcode=$opcode (0x${"%02X".format(opcode)}) $name size=$size")
-            if (!prettyPrintServerPkt(opcode, payload, size)) {
-                if (size > 0) logHex("S->C", payload, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN)
+            if (opcode !in SUPPRESS_S2C) {
+                val name = codec.serverProtName(opcode)
+                log("S->C", "PKT opcode=$opcode (0x${"%02X".format(opcode)}) $name size=$size")
+                if (!prettyPrintServerPkt(opcode, payload, size)) {
+                    if (size > 0) logHex("S->C", payload, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN)
+                }
             }
         }
 
@@ -1753,7 +1853,7 @@ private class ProxySession(
     private fun prettyPrintServerPkt(opcode: Int, d: ByteArray, size: Int): Boolean {
         try {
             when (opcode) {
-                // ---- Variable setters (RE-verified from rs2client rev 946) ----
+                // ---- Variable setters (RE-verified from rs2client rev 947) ----
                 14 -> { // SET_VARP_SMALL: g2(lo-128) varpId, g1(-128) value
                     val id = r2sub128(d, 0); val v = (r1(d, 2) - 128).toByte().toInt()
                     log("S->C", "         varp[$id] = $v")
@@ -1810,18 +1910,15 @@ private class ProxySession(
                         logHex("S->C", d, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN)
                     }
                 }
-                // Remaining interface packets — show raw hex
-                59, 4, 202, 207 -> {
-                    logHex("S->C", d, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN)
-                }
-                202 -> { // IF_SETEVENTS/SETSCROLLSIZE: 2x LE u16, 1B(0x80-transform), g4s_alt2 hash
-                    if (size >= 9) {
-                        val sizeA = r2le(d, 0); val sizeB = r2le(d, 2)
-                        val scrollIdx = (0x80 - (d[4].toInt() and 0xFF)) and 0xFF
-                        val hash = r4alt2(d, 5)
-                        val ifId = (hash ushr 16) and 0xFFFF; val comp = hash and 0xFFFF
-                        log("S->C", "         if=$ifId comp=$comp sizeA=$sizeA sizeB=$sizeB scrollIdx=$scrollIdx")
+                // IF_SETEVENTS (59, 12B): decode and print copy-pasteable builder
+                59 -> {
+                    if (size >= 12) {
+                        log("S->C", "         ${IFEvents.fromWire(d)}")
                     }
+                }
+                // Remaining interface packets — show raw hex
+                4, 202, 207 -> {
+                    logHex("S->C", d, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN)
                 }
                 // IF_OPENSUB/CLOSESUB use DBFilter dispatch — complex routing, show raw hex
                 182, 180 -> {
@@ -1857,7 +1954,7 @@ private class ProxySession(
                         logHex("S->C", d, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN)
                     }
                 }
-                18 -> { // UPDATE_SITESETTINGS: var_short, loop of entries
+                18 -> { // UPDATE_FRIENDLIST: var_short, loop of entries
                     if (size == 0) {
                         log("S->C", "         (empty)")
                     } else {
@@ -2027,6 +2124,7 @@ private class ProxySession(
                     val countryName = if (countryOverride != 0) gjStr2() else ""
                     val activity = gjStr2()
                     val hostname = gjStr2()
+                    worldHostnames[absWorldId] = hostname
                     val extra = if (countryName.isNotEmpty()) " country=\"$countryName\"" else ""
                     log("S->C", "           world[$absWorldId] loc=$countryIdx flags=0x${"%08X".format(flags)} addr=\"$hostname\" activity=\"$activity\"$extra")
                 }
@@ -2128,7 +2226,7 @@ private class ProxySession(
 
     /**
      * Parse lobby login data — exact format from jag::LoginManager::LoginStepHandleLoginData
-     * (verified from rs2client rev 946 via Ghidra RE).
+     * (verified from rs2client rev 947 via Ghidra RE).
      */
     private fun parseLobbyLoginData(data: ByteArray, len: Int) {
         if (len < 10) {
@@ -2255,6 +2353,61 @@ private class ProxySession(
             logWriter.println(hexLine)
         }
         println("[s$sessionId] $hexLine")
+    }
+
+    /**
+     * Rewrite the buffered login response to replace the world hostname with "localhost".
+     * The buffer contains everything from the LOGIN_RESULT byte onwards:
+     *   [1B result=2][1B dataLen][NB loginData]...
+     * The loginData contains a null-terminated hostname string. We find it by searching
+     * for ".runescape.com\0" and replace the entire hostname with "localhost\0".
+     */
+    private fun rewriteLoginResponseHostname(data: ByteArray): ByteArray {
+        // Find ".runescape.com\0" pattern
+        val marker = ".runescape.com\u0000".toByteArray(Charsets.ISO_8859_1)
+        var markerPos = -1
+        outer@ for (i in 0 until data.size - marker.size) {
+            for (j in marker.indices) {
+                if (data[i + j] != marker[j]) continue@outer
+            }
+            markerPos = i
+            break
+        }
+
+        if (markerPos < 0) {
+            log("CTRL", "WARNING: Could not find .runescape.com in login response, forwarding unmodified")
+            return data
+        }
+
+        // Walk backwards from markerPos to find the start of the hostname string
+        var hostnameStart = markerPos
+        while (hostnameStart > 0 && data[hostnameStart - 1] != 0.toByte()) {
+            hostnameStart--
+        }
+
+        val hostnameEnd = markerPos + marker.size // includes the null terminator
+        val oldHostname = String(data, hostnameStart, hostnameEnd - hostnameStart - 1, Charsets.ISO_8859_1)
+        log("CTRL", "Rewriting hostname: \"$oldHostname\" → \"localhost\"")
+
+        val replacement = "localhost\u0000".toByteArray(Charsets.ISO_8859_1)
+        val out = ByteArrayOutputStream(data.size)
+        out.write(data, 0, hostnameStart)
+        out.write(replacement)
+        out.write(data, hostnameEnd, data.size - hostnameEnd)
+
+        val result = out.toByteArray()
+
+        // Adjust the login data length byte (second byte in the buffer = result[1])
+        // The length changed by (replacement.size - (hostnameEnd - hostnameStart))
+        val delta = replacement.size - (hostnameEnd - hostnameStart)
+        if (result.size >= 2) {
+            val oldLen = result[1].toInt() and 0xFF
+            val newLen = oldLen + delta
+            result[1] = (newLen and 0xFF).toByte()
+            log("CTRL", "Adjusted login data length: $oldLen → $newLen (delta=$delta)")
+        }
+
+        return result
     }
 
     private fun closeLog() {

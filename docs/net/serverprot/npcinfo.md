@@ -1,5 +1,7 @@
 # ServerProt: NPCInfo Category
 
+> **Rev 947-1**: Opcodes reshuffled from 946. See `serverprot-table.md` for current opcode/size table.
+
 ## Overview
 
 The NPCInfo packet handler category manages NPC data decoding and NPC-specific animation updates. Two handlers are registered inline in `BindHandlers` (0x0011852a), not via a separate constructor call. The primary handler (`decode`) processes the main NPC_INFO packet which contains the full NPC update stream (positions, appearances, animations, etc.), while `decodeAnimSpecific` handles targeted animation updates for individual NPCs.

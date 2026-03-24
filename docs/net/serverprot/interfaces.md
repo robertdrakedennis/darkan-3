@@ -1,8 +1,13 @@
 # ServerProt: Interfaces Category
 
+> **Rev 947-1 update**: All opcodes reshuffled. Interfaces constructor at `0x0014d97a` (947-1).
+> Key verified 947 opcodes: IF_OPENTOP=68 (6B), IF_OPENSUB=17 (8B), IF_SETGRAPHIC=92 (8B),
+> IF_SETEVENTS=34 (10B, changed from 12B), IF_SETEVENTS2=35 (12B), IF_SETPOSITION=8 (23B).
+> See `serverprot-947-matched.md` for byte transform details.
+
 ## Overview
 
-The Interfaces packet handler category manages all server-to-client interface/widget operations. It is registered by the constructor at `0x0014d9aa` (`jag::packethandlers::Interfaces::Interfaces`), which binds 37 lambda handlers to ServerProt globals in the address range `0x016f38b0` - `0x016f41c0`.
+The Interfaces packet handler category manages all server-to-client interface/widget operations. It is registered by the constructor at `0x0014d97a` (947-1), which binds lambda handlers to ServerProt globals.
 
 All handlers follow the standard ServerProt invocation pattern:
 - Called via `ServerProt.invokePtr(ServerProt.callableData, Packet*, &packetSize)`

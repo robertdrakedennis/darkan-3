@@ -32,7 +32,7 @@ object EnvVars {
     val worldPort: Int = dotenv.get("WORLD_PORT", "43595").toInt()
     val cachePath: String = dotenv.get("CACHE_PATH", "./data/cache")
     val memCache: Boolean = dotenv.get("MEM_CACHE", "false").toBooleanStrict()
-    val majorVersion: Int = dotenv.get("MAJOR_VERSION", "946").toInt()
+    val majorVersion: Int = dotenv.get("MAJOR_VERSION", "947").toInt()
     val minorVersion: Int = dotenv.get("MINOR_VERSION", "1").toInt()
     val cacheThreadUsage: Double = dotenv.get("CACHE_THREAD_USAGE", "1.0").toDouble()
     val configHttpPort: Int = dotenv.get("CONFIG_HTTP_PORT", "8829").toInt()
@@ -42,11 +42,11 @@ object EnvVars {
     val packetValidateSizes: Boolean = dotenv.get("PACKET_VALIDATE_SIZES", "true").toBooleanStrict()
 
     // ISAAC delta: added to XTEA key ints to derive server->client cipher seed
-    // VERIFIED from rs2client rev 946 at 0x00dc8090 — all four values are 50
+    // VERIFIED from rs2client rev 947-1 at 0x00dcbd90 — all four values are 50
     const val ISAAC_DELTA = 50
 
     // Jagex login RSA public key (1024-bit) — used by the proxy to re-encrypt intercepted RSA blocks
-    // VERIFIED from rs2client rev 946 at 0x0111c898
-    const val JAGEX_LOGIN_RSA_MODULUS_HEX = "9cbc5f910c473c629a26baf5f9a1d01d4b8aadc6480518d3fe8659e4b09cbe90e104147c47e7df58da3891358777ff6d3a4dbb8940b1d844592b40f45a975590028c0b480f82ac6a52b47ce63b8154e56aa8164a81063a95df25f07882ffdfeb1eb91c4a0d03dd0537c933065080b90436c1376cfa8c3fdebf2e747142579069"
+    // VERIFIED from rs2client rev 947-1 at 0x01120558
+    const val JAGEX_LOGIN_RSA_MODULUS_HEX = "8f389edb4b56fdafc410be11bd0b4dd2ca95085134ac9a00f7768275412e635c05c99b8b6bd10edbaa274e653aed80909ac08f3c35c238f80b40b7d158e351db8039b2d4d8c99891fdc29d1a3182c55ef046bab429f060d101f8ac66d6484dc12b9e63e0d4a83264741aeab3d841045211928c3c6ca72deb5ff2331929efafe9"
     const val JAGEX_LOGIN_RSA_EXPONENT = 65537
 }

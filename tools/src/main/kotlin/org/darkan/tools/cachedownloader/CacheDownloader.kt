@@ -55,22 +55,33 @@ class CacheDownloader(
                     println("  Index $index: skipped (not served by content server)")
                     continue
                 }
-                val existingKeys = storage.allKeys(index)
+                val existingVersions = storage.allVersions(index)
                 var skipped = 0
                 var badSkipped = 0
+                var stale = 0
                 for (entry in archives) {
                     val key = (index.toLong() shl 32) or entry.id.toLong()
                     if (key in badArchives) {
                         badSkipped++
-                    } else if (entry.id !in existingKeys) {
-                        queue.send(FileRequest(index, entry.id))
-                        totalFiles++
                     } else {
-                        skipped++
+                        val cached = existingVersions[entry.id]
+                        if (cached == null) {
+                            // Not cached at all
+                            queue.send(FileRequest(index, entry.id))
+                            totalFiles++
+                        } else if (cached.first != entry.version || cached.second != entry.crc) {
+                            // Cached but version/CRC changed — re-download
+                            queue.send(FileRequest(index, entry.id))
+                            totalFiles++
+                            stale++
+                        } else {
+                            skipped++
+                        }
                     }
                 }
                 val queued = archives.size - skipped - badSkipped
-                if (skipped > 0 || badSkipped > 0) println("  Index $index: skipped $skipped cached, $badSkipped unservable, queued $queued")
+                if (skipped > 0 || badSkipped > 0 || stale > 0)
+                    println("  Index $index: skipped $skipped cached, $stale stale (re-downloading), $badSkipped unservable, queued $queued")
             }
             progress.totalFiles.set(totalFiles)
             println("  $totalFiles TCP files to download (skipped already-cached)")
@@ -115,8 +126,11 @@ class CacheDownloader(
     }
 
     private suspend fun downloadHttpIndex(index: Int, archives: Array<ArchiveEntry>) {
-        val existingKeys = storage.allKeys(index).toMutableSet()
-        var remaining = archives.filter { it.id !in existingKeys }
+        val existingVersions = storage.allVersions(index)
+        var remaining = archives.filter { entry ->
+            val cached = existingVersions[entry.id]
+            cached == null || cached.first != entry.version || cached.second != entry.crc
+        }
         println("  Index $index: ${archives.size} total, ${archives.size - remaining.size} cached, ${remaining.size} to download via HTTP")
 
         if (remaining.isEmpty()) return
