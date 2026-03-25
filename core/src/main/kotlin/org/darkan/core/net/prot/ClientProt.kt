@@ -14,5 +14,12 @@ value class Ping(val dummy: Int = 0) : ClientProt
 
 data class RequestWorldList(val worldlistVersion: Int) : ClientProt
 
+// --- Social ---
+
+data class FriendListAdd(val displayName: String) : ClientProt
+data class FriendListDel(val displayName: String) : ClientProt
+data class IgnoreListAdd(val displayName: String) : ClientProt
+// IgnoreListDel not needed yet — client sends opcode we haven't confirmed
+
 /** Catch-all for opcodes we haven't implemented handlers for yet. Carries opcode for logging. */
 data class UnhandledClientProt(val opcode: Int, val name: String, val size: Int) : ClientProt

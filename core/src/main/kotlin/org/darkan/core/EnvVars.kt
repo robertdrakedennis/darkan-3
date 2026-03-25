@@ -40,6 +40,8 @@ object EnvVars {
     val logLevel: String = dotenv.get("LOG_LEVEL", "TRACE")
     val packetQueueCapacity: Int = dotenv.get("PACKET_QUEUE_CAPACITY", "100").toInt()
     val packetValidateSizes: Boolean = dotenv.get("PACKET_VALIDATE_SIZES", "true").toBooleanStrict()
+    val mongoUri: String = dotenv.get("MONGO_URI", "mongodb://localhost:27017")
+    val mongoDatabase: String = dotenv.get("MONGO_DATABASE", "darkan3")
 
     // ISAAC delta: added to XTEA key ints to derive server->client cipher seed
     // VERIFIED from rs2client rev 947-1 at 0x00dcbd90 — all four values are 50

@@ -8,6 +8,7 @@ package org.darkan.core.net.prot
  * and encoder lambda for a given revision.
  */
 import org.darkan.core.model.IFEvents
+import org.darkan.core.worldlist.WorldList
 
 interface ServerProt
 
@@ -74,4 +75,7 @@ data class UpdateFriendList(val friends: List<FriendEntry>) : ServerProt {
 
 // --- World list ---
 
-data class WorldListPacket(val checksum: Int) : ServerProt
+data class WorldListPacket(
+    val worldList: WorldList,
+    val fullRefresh: Boolean,         // true = send full world defs, false = delta (counts only)
+) : ServerProt

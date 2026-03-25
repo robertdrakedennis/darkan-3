@@ -46,45 +46,69 @@ internal fun Codec.registerRev947ServerCodecsMisc() {
         }
     }
 
-    // WORLDLIST_FETCH_REPLY (159, var_short) — handler: Social::UPDATE_FRIENDCHAT_CHANNEL
+    // WORLDLIST_FETCH_REPLY (159, var_short)
+    // Format RE-verified from rs2client 947-1 handler at 0x0023a390.
+    // See docs/net/serverprot/worldlist-fetch-reply.md for full wire format.
     serverProt<WorldListPacket>(opcode = 159, size = ProtSize.VarShort) { out ->
-        // Frame byte: 0x01 = last (and only) segment
-        out.writeByte(0x01)
+        val worlds = worldList.getWorldArray()
+        out.writeByte(1)                            // frame: 1 = last segment
+        out.writeByte(if (fullRefresh) 2 else 0)    // refresh: 2 = full, 0 = delta
 
-        if (checksum == -1 || checksum == 0) {
-            // Full world list + player counts (updateType = 0x03: bit0 + bit1)
-            out.writeByte(0x03)
+        if (fullRefresh) {
+            out.writeByte(1)                        // separator: 1 = has world defs
 
-            // Country list
-            out.writeByte(1)                        // hasCountries = true
-            out.writeSmart(1)                       // 1 country
-            out.writeSmart(0)                       // countryId = 0
-            out.writePrefixedString("Local")        // country name (gjStr2)
+            // 1. Country list — deduplicated, worlds reference by index
+            val countries = worlds.map { it.country }.distinct()
+            out.writeSmart(countries.size)
+            for (country in countries) {
+                out.writeSmart(country.id)
+                out.writeJagString(country.name.lowercase().replaceFirstChar { it.uppercase() })
+            }
 
-            // World list
-            val worldId = 1
-            out.writeSmart(worldId)                 // minWorldId
-            out.writeSmart(worldId)                 // maxWorldId
-            out.writeSmart(1)                       // worldCount = 1
+            // 2. World ID range and count
+            val minWorldId = worlds.minOfOrNull { it.number } ?: 0
+            val maxWorldId = worlds.maxOfOrNull { it.number } ?: 0
+            out.writeSmart(minWorldId)              // minWorldId (base for offsets)
+            out.writeSmart(maxWorldId + 1)          // maxWorldId (upper bound)
+            out.writeSmart(worlds.size)             // worldCount
 
-            // World entry
-            out.writeSmart(0)                       // idDelta = 0
-            out.writeByte(0)                        // countryIndex = 0
-            out.writeInt(0x00000001)                // flags: bit0 = members
-            out.writeSmart(0)                       // countryOverride = 0
-            out.writePrefixedString("Darkan")       // activity (gjStr2)
-            out.writePrefixedString("localhost")    // hostname (gjStr2)
+            // 3. World entries
+            for (world in worlds) {
+                out.writeSmart(world.number - minWorldId) // worldNumberOffset from minWorldId
+                out.writeByte(countries.indexOf(world.country)) // country array index
 
-            // CRC + Player counts
-            out.writeInt(0x00000001)                // CRC
-            out.writeSmart(0)                       // worldIdDelta = 0
-            out.writeShort(1)                       // playerCount = 1
+                // Flags (no port bit — 947 doesn't read port from this packet)
+                var flags = 0
+                if (world.members) flags = flags or 0x1
+                if (world.quickchat) flags = flags or 0x2
+                if (world.pvp) flags = flags or 0x4
+                if (world.lootShare) flags = flags or 0x8
+                if (world.highlighted) flags = flags or 0x10
+                out.writeInt(flags)
+
+                // Activity (conditional: smart value > 0 means activity string follows)
+                if (world.activity.isNotEmpty()) {
+                    out.writeSmart(1)               // activityPresence: non-zero = has activity
+                    out.writeJagString(world.activity)
+                } else {
+                    out.writeSmart(0)               // activityPresence: 0 = no activity string
+                }
+
+                // Hostname + serverAddress (two gjStr2 strings)
+                out.writeJagString(world.hostname)
+                out.writeJagString(world.hostname)  // serverAddress = same as hostname
+            }
+
+            // 4. Revision
+            out.writeInt(worldList.revision)
         } else {
-            // Delta: player counts only (updateType = 0x01: bit0 only)
-            out.writeByte(0x01)
-            out.writeInt(checksum)                  // echo back the CRC
-            out.writeSmart(0)                       // worldIdDelta = 0
-            out.writeShort(1)                       // playerCount = 1
+            out.writeByte(0)                        // separator: 0 = counts only
+        }
+
+        // 5. Player count section — always sent
+        for (world in worlds) {
+            out.writeSmart(world.number)
+            out.writeShort(if (world.offline) -1 else world.playersOnline)
         }
     }
 }

@@ -3,6 +3,8 @@ package org.darkan.lobby
 import kotlinx.coroutines.runBlocking
 import org.darkan.core.EnvVars
 import org.darkan.core.Logger
+import org.darkan.core.mongo.Accounts
+import org.darkan.core.mongo.MongoManager
 import org.darkan.core.net.prot.handler.PacketHandlers
 import org.darkan.core.net.prot.revision.rev947.register947
 import world.gregs.voidps.cache.Cache
@@ -21,6 +23,13 @@ fun main() {
         else -> java.util.logging.Level.FINER
     })
     Logger.log("Main", "Log level: ${EnvVars.logLevel}")
+
+    // Initialize MongoDB
+    MongoManager.init()
+    runBlocking { Accounts.ensureIndexes() }
+
+    // Initialize lobby state
+    LobbyState.init()
 
     // Register protocol codec and packet handlers
     register947()

@@ -15,10 +15,15 @@ import org.darkan.core.Logger.logTrace
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.RequestOpcode
 import org.darkan.core.net.ResponseOpcode
+import org.darkan.core.model.Account
 import org.darkan.core.model.IFEvents
+import org.darkan.core.model.Vars
+import org.darkan.core.mongo.Accounts
 import org.darkan.core.net.prot.*
 import org.darkan.core.net.prot.handler.PacketHandlers
 import org.darkan.core.net.session.GameSession
+import org.darkan.lobby.LobbyState
+import org.darkan.lobby.social.SocialManager
 import world.gregs.voidps.buffer.*
 import world.gregs.voidps.buffer.read.BufferReader
 import world.gregs.voidps.buffer.write.BufferWriter
@@ -141,9 +146,11 @@ class LoginServer {
 
         logTrace("XTEA decrypted ${xteaData.size} bytes from $ip")
 
+        // Parse username
+        val username: String
         try {
             val stringUsername = xtea.readUByte().toInt() == 1
-            val username = if (stringUsername) {
+            username = if (stringUsername) {
                 xtea.readRSString()
             } else {
                 xtea.readLong().toRSString()
@@ -154,9 +161,17 @@ class LoginServer {
             logTrace("XTEA remaining ${remaining.size} bytes: ${remaining.take(64).joinToString(" ") { "%02x".format(it) }}")
         } catch (e: Exception) {
             logTrace("XTEA parsing stopped: ${e::class.simpleName}: ${e.message}")
+            output.finish(ResponseOpcode.COULD_NOT_COMPLETE_LOGIN)
+            return
         }
 
-        // Step 5: Send login success
+        // Step 5: Look up or create account in MongoDB
+        val account = Accounts.getOrCreate(username)
+        account.lastIp = ip
+        Accounts.save(account)
+        logInfo("Account loaded: ${account.displayName} (${account.username}) from $ip")
+
+        // Step 6: Send login success
         logInfo("Sending login success to $ip")
 
         // Initialize ISAAC ciphers
@@ -169,7 +184,7 @@ class LoginServer {
         output.writeByte(ResponseOpcode.SUCCESS)
 
         // Send lobby data length + lobby data
-        val lobbyData = buildLobbyData()
+        val lobbyData = buildLobbyData(account)
         output.writeByte(lobbyData.size.toByte())
         output.writeFully(lobbyData)
         output.flush()
@@ -178,22 +193,29 @@ class LoginServer {
 
         // Create session with codec
         val codec = Codec.get(947) ?: error("Rev947 codec not registered!")
-        val session = GameSession(output, inCipher, outCipher, ip, codec)
+        val session = GameSession(output, inCipher, outCipher, ip, codec, username = account.username)
 
-        // Step 6: Send initial lobby packets
-        sendLobbyInitPackets(session)
+        // Register in SocialManager for presence tracking
+        SocialManager.registerPlayer(account, session)
 
-        // Step 7: Lobby session loop — reader coroutine + handler dispatch
-        coroutineScope {
-            launch { session.readPackets(input) }
-            lobbySessionLoop(session)
+        // Step 7: Send initial lobby packets
+        sendLobbyInitPackets(session, account)
+
+        // Step 8: Lobby session loop — reader coroutine + handler dispatch
+        try {
+            coroutineScope {
+                launch { session.readPackets(input) }
+                lobbySessionLoop(session)
+            }
+        } finally {
+            SocialManager.unregisterPlayer(account.username)
         }
     }
 
     /**
-     * Build the lobby login data blob.
+     * Build the lobby login data blob using real account data.
      */
-    private fun buildLobbyData(): ByteArray {
+    private fun buildLobbyData(account: Account): ByteArray {
         val buf = BufferWriter(128)
         val nowMs = System.currentTimeMillis()
 
@@ -202,13 +224,13 @@ class LoginServer {
         buf.writeByte(30)                         // #3 membershipDays: 30
         buf.writeByte(1)                          // #4 emailValidated: yes (bool)
         buf.writeMedium(0)                        // #5 recoveryDelay: 0 (signed medium)
-        buf.writeByte(0)                          // #6 staffModLevel: 0 = none
+        buf.writeByte(account.rights)             // #6 staffModLevel (0=none, 1=mod, 2=admin)
         buf.writeByte(0)                          // #7 unknownFlag1 (bool)
         buf.writeByte(0)                          // #8 unknownFlag2 (bool)
         buf.writeLong(nowMs)                      // #9 membershipTimestamp: Unix millis
         buf.writeByte(0)                          // #10 timeDaysByte
         buf.writeInt((nowMs / 1000).toInt())      // #11 timeMillisInt (seconds since epoch)
-        buf.writeByte(0)                          // #12 flagsByte
+        buf.writeByte(0)                          // #12 flagsByte: 0 = NOT quickchat-only
         buf.writeInt(0)                           // #13 lastLoginIP
         buf.writeInt(5000)                        // #14 lastLoginDays (5000 = "long ago")
         buf.writeShort(1)                         // #15 playerIndex
@@ -219,11 +241,11 @@ class LoginServer {
         buf.writeShort(0)                         // #20 unknown7
         buf.writeShort(0)                         // #21 unknown8
         buf.writeByte(1)                          // #22 isMembersWorld (bool)
-        buf.writePrefixedString("Player")         // #23 displayName (gjStr2)
+        buf.writePrefixedString(account.displayName) // #23 displayName
         buf.writeByte(0)                          // #24 unknown9
         buf.writeInt(0)                           // #25 unknown10
-        buf.writeShort(1)                         // #26 worldId
-        buf.writePrefixedString("localhost")      // #27 serverHostname (gjStr2)
+        buf.writeShort(300)                       // #26 worldId
+        buf.writePrefixedString("localhost")      // #27 serverHostname
         buf.writeShort(43594)                     // #28 gamePort
         buf.writeShort(443)                       // #29 httpsPort
         buf.writeLong(0x4461726B616E3333L)        // #30 sessionToken1 = "Darkan33"
@@ -235,30 +257,35 @@ class LoginServer {
     /**
      * Send initial lobby packets to get the client to render the lobby UI.
      */
-    private suspend fun sendLobbyInitPackets(session: GameSession) {
+    private suspend fun sendLobbyInitPackets(session: GameSession, account: Account) {
         // 1. UPDATE_STAT x29
         for ((statId, xp, level) in DEFAULT_STATS) {
             session.send(UpdateStat(statId, xp, level))
         }
         logTrace("Sent ${DEFAULT_STATS.size}x UPDATE_STAT to ${session.ip}")
 
-        // 2. RESET_ALL_VARPS
+        // 2. RESET_ALL_VARPS + init Vars
+        val vars = Vars()
+        vars.init(session)
         session.send(ResetClientVarcache())
 
-        // 3. SET_VARP — all varps from Jagex live capture
-        for ((id, value) in lobbyVarps) {
-            if (value in -128..127) {
-                session.send(VarpSmall(id, value))
-            } else {
-                session.send(VarpLarge(id, value))
-            }
-        }
-        logTrace("Sent ${lobbyVarps.size}x SET_VARP to ${session.ip}")
+        // 3. Set lobby-relevant varps (identified from CS2 lobby scripts)
+        // Only varps actually referenced by lobby CS2 scripts are sent.
+        vars.setVar(VARP_LAST_LOGIN_RUNEDAY, 7079)    // last login date (runedays)
+        vars.setVar(VARP_CHAT_STATE, 0)                // 0 = safe default (don't hide chat)
+        vars.setVar(VARP_TREASURY_TIMESTAMP, 8792)     // treasury/notification timestamp
+        vars.setVar(VARP_MEMBERSHIP_NOTIF_1, 1)        // membership notification flag
+        // varp 6681 = membership comparison value (only needed if 6680 is set)
+        vars.syncAllToClient()
+        logTrace("Sent lobby varps to ${session.ip}")
 
         // 4. Pre-interface varcs
-        for ((id, value) in preInterfaceVarcs) {
-            sendVarc(session, id, value)
-        }
+        vars.setVarc(VARC_NOTIFICATION_COUNT, 0)   // no pending notifications
+        vars.setVarc(VARC_RENDER_FLAG, 0)
+        vars.setVarc(VARC_NOTIFY_7108, 0)          // false = no notification
+        vars.setVarc(VARC_INBOX_STATE, -1)          // -1 = no inbox messages
+        vars.setVarc(VARC_INBOX_TYPE, -2)           // -2 = no type
+        vars.setVarc(VARC_MUSIC_VOLUME, 150)        // default volume
 
         // 5. IF_OPENTOP + IF_OPENSUB
         session.send(IfOpenTopLobby(LOBBY_INTERFACE_ID))
@@ -268,33 +295,35 @@ class LoginServer {
         logInfo("Sent IF_OPENTOP($LOBBY_INTERFACE_ID) + ${LOBBY_SUB_INTERFACES.size}x IF_OPENSUB to ${session.ip}")
 
         // 6. Post-interface varcs
-        for ((id, value) in postInterfaceVarcs) {
-            sendVarc(session, id, value)
-        }
-        logTrace("Sent ${preInterfaceVarcs.size + postInterfaceVarcs.size}x SET_VARC to ${session.ip}")
+        vars.setVarc(VARC_MEMBERSHIP_TIER, 294)    // membership tier threshold
+        vars.setVarc(VARC_MEMBERSHIP_TIMER, 592000) // membership notification timer
+        vars.setVarc(VARC_TIMER_1776, 592000)       // display timer
+        vars.setVarc(VARC_BONDS_TRADEABLE, 0)       // 0 tradeable bonds
+        vars.setVarc(VARC_BONDS_UNTRADEABLE, 0)     // 0 untradeable bonds
+        vars.setVarc(VARC_RUNECOINS, 0)             // 0 RuneCoins
 
         // 7. IF_SETEVENTS — from 947-1 capture: settings=0, comp varies, ifId=907, fromSlot=1, settings=2
         for (comp in LOBBY_SETEVENTS_COMPONENTS) {
             session.send(IfSetEvents(IFEvents(LOBBY_SETEVENTS_INTERFACE, comp, 1, 0, LOBBY_SETEVENTS_SETTINGS)))
         }
 
-        // 8. SET_RUN_ENERGY → SET_READY_FLAG → UPDATE_IGNORELIST → UPDATE_FRIENDLIST
+        // 8. SET_RUN_ENERGY → SET_READY_FLAG → CHANGE_LOBBY → UPDATE_FRIENDLIST
         session.send(UpdateRunenergy(1))
         session.send(SetReadyFlag())
-        session.send(UpdateIgnoreList())
-        session.send(UpdateFriendList(TEST_FRIENDS))
+        session.send(UpdateIgnoreList())  // CHANGE_LOBBY (empty)
+
+        // Send real friend list from account data
+        val friendEntries = SocialManager.buildFriendList(account)
+        session.send(UpdateFriendList(friendEntries))
+
+        // Send world list (full refresh on login)
+        session.send(WorldListPacket(LobbyState.worldList, fullRefresh = true))
 
         session.flush()
         logInfo("Sent lobby init packets to ${session.ip}")
     }
 
-    private suspend fun sendVarc(session: GameSession, id: Int, value: Int) {
-        if (value in -128..127) {
-            session.send(ClientSetVarcSmall(id, value))
-        } else {
-            session.send(ClientSetVarcLarge(id, value))
-        }
-    }
+    // sendVarc removed — use Vars.setVarc() instead
 
     /**
      * Dispatch loop for the lobby session.
@@ -377,61 +406,30 @@ class LoginServer {
             }
         }
 
-        /** Components on interface 907 that receive IF_SETEVENTS during lobby init (from 947-1 capture). */
+        // --- Lobby-relevant varp IDs (from CS2 lobby script analysis) ---
+        private const val VARP_LAST_LOGIN_RUNEDAY = 1749  // DATE_RUNEDAY at last login
+        private const val VARP_CHAT_STATE = 3185           // chat state machine (0=default, -4=hidden)
+        private const val VARP_TREASURY_TIMESTAMP = 6601   // treasury notification timestamp
+        private const val VARP_MEMBERSHIP_NOTIF_1 = 6679   // membership notification flag 1
+
+        // --- Lobby-relevant varc IDs (from CS2 script cross-reference) ---
+        private const val VARC_INBOX_STATE = 1027          // inbox/notification state (-1=none)
+        private const val VARC_INBOX_TYPE = 1034           // inbox notification type (-2=none)
+        private const val VARC_MUSIC_VOLUME = 1928         // audio volume setting (switch in script 3904/6566)
+        private const val VARC_TIMER_1776 = 1776           // display timer (script 12083)
+        private const val VARC_NOTIFICATION_COUNT = 2643   // notification counter (shown in UI if 1-4)
+        private const val VARC_RENDER_FLAG = 3496          // boolean flag (script 16901)
+        private const val VARC_RUNECOINS = 4266            // RuneCoins balance (script 11164)
+        private const val VARC_MEMBERSHIP_TIER = 4787      // membership/premium tier threshold
+        private const val VARC_MEMBERSHIP_TIMER = 4788     // membership notification timer
+        private const val VARC_BONDS_TRADEABLE = 4968      // tradeable bonds count
+        private const val VARC_BONDS_UNTRADEABLE = 4969    // untradeable bonds count
+        private const val VARC_NOTIFY_7108 = 7108          // boolean notification flag
+
         private const val LOBBY_SETEVENTS_INTERFACE = 907
         private val LOBBY_SETEVENTS_COMPONENTS = intArrayOf(39, 75, 46, 101)
         private const val LOBBY_SETEVENTS_SETTINGS = 0x0002  // from capture: last 2 bytes = 02 00 LE = 2
 
-        /** Hardcoded test friends for lobby development. */
-        private val TEST_FRIENDS = listOf(
-            UpdateFriendList.FriendEntry(displayName = "Zezima", worldId = 1, worldName = "Darkan", worldFlags = 1),
-            UpdateFriendList.FriendEntry(displayName = "Woox", worldId = 0),
-            UpdateFriendList.FriendEntry(displayName = "Suomi"),
-        )
-
-        private val lobbyVarps: List<Pair<Int, Int>> = loadIntPairs("/capture/lobby-varps.txt")
-
-        private val preInterfaceVarcs: List<Pair<Int, Int>>
-        private val postInterfaceVarcs: List<Pair<Int, Int>>
-
-        init {
-            val (pre, post) = loadVarcs("/capture/lobby-varcs.txt")
-            preInterfaceVarcs = pre
-            postInterfaceVarcs = post
-        }
-
-        private fun loadIntPairs(resource: String): List<Pair<Int, Int>> {
-            val stream = LoginServer::class.java.getResourceAsStream(resource)
-                ?: error("Missing resource: $resource")
-            return stream.bufferedReader().useLines { lines ->
-                lines.filter { it.isNotBlank() && !it.startsWith("#") }
-                    .map { line ->
-                        val (id, value) = line.trim().split(" ", limit = 2)
-                        id.toInt() to value.toInt()
-                    }.toList()
-            }
-        }
-
-        private fun loadVarcs(resource: String): Pair<List<Pair<Int, Int>>, List<Pair<Int, Int>>> {
-            val stream = LoginServer::class.java.getResourceAsStream(resource)
-                ?: error("Missing resource: $resource")
-            val pre = mutableListOf<Pair<Int, Int>>()
-            val post = mutableListOf<Pair<Int, Int>>()
-            var target = pre
-            stream.bufferedReader().useLines { lines ->
-                for (line in lines) {
-                    val trimmed = line.trim()
-                    when {
-                        trimmed.isEmpty() || trimmed.startsWith("#") -> {}
-                        trimmed == "---" -> target = post
-                        else -> {
-                            val (id, value) = trimmed.split(" ", limit = 2)
-                            target.add(id.toInt() to value.toInt())
-                        }
-                    }
-                }
-            }
-            return pre to post
-        }
+        // Dump file loaders removed — lobby only needs the named varps above.
     }
 }

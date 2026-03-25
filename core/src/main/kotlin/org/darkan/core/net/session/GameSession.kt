@@ -10,5 +10,7 @@ class GameSession(
     isaacIn: Isaac,
     isaacOut: Isaac,
     ip: String,
-    codec: Codec
+    codec: Codec,
+    /** Protocol username of the logged-in player. Set after login. */
+    var username: String = "",
 ) : Session(write, isaacIn, isaacOut, ip, codec)

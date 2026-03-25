@@ -1,6 +1,7 @@
 package org.darkan.core.net.prot.revision.rev947
 
 import org.darkan.core.net.prot.*
+import world.gregs.voidps.buffer.readRSString
 
 /**
  * All 130 ClientProt opcodes (0-129) for build 947-1.
@@ -18,6 +19,17 @@ internal fun Codec.registerRev947ClientProts() {
     // WORLDLIST_FETCH: CONFIRMED at opcode 23, size 4
     clientProt<RequestWorldList>(opcode = 23, size = 4) {
         RequestWorldList(worldlistVersion = readInt())
+    }
+
+    // --- Social packets (capture-confirmed opcodes) ---
+    clientProt<FriendListDel>(opcode = 22, size = ProtSize.VarByte) {
+        FriendListDel(displayName = readRSString())
+    }
+    clientProt<IgnoreListAdd>(opcode = 48, size = ProtSize.VarByte) {
+        IgnoreListAdd(displayName = readRSString())
+    }
+    clientProt<FriendListAdd>(opcode = 93, size = ProtSize.VarByte) {
+        FriendListAdd(displayName = readRSString())
     }
 
     // --- Unhandled packets (size-only, for framing) ---
@@ -44,7 +56,7 @@ internal fun Codec.registerRev947ClientProts() {
     clientProt<UnhandledClientProt>(opcode = 19, size = ProtSize.VarByte)
     clientProt<UnhandledClientProt>(opcode = 20, size = 1)
     clientProt<UnhandledClientProt>(opcode = 21, size = 8)
-    clientProt<UnhandledClientProt>(opcode = 22, size = ProtSize.VarByte)   // FRIENDLIST_DEL
+    // 22 = FriendListDel (registered above)
     // 23 = RequestWorldList (registered above)
     clientProt<UnhandledClientProt>(opcode = 24, size = ProtSize.VarByte)   // CLANCHANNEL_KICKUSER
     clientProt<UnhandledClientProt>(opcode = 25, size = ProtSize.VarByte)
@@ -70,7 +82,7 @@ internal fun Codec.registerRev947ClientProts() {
     clientProt<UnhandledClientProt>(opcode = 45, size = 9)
     clientProt<UnhandledClientProt>(opcode = 46, size = 3)
     clientProt<UnhandledClientProt>(opcode = 47, size = 4)
-    clientProt<UnhandledClientProt>(opcode = 48, size = ProtSize.VarByte)   // IGNORELIST_ADD
+    // 48 = IgnoreListAdd (registered above)
     clientProt<UnhandledClientProt>(opcode = 49, size = 17)
     clientProt<UnhandledClientProt>(opcode = 50, size = 3)
     clientProt<UnhandledClientProt>(opcode = 51, size = 8)
@@ -115,7 +127,7 @@ internal fun Codec.registerRev947ClientProts() {
     clientProt<UnhandledClientProt>(opcode = 90, size = ProtSize.VarShort)
     clientProt<UnhandledClientProt>(opcode = 91, size = 2)
     clientProt<UnhandledClientProt>(opcode = 92, size = 22)
-    clientProt<UnhandledClientProt>(opcode = 93, size = ProtSize.VarByte)   // FRIENDLIST_ADD
+    // 93 = FriendListAdd (registered above)
     clientProt<UnhandledClientProt>(opcode = 94, size = ProtSize.VarShort)
     clientProt<UnhandledClientProt>(opcode = 95, size = 8)
     clientProt<UnhandledClientProt>(opcode = 96, size = 8)
