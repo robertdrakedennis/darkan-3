@@ -321,6 +321,16 @@ class LoginServer {
         session.send(RunClientScript.of(SCRIPT_LOBBY_SUBIF_VISIBILITY))
         session.send(RunClientScript.of(SCRIPT_LOBBY_TAB_SWITCH, 0))
 
+        // 8b. Lobby news entries — script 10931 with 9 args:
+        //   arg0(i)=slot, arg1(i)=spriteId, arg2(i)=category, arg3(i)=-1,
+        //   arg4(s)=title, arg5(s)=summary, arg6(s)=urlSlug, arg7(s)=date, arg8(i)=0
+        for ((slot, entry) in LOBBY_NEWS.withIndex()) {
+            session.send(RunClientScript.of(SCRIPT_LOBBY_NEWS, slot, entry.spriteId,
+                entry.category, -1, entry.title, entry.summary, entry.slug, entry.date, 0))
+        }
+        // Final news script — signals end of news entries
+        session.send(RunClientScript.of(SCRIPT_LOBBY_NEWS_END))
+
         // 9. SET_RUN_ENERGY → SET_READY_FLAG → CHANGE_LOBBY
         session.send(UpdateRunenergy(1))
         session.send(SetReadyFlag())
@@ -446,6 +456,48 @@ class LoginServer {
         private const val SCRIPT_TIMER_SETUP = 7486        // sets up countdown timer display on a component
         private const val SCRIPT_LOBBY_SUBIF_VISIBILITY = 10936  // shows/hides sub-interface layers based on children
         private const val SCRIPT_LOBBY_TAB_SWITCH = 3060       // lobbyscreen_tabswitch(tabIndex) — selects a lobby tab
+        private const val SCRIPT_LOBBY_NEWS = 10931             // lobby news entry (9 args: slot, sprite, category, -1, title, summary, slug, date, 0)
+        private const val SCRIPT_LOBBY_NEWS_END = 10936         // signals end of news entries (same as subif visibility)
+
+        // News categories (from Jagex capture analysis)
+        private const val NEWS_CATEGORY_GAME_UPDATE = 1
+        private const val NEWS_CATEGORY_PATCH_NOTES = 12
+
+        data class NewsEntry(
+            val spriteId: Int,
+            val category: Int,
+            val title: String,
+            val summary: String,
+            val slug: String,
+            val date: String,
+        )
+
+        private val LOBBY_NEWS = listOf(
+            NewsEntry(
+                spriteId = 19261,
+                category = NEWS_CATEGORY_GAME_UPDATE,
+                title = "Welcome to Darkan 3",
+                summary = "Darkan 3 is a RuneScape 3 private server targeting the NXT client. This is an early development build; expect bugs and missing features!",
+                slug = "welcome-to-darkan-3",
+                date = "26-Mar-2026",
+            ),
+            NewsEntry(
+                spriteId = 19256,
+                category = NEWS_CATEGORY_GAME_UPDATE,
+                title = "Lobby System Online",
+                summary = "The lobby server is now functional with friends list, world selection, and account persistence via MongoDB.",
+                slug = "lobby-system-online",
+                date = "26-Mar-2026",
+            ),
+            NewsEntry(
+                spriteId = 19260,
+                category = NEWS_CATEGORY_PATCH_NOTES,
+                title = "947-1 Protocol Support",
+                summary = "Full protocol support for NXT client revision 947-1 including all packet encoders, ISAAC cipher, and JS5 cache serving.",
+                slug = "947-1-protocol-support",
+                date = "23-Mar-2026",
+            ),
+        )
 
         private const val LOBBY_SETEVENTS_INTERFACE = 907
         private val LOBBY_SETEVENTS_COMPONENTS = intArrayOf(39, 75, 46, 101)
