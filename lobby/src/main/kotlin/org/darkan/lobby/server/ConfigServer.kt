@@ -224,7 +224,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=3=$host")                                    // lobby host
         line("param=4=0")
         line("param=5=0")
-        line("param=6=0")
+        line("param=6=300")                                     // world ID (MAP_WORLD() reads this)
         line("param=7=0")
         line("param=8=false")
         line("param=10=${EnvVars.loginServerToken}")              // login server token
@@ -254,7 +254,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=36=")
         line("param=37=$host")                                    // content server host
         line("param=38=1200")
-        line("param=39=false")
+        line("param=39=1829")                                    // lobby worldId (HTTP port = 1829+7000 = 8829)
         line("param=40=http://$host:${EnvVars.configHttpPort}")   // world server URL
         line("param=41=$port")                                    // game port 1
         line("param=42=$port")                                    // game port 2 (was SSL 443)

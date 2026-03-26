@@ -148,6 +148,14 @@ open class Session(
         }
     }
 
+    /** Write a raw ServerProt packet with pre-built payload (VarShort framing). */
+    suspend fun writeRawServerProt(opcode: Int, payload: ByteArray) {
+        if (disconnected) return
+        writeOpcode(opcode, isaacOut)
+        write.writeShort(payload.size.toShort())
+        write.writeFully(payload)
+    }
+
     open suspend fun send(serverProt: ServerProt, noIsaac: Boolean = false) {
         if (disconnected) return
         try {

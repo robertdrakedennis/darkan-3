@@ -287,6 +287,8 @@ class LoginServer {
         vars.setVarc(VARC_INBOX_TYPE, -2)           // -2 = no type
         vars.setVarc(VARC_MUSIC_VOLUME, 150)        // default volume
 
+        // No pre-interface world list — sent at the end of init (matching Jagex sequence)
+
         // 5. IF_OPENTOP + IF_OPENSUB
         session.send(IfOpenTopLobby(LOBBY_INTERFACE_ID))
         for ((parentComponent, subIfId) in LOBBY_SUB_INTERFACES) {
@@ -294,29 +296,40 @@ class LoginServer {
         }
         logInfo("Sent IF_OPENTOP($LOBBY_INTERFACE_ID) + ${LOBBY_SUB_INTERFACES.size}x IF_OPENSUB to ${session.ip}")
 
-        // 6. Post-interface varcs
-        vars.setVarc(VARC_MEMBERSHIP_TIER, 294)    // membership tier threshold
-        vars.setVarc(VARC_MEMBERSHIP_TIMER, 592000) // membership notification timer
-        vars.setVarc(VARC_TIMER_1776, 592000)       // display timer
-        vars.setVarc(VARC_BONDS_TRADEABLE, 0)       // 0 tradeable bonds
-        vars.setVarc(VARC_BONDS_UNTRADEABLE, 0)     // 0 untradeable bonds
-        vars.setVarc(VARC_RUNECOINS, 0)             // 0 RuneCoins
+        // 5b. RUNCLIENTSCRIPT — timer display setup on sub-interface components (from Jagex capture)
+        // Script 7486: sets up countdown timers. int0=timer minutes, int1=component hash.
+        val timerMinutes = ((System.currentTimeMillis() / 60000) + (24 * 365 * 60)).toInt() // ~1 year future
+        session.send(RunClientScript.of(SCRIPT_TIMER_SETUP, timerMinutes,
+            RunClientScript.componentHash(801, 5)))
+        session.send(RunClientScript.of(SCRIPT_TIMER_SETUP, timerMinutes,
+            RunClientScript.componentHash(910, 15)))
 
-        // 7. IF_SETEVENTS — from 947-1 capture: settings=0, comp varies, ifId=907, fromSlot=1, settings=2
+        // 6. Post-interface varcs
+        vars.setVarc(VARC_MEMBERSHIP_TIER, 294)
+        vars.setVarc(VARC_MEMBERSHIP_TIMER, 592000)
+        vars.setVarc(VARC_TIMER_1776, 592000)
+        vars.setVarc(VARC_BONDS_TRADEABLE, 0)
+        vars.setVarc(VARC_BONDS_UNTRADEABLE, 0)
+        vars.setVarc(VARC_RUNECOINS, 0)
+
+        // 7. IF_SETEVENTS
         for (comp in LOBBY_SETEVENTS_COMPONENTS) {
             session.send(IfSetEvents(IFEvents(LOBBY_SETEVENTS_INTERFACE, comp, 1, 0, LOBBY_SETEVENTS_SETTINGS)))
         }
 
-        // 8. SET_RUN_ENERGY → SET_READY_FLAG → CHANGE_LOBBY → UPDATE_FRIENDLIST
+        // 8. RUNCLIENTSCRIPT — interface visibility setup (shows/hides sub-interface layers)
+        session.send(RunClientScript.of(SCRIPT_LOBBY_SUBIF_VISIBILITY))
+
+        // 9. SET_RUN_ENERGY → SET_READY_FLAG → CHANGE_LOBBY
         session.send(UpdateRunenergy(1))
         session.send(SetReadyFlag())
         session.send(UpdateIgnoreList())  // CHANGE_LOBBY (empty)
 
-        // Send real friend list from account data
+        // 10. Friend list
         val friendEntries = SocialManager.buildFriendList(account)
         session.send(UpdateFriendList(friendEntries))
 
-        // Send world list (full refresh on login)
+        // 11. World list — sent LAST (matching Jagex sequence)
         session.send(WorldListPacket(LobbyState.worldList, fullRefresh = true))
 
         session.flush()
@@ -350,11 +363,13 @@ class LoginServer {
                     PacketHandlers.handleBlocking<GameSession>(session, packet)
                 }
 
+                // Flush any queued responses after processing packets
+                session.flush()
+
                 // Send periodic keepalives
                 val now = System.currentTimeMillis()
                 if (now - lastKeepaliveSent > KEEPALIVE_INTERVAL_MS) {
                     session.send(NoTimeout())
-                    session.flush()
                     lastKeepaliveSent = now
                 }
 
@@ -425,6 +440,10 @@ class LoginServer {
         private const val VARC_BONDS_TRADEABLE = 4968      // tradeable bonds count
         private const val VARC_BONDS_UNTRADEABLE = 4969    // untradeable bonds count
         private const val VARC_NOTIFY_7108 = 7108          // boolean notification flag
+
+        // --- Lobby CS2 script IDs ---
+        private const val SCRIPT_TIMER_SETUP = 7486        // sets up countdown timer display on a component
+        private const val SCRIPT_LOBBY_SUBIF_VISIBILITY = 10936  // shows/hides sub-interface layers based on children
 
         private const val LOBBY_SETEVENTS_INTERFACE = 907
         private val LOBBY_SETEVENTS_COMPONENTS = intArrayOf(39, 75, 46, 101)

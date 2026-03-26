@@ -73,6 +73,36 @@ data class UpdateFriendList(val friends: List<FriendEntry>) : ServerProt {
     )
 }
 
+// --- Client Scripts ---
+
+/**
+ * RUNCLIENTSCRIPT (opcode 121, varShort) — invokes a CS2 script on the client.
+ *
+ * Wire format: type descriptor (RS string) + args (in REVERSED type order) + script ID (4B BE).
+ * The type descriptor is a string of chars: 'i' = int, 's' = string, 'l' = long.
+ * Args are written in REVERSED order of the type chars because the client reads them reversed.
+ */
+data class RunClientScript(val scriptId: Int, val types: String, val args: Array<Any>) : ServerProt {
+    companion object {
+        /** Build with named args — ints and strings. */
+        fun of(scriptId: Int, vararg args: Any): RunClientScript {
+            val types = StringBuilder()
+            for (arg in args) {
+                when (arg) {
+                    is Int -> types.append('i')
+                    is String -> types.append('s')
+                    is Long -> types.append('l')
+                    else -> error("Unsupported arg type: ${arg::class}")
+                }
+            }
+            return RunClientScript(scriptId, types.toString(), arrayOf(*args))
+        }
+
+        /** Component hash from interface ID and component ID. */
+        fun componentHash(interfaceId: Int, componentId: Int) = (interfaceId shl 16) or componentId
+    }
+}
+
 // --- World list ---
 
 data class WorldListPacket(

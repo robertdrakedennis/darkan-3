@@ -9,6 +9,23 @@ import world.gregs.voidps.buffer.*
  * Opcodes and sizes verified from rs2client binary.
  */
 internal fun Codec.registerRev947ServerCodecsMisc() {
+    // RUNCLIENTSCRIPT (121, varShort) — RE-verified: invokes CS2 script
+    // Wire: RS string (type descriptor) + args in REVERSED type order + script_id (4B BE)
+    serverProt<RunClientScript>(opcode = 121, size = ProtSize.VarShort) { out ->
+        // Type descriptor as null-terminated string (no version prefix)
+        out.writeRSString(types)
+        // Args in REVERSED order (client reads reversed type chars)
+        for (i in args.indices.reversed()) {
+            when (val arg = args[i]) {
+                is Int -> out.writeInt(arg)
+                is String -> out.writeRSString(arg)
+                is Long -> out.writeLong(arg)
+            }
+        }
+        // Script ID
+        out.writeInt(scriptId)
+    }
+
     // NO_TIMEOUT (216, 0B) — trivial return handler (keepalive)
     serverProt<NoTimeout>(opcode = 216, size = 0)
 
@@ -49,13 +66,20 @@ internal fun Codec.registerRev947ServerCodecsMisc() {
     // WORLDLIST_FETCH_REPLY (159, var_short)
     // Format RE-verified from rs2client 947-1 handler at 0x0023a390.
     // See docs/net/serverprot/worldlist-fetch-reply.md for full wire format.
+    //
+    // refreshFlag MUST be 2 for the client to read ANY data (including player counts).
+    // separator=1 means full definitions + counts; separator=0 means counts only.
+    // refreshFlag != 2 is a no-op (client rebuilds vector from cache, reads nothing).
     serverProt<WorldListPacket>(opcode = 159, size = ProtSize.VarShort) { out ->
         val worlds = worldList.getWorldArray()
+        val minWorldId = worlds.minOfOrNull { it.number } ?: 0
+        val maxWorldId = worlds.maxOfOrNull { it.number } ?: 0
+
         out.writeByte(1)                            // frame: 1 = last segment
-        out.writeByte(if (fullRefresh) 2 else 0)    // refresh: 2 = full, 0 = delta
+        out.writeByte(2)                            // refreshFlag: MUST be 2 for data to be read
 
         if (fullRefresh) {
-            out.writeByte(1)                        // separator: 1 = has world defs
+            out.writeByte(1)                        // separator: 1 = has world defs + counts
 
             // 1. Country list — deduplicated, worlds reference by index
             val countries = worlds.map { it.country }.distinct()
@@ -66,18 +90,17 @@ internal fun Codec.registerRev947ServerCodecsMisc() {
             }
 
             // 2. World ID range and count
-            val minWorldId = worlds.minOfOrNull { it.number } ?: 0
-            val maxWorldId = worlds.maxOfOrNull { it.number } ?: 0
             out.writeSmart(minWorldId)              // minWorldId (base for offsets)
-            out.writeSmart(maxWorldId + 1)          // maxWorldId (upper bound)
+            out.writeSmart(maxWorldId)              // maxWorldId (inclusive upper bound, NOT max+1)
             out.writeSmart(worlds.size)             // worldCount
 
             // 3. World entries
+            // With actPres=0: hostname field = UI display text, serverAddress = actual server
+            // With actPres>0: activity = extra display text, hostname = "-", serverAddress = actual server
             for (world in worlds) {
-                out.writeSmart(world.number - minWorldId) // worldNumberOffset from minWorldId
-                out.writeByte(countries.indexOf(world.country)) // country array index
+                out.writeSmart(world.number - minWorldId) // worldNumberOffset (= hashtable key)
+                out.writeByte(countries.indexOf(world.country)) // country array index (0-based)
 
-                // Flags (no port bit — 947 doesn't read port from this packet)
                 var flags = 0
                 if (world.members) flags = flags or 0x1
                 if (world.quickchat) flags = flags or 0x2
@@ -86,28 +109,22 @@ internal fun Codec.registerRev947ServerCodecsMisc() {
                 if (world.highlighted) flags = flags or 0x10
                 out.writeInt(flags)
 
-                // Activity (conditional: smart value > 0 means activity string follows)
-                if (world.activity.isNotEmpty()) {
-                    out.writeSmart(1)               // activityPresence: non-zero = has activity
-                    out.writeJagString(world.activity)
-                } else {
-                    out.writeSmart(0)               // activityPresence: 0 = no activity string
-                }
-
-                // Hostname + serverAddress (two gjStr2 strings)
-                out.writeJagString(world.hostname)
-                out.writeJagString(world.hostname)  // serverAddress = same as hostname
+                out.writeSmart(0)                       // actPres=0: no conditional activity
+                out.writeJagString(world.activity)      // hostname field: UI display text
+                out.writeJagString(world.hostname)      // serverAddress field: actual server hostname
             }
 
             // 4. Revision
             out.writeInt(worldList.revision)
         } else {
-            out.writeByte(0)                        // separator: 0 = counts only
+            out.writeByte(0)                        // separator: 0 = player counts only
         }
 
-        // 5. Player count section — always sent
+        // 5. Player count section (read when refreshFlag==2, regardless of separator)
+        // World numbers here MUST be offsets (worldNumber - minWorldId), NOT actual world numbers.
+        // The client looks these up in the hashtable which is keyed by offsets.
         for (world in worlds) {
-            out.writeSmart(world.number)
+            out.writeSmart(world.number - minWorldId)
             out.writeShort(if (world.offline) -1 else world.playersOnline)
         }
     }
