@@ -317,8 +317,9 @@ class LoginServer {
             session.send(IfSetEvents(IFEvents(LOBBY_SETEVENTS_INTERFACE, comp, 1, 0, LOBBY_SETEVENTS_SETTINGS)))
         }
 
-        // 8. RUNCLIENTSCRIPT — interface visibility setup (shows/hides sub-interface layers)
+        // 8. RUNCLIENTSCRIPT — interface visibility + retrigger tab 0 (Updates) selection
         session.send(RunClientScript.of(SCRIPT_LOBBY_SUBIF_VISIBILITY))
+        session.send(RunClientScript.of(SCRIPT_LOBBY_TAB_SWITCH, 0))
 
         // 9. SET_RUN_ENERGY → SET_READY_FLAG → CHANGE_LOBBY
         session.send(UpdateRunenergy(1))
@@ -444,6 +445,7 @@ class LoginServer {
         // --- Lobby CS2 script IDs ---
         private const val SCRIPT_TIMER_SETUP = 7486        // sets up countdown timer display on a component
         private const val SCRIPT_LOBBY_SUBIF_VISIBILITY = 10936  // shows/hides sub-interface layers based on children
+        private const val SCRIPT_LOBBY_TAB_SWITCH = 3060       // lobbyscreen_tabswitch(tabIndex) — selects a lobby tab
 
         private const val LOBBY_SETEVENTS_INTERFACE = 907
         private val LOBBY_SETEVENTS_COMPONENTS = intArrayOf(39, 75, 46, 101)
