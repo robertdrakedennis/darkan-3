@@ -18,7 +18,9 @@ import org.darkan.core.net.ResponseOpcode
 import org.darkan.core.model.Account
 import org.darkan.core.model.IFEvents
 import org.darkan.core.model.Vars
+import org.darkan.core.formatForProtocol
 import org.darkan.core.mongo.Accounts
+import org.darkan.core.security.PasswordHash
 import org.darkan.core.net.prot.*
 import org.darkan.core.net.prot.handler.PacketHandlers
 import org.darkan.core.net.session.GameSession
@@ -166,7 +168,26 @@ class LoginServer {
         }
 
         // Step 5: Look up or create account in MongoDB
-        val account = Accounts.getOrCreate(username)
+        val existing = Accounts.findByUsername(username)
+        val account = if (existing != null) {
+            if (password.isNotEmpty() && !PasswordHash.verify(password, existing.passwordHash)) {
+                logInfo("Invalid password for ${existing.username} from $ip")
+                output.finish(ResponseOpcode.INVALID_CREDENTIALS)
+                return
+            }
+            existing
+        } else {
+            if (password.isEmpty()) {
+                logInfo("New account '$username' with no password from $ip — rejecting")
+                output.finish(ResponseOpcode.INVALID_CREDENTIALS)
+                return
+            }
+            Accounts.create(
+                username = username.formatForProtocol(),
+                email = "${username.formatForProtocol()}@darkan.local",
+                password = password,
+            )
+        }
         account.lastIp = ip
         Accounts.save(account)
         logInfo("Account loaded: ${account.displayName} (${account.username}) from $ip")

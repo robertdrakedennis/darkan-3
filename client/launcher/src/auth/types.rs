@@ -25,7 +25,8 @@ pub struct Account {
     #[serde(rename = "accountId")]
     pub account_id: String,
     #[serde(rename = "displayName")]
-    pub display_name: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
     #[serde(rename = "userHash")]
     pub user_hash: String,
 }

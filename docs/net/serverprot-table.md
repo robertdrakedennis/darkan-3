@@ -31,13 +31,13 @@ Size notation: positive = fixed bytes, varByte = variable (1-byte length prefix)
 
 | 947 Op | Size | Packet Name | 946 Op | Confidence | Match Method |
 |--------|------|-------------|--------|------------|--------------|
-| 0 | varByte | ??? | ??? | UNMATCHED | |
+| 0 | varByte | SET_PLAYER_OP | ??? | CERTAIN | handler: ClientState::SET_PLAYER_OP (decompiled) |
 | 1 | 3 | ??? | ??? | UNMATCHED | |
-| 2 | varShort | ??? | ??? | UNMATCHED | |
+| 2 | varShort | IF_SETTEXT | ??? | CERTAIN | handler: Interfaces::IF_SETTEXT (decompiled) |
 | 3 | 1 | CAM_FORCEANGLE | 52 | CERTAIN | handler: Camera::CAM_FORCEANGLE |
 | 4 | 4 | ??? | ??? | UNMATCHED | |
 | 5 | varShort | UPDATE_INV_PARTIAL | 81 | CERTAIN | handler: Inventory::UPDATE_INV_PARTIAL |
-| 6 | varByte | ??? | ??? | UNMATCHED | |
+| 6 | varByte | HASHED_WORLD_TOKEN | ??? | PROBABLE | handler: empty invoke (token consumed, not processed). 44B Base64url string at world login |
 | 7 | varByte | MESSAGE_FRIENDCHANNEL | 56 | PROBABLE | handler: Chat::MESSAGE_FRIENDCHANNEL (multi) |
 | 8 | 23 | IF_SETPOSITION | 38 | CERTAIN | unique size 23 |
 | 9 | varShort | ??? | ??? | UNMATCHED | |
@@ -49,7 +49,7 @@ Size notation: positive = fixed bytes, varByte = variable (1-byte length prefix)
 | 15 | varShort | ??? | ??? | UNMATCHED | |
 | 16 | 4 | ??? | ??? | UNMATCHED | |
 | 17 | 8 | ??? | ??? | UNMATCHED | |
-| 18 | 3 | ??? | ??? | UNMATCHED | |
+| 18 | 3 | UPDATE_ZONE_FULL_FOLLOWS | ??? | CERTAIN | handler: ZoneUpdates::UPDATE_ZONE_FULL_FOLLOWS (decompiled) |
 | 19 | 1 | UPDATE_RUNENERGY | 27 | CERTAIN | handler: Misc::SET_RUN_ENERGY |
 | 20 | 7 | ??? | ??? | UNMATCHED | |
 | 21 | varByte | ??? | ??? | UNMATCHED | |
@@ -64,7 +64,7 @@ Size notation: positive = fixed bytes, varByte = variable (1-byte length prefix)
 | 30 | varShort | UPDATE_IGNORELIST | 17 | CERTAIN | handler: Lobby::CHANGE_LOBBY |
 | 31 | varShort | ??? | ??? | UNMATCHED | |
 | 32 | 10 | ??? | ??? | UNMATCHED | |
-| 33 | 4 | ??? | ??? | UNMATCHED | |
+| 33 | 4 | IF_CLOSESUB | ??? | CERTAIN | handler: Interfaces::IF_CLOSESUB_ACTIVE (BindHandlers lambda #9). Cross-ref: unstripped IF_CLOSESUB |
 | 34 | 10 | ??? | ??? | UNMATCHED | |
 | 35 | 12 | ??? | ??? | UNMATCHED | |
 | 36 | 28 | UPDATE_UID192 | 0 | CERTAIN | handler: PlayerInfo::REBUILD_PLAYERINFO_POSITIONS |
@@ -81,7 +81,7 @@ Size notation: positive = fixed bytes, varByte = variable (1-byte length prefix)
 | 47 | 20 | MAP_PROJANIM | 24 | CERTAIN | unique size 20 |
 | 48 | 0 | ??? | ??? | UNMATCHED | |
 | 49 | 0 | ??? | ??? | UNMATCHED | |
-| 50 | 3 | ??? | ??? | UNMATCHED | |
+| 50 | 3 | VARP_BIT | ??? | CERTAIN | handler: Variables::VARP_BIT (decompiled) |
 | 51 | 7 | ??? | ??? | UNMATCHED | |
 | 52 | 2 | UNKNOWN_22 | 22 | CERTAIN | handler: ClientState::SET_TICK_TIMER |
 | 53 | 8 | ??? | ??? | UNMATCHED | |
@@ -117,11 +117,11 @@ Size notation: positive = fixed bytes, varByte = variable (1-byte length prefix)
 | 83 | varByte | CLANCHANNEL_DELTA | 123 | CERTAIN | handler: Chat::CLANCHANNEL_DELTA (note: varByte not varShort) |
 | 84 | varShort | UNKNOWN_11 | 11 | CERTAIN | handler: Chat::CLANCHANNEL_FULL_CHAT |
 | 85 | 8 | ??? | ??? | UNMATCHED | |
-| 86 | varShort | ??? | ??? | UNMATCHED | |
-| 87 | 5 | ??? | ??? | UNMATCHED | |
+| 86 | varShort | ??? | ??? | UNMATCHED | empty BindHandlers invoke; likely handled in TcpIn dispatch (FUN_0015b4d0). 5518B during char creation |
+| 87 | 5 | MIDI_SONG | ??? | CERTAIN | handler: Audio::MIDI_SONG (BindHandlers lambda #12). Cross-ref: unstripped MIDI_SONG |
 | 88 | 10 | ??? | ??? | UNMATCHED | |
 | 89 | 0 | CAM_RESET | 69 | CERTAIN | handler: Camera::CAM_RESET |
-| 90 | varShort | ??? | ??? | UNMATCHED | |
+| 90 | varShort | REBUILD_REGION | ??? | CERTAIN | handler: ClientState::REBUILD_REGION (decompiled) |
 | 91 | 35 | CUTSCENE | 53 | CERTAIN | unique size 35 |
 | 92 | 8 | ??? | ??? | UNMATCHED | |
 | 93 | 10 | ??? | ??? | UNMATCHED | |
@@ -134,7 +134,7 @@ Size notation: positive = fixed bytes, varByte = variable (1-byte length prefix)
 | 100 | 10 | ??? | ??? | UNMATCHED | |
 | 101 | varShort | RUNCLIENTSCRIPT | 16 | CERTAIN | handler: Chat::RUN_CLIENTSCRIPT |
 | 102 | varShort | ??? | ??? | UNMATCHED | |
-| 103 | 5 | ??? | ??? | UNMATCHED | |
+| 103 | 5 | IF_SETHIDE | ??? | CERTAIN | handler: Interfaces::IF_SETHIDE (BindHandlers lambda #14). Cross-ref: unstripped IF_SETHIDE. 1B hide flag + 4B component hash |
 | 104 | varShort | CLANSETTINGS_FULL | 39 | CERTAIN | handler: Clans::CLANSETTINGS_FULL |
 | 105 | varByte | MESSAGE_GAME | 1 | CERTAIN | handler: Chat::MESSAGE_GAME |
 | 106 | 10 | ??? | ??? | UNMATCHED | |
@@ -173,8 +173,8 @@ Size notation: positive = fixed bytes, varByte = variable (1-byte length prefix)
 | 139 | varShort | ??? | ??? | UNMATCHED | |
 | 140 | 5 | ??? | ??? | UNMATCHED | |
 | 141 | 5 | ??? | ??? | UNMATCHED | |
-| 142 | 0 | ??? | ??? | UNMATCHED | |
-| 143 | 1 | ??? | ??? | UNMATCHED | |
+| 142 | 0 | CLEAR_PENDING_UPDATES | ??? | CERTAIN | handler: Variables::CLEAR_PENDING_UPDATES (decompiled) |
+| 143 | 1 | CREATE_CHECK_NAME_REPLY | 143 | CERTAIN | handler: AccountCreation::CREATE_CHECK_NAME_REPLY, bitmask 0xFE3 |
 | 144 | 3 | UNKNOWN_175 | 175 | CERTAIN | handler: Misc::SET_INTERACTION_FLAG_D |
 | 145 | 14 | ??? | ??? | UNMATCHED | |
 | 146 | varByte | UNKNOWN_162 | 162 | CERTAIN | handler: Interfaces::IF_SETGRAPHIC_ACTIVE_handler |
@@ -187,7 +187,7 @@ Size notation: positive = fixed bytes, varByte = variable (1-byte length prefix)
 | 153 | 4 | ??? | ??? | UNMATCHED | |
 | 154 | 1 | ??? | ??? | UNMATCHED | |
 | 155 | 1 | UNKNOWN_188 | 188 | CERTAIN | handler: Chat::SET_CHAT_FILTER_B |
-| 156 | 1 | ??? | ??? | UNMATCHED | |
+| 156 | 1 | CREATE_CHECK_EMAIL_REPLY | 156 | CERTAIN | handler: AccountCreation::CREATE_CHECK_EMAIL_REPLY, bitmask 0x1800063 |
 | 157 | 2 | ??? | ??? | UNMATCHED | |
 | 158 | 12 | ??? | ??? | UNMATCHED | |
 | 159 | varShort | WORLDLIST_FETCH_REPLY | 150 | CERTAIN | handler: Social::UPDATE_FRIENDCHAT_CHANNEL |
@@ -203,7 +203,7 @@ Size notation: positive = fixed bytes, varByte = variable (1-byte length prefix)
 | 169 | 2 | ??? | ??? | UNMATCHED | |
 | 170 | 10 | ??? | ??? | UNMATCHED | |
 | 171 | 8 | SERVER_TICK_END | 203 | CERTAIN | handler: Misc::SERVER_TICK_END |
-| 172 | varShort | ??? | ??? | UNMATCHED | |
+| 172 | varShort | REBUILD_NORMAL | ??? | CERTAIN | handler: ClientState::REBUILD_NORMAL (0x002144e0) via BindHandlers. Cross-ref: unstripped REBUILD_NORMAL |
 | 173 | varShort | UNKNOWN_141 | 141 | CERTAIN | handler: ZoneUpdates::UPDATE_ZONE_FULL_FOLLOWS_handler |
 | 174 | 1 | CLEAR_PLAYER_SNAPSHOT | 205 | PROBABLE | handler: Misc::SET_INTERACTION_FLAG_C (shared w/ 946 op169) |
 | 175 | 6 | ??? | ??? | UNMATCHED | |
@@ -229,7 +229,7 @@ Size notation: positive = fixed bytes, varByte = variable (1-byte length prefix)
 | 195 | 0 | TRIGGER_ONDIALOGABORT | 212 | CERTAIN | handler: ClientState::TRIGGER_ONDIALOGABORT |
 | 196 | 21 | PROJANIM_SPECIFIC | 214 | CERTAIN | unique size 21 |
 | 197 | 5 | ??? | ??? | UNMATCHED | |
-| 198 | 8 | ??? | ??? | UNMATCHED | |
+| 198 | 8 | ANTI_CHEAT_CHALLENGE | ??? | CERTAIN | handler: HandleAntiCheatChallenge (0x0021ba20). Server sends 8B, client responds with 9B (swapped + prefix). Sent every ~6s |
 | 199 | 28 | UNKNOWN_159 | 159 | CERTAIN | unique size 28 (after handler matches removed other 28s) |
 | 200 | varByte | UNKNOWN_171 | 171 | CERTAIN | handler: Misc::SET_URL_STRING |
 | 201 | 3 | ??? | ??? | UNMATCHED | |

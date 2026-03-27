@@ -22,23 +22,25 @@ Handlers identified from BindHandlers at `0x001185aa` with named handler functio
 
 ### Definitively Matched
 
-| Rev 947 Opcode | Size | Handler Name | Notes |
-|----------------|------|--------------|-------|
+| Rev 947-1 Opcode | Size | Handler Name | Notes |
+|------------------|------|--------------|-------|
 | 0xD8 (216) | 0 (fixed) | **NO_TIMEOUT** | Trivial return handler (keepalive) |
 | 0x1E (30) | varShort | **CHANGE_LOBBY** | handler: Lobby::CHANGE_LOBBY |
 | 0x41 (65) | 0 (fixed) | **SET_READY_FLAG** | handler: ClientState::SET_READY_FLAG |
 | 0x30 (48) | 0 (fixed) | **RESET_CLIENT_VARCACHE** | handler: ClientState::RESET_ALL_VARPS |
+| 0x9C (156) | 1 (fixed) | **CREATE_CHECK_EMAIL_REPLY** | handler: AccountCreation::CREATE_CHECK_EMAIL_REPLY, bitmask 0x1800063, ProtEntry at `0x016ebfe0` |
+| 0x8F (143) | 1 (fixed) | **CREATE_CHECK_NAME_REPLY** | handler: AccountCreation::CREATE_CHECK_NAME_REPLY, bitmask 0xFE3, ProtEntry at `0x016ec2a0` |
 
-### Not Found in rev 946 (4 of 8)
+### Not Found in rev 947-1 (4 of 8)
 
-The following old binary lobby handlers have no clear equivalent among the unnamed handlers in rev 946's `BindHandlers`:
+The following old binary lobby handlers have no clear equivalent among the unnamed handlers in rev 947-1's `BindHandlers`:
 
 | Old Handler Name | Old Signature | Status |
 |-----------------|---------------|--------|
-| **CREATE_ACCOUNT_REPLY** | Bitmask `0x23e01803fe3`, check `< 0x2a`, writes +0x30 | No matching handler found. Account creation may have been moved to a web-based flow in rev 946. |
+| **CREATE_ACCOUNT_REPLY** | Bitmask `0x23e01803fe3`, check `< 0x2a`, writes +0x30 | No matching handler found. Account creation may have been moved to a web-based flow. |
 | **CREATE_SUGGEST_NAME_ERROR** | Bitmask `0xe3`, check `< 8`, writes +0x3c, clears string | No matching handler found. |
 | **CREATE_SUGGEST_NAME_REPLY** | Reads CP1252 string, writes +0x3c=2, assigns string to +0x40 | No matching handler found. |
-| **LOBBY_APPEARANCE** | Calls `PlayerEntity::SetBaseAppearanceAsPlayer` | No direct handler found. `SetBaseAppearanceAsPlayer` (at `0x001f6220`) is called through a vtable chain: `FUN_00311530` -> `FUN_002eb240` -> `FUN_001f7760` -> `SetBaseAppearanceAsPlayer`. This may be triggered by the player info/update system rather than a dedicated lobby packet in rev 946. |
+| **LOBBY_APPEARANCE** | Calls `PlayerEntity::SetBaseAppearanceAsPlayer` | No direct handler found. `SetBaseAppearanceAsPlayer` (at `0x001f6220`) is called through a vtable chain: `FUN_00311530` -> `FUN_002eb240` -> `FUN_001f7760` -> `SetBaseAppearanceAsPlayer`. This may be triggered by the player info/update system rather than a dedicated lobby packet. |
 
 ## All Unnamed Handlers in BindHandlers (Complete List)
 
@@ -54,7 +56,7 @@ Every ServerProt entry with an unnamed (FUN_) invoke handler, with opcode and si
 | 0x31 | 10 | `0x016e8c80` | `FUN_00191a20` | SpotAnim/entity handler (identical pattern to 0x05) |
 | 0x6D | varShort | `0x016e84c0` | `FUN_00198110` | ISAAC-decrypted chat/message: delegates to `FUN_0032a030` |
 | 0x6F | varByte | `0x016e8440` | `FUN_0018cdb0` | Trivial return (NONE) — unused/placeholder |
-| 0x85 | 1 | `0x016e8240` | `FUN_00212d90` | **CREATE_CHECK_EMAIL_REPLY** |
+| 0x85 | 1 | `0x016e8240` | `FUN_00212d90` | UNKNOWN (was incorrectly labeled CREATE_CHECK_EMAIL_REPLY in rev 946) |
 | 0x92 | 0 | `0x016e8000` | `FUN_00212df0` | **NO_TIMEOUT** |
 | 0x9B | varByte | `0x016e7e80` | `FUN_001e0360` | `Misc::UPDATE_URL_STRING`: reads 4 bytes + CP1252 string |
 | 0xA1 | 1 | `0x016e7dc0` | `FUN_002123a0` | Reads 1 byte + 0x80, writes to struct+0xa0 |
@@ -66,7 +68,7 @@ Every ServerProt entry with an unnamed (FUN_) invoke handler, with opcode and si
 | 0xB5 | 1 | `0x016e7980` | `FUN_00212930` | Reads 1 byte, sets boolean flag, increments counter |
 | 0xBB | 4 | `0x016e78c0` | `FUN_00225ea0` | Reads 4 bytes (mixed-endian int), writes to struct+0x40, triggers script |
 | 0xC4 | varShort | `0x016e7700` | `FUN_0018cdc0` | Trivial return (NONE) — unused/placeholder |
-| 0xCC | 1 | `0x016e7580` | `FUN_00212c80` | **CREATE_CHECK_NAME_REPLY** |
+| 0xCC | 1 | `0x016e7580` | `FUN_00212c80` | UNKNOWN (was incorrectly labeled CREATE_CHECK_NAME_REPLY in rev 946) |
 
 ## Old Binary Handler Reference
 
@@ -117,7 +119,7 @@ To get the client into the lobby screen, the server must handle:
 3. **CHANGE_LOBBY** (opcode 0x11, varShort) — send world list/lobby data
 4. Potentially **LOBBY_APPEARANCE** — player preview (may be handled through player info system)
 
-The 5 account creation packets (CREATE_CHECK_EMAIL_REPLY, CREATE_ACCOUNT_REPLY, etc.) are only needed if implementing in-client account creation. In rev 946, some or all of these may have been removed (web-based account creation).
+The account creation packets (CREATE_CHECK_EMAIL_REPLY at opcode 0x9C, CREATE_CHECK_NAME_REPLY at opcode 0x8F) are only needed if implementing in-client account creation. CREATE_ACCOUNT_REPLY, CREATE_SUGGEST_NAME_ERROR, and CREATE_SUGGEST_NAME_REPLY have not been found in rev 947-1 and may have been removed (web-based account creation).
 
 ## Login Protocol Step Opcodes
 

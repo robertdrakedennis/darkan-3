@@ -181,7 +181,7 @@
       session.accounts.forEach((a) => {
         const opt = document.createElement("option");
         opt.value = a.accountId;
-        opt.textContent = a.displayName;
+        opt.textContent = a.displayName || "Unnamed";
         selCharacter.appendChild(opt);
       });
     }
@@ -266,7 +266,7 @@
       send({
         type: "launch",
         account_id: accountId,
-        display_name: account.displayName,
+        display_name: account.displayName || "",
       });
     }
   });

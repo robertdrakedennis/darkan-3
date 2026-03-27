@@ -37,7 +37,7 @@ pub async fn get_accounts(client: &reqwest::Client, session_id: &str) -> Result<
         return Err(anyhow!("Accounts fetch failed: {}", status));
     }
 
-    resp.json()
-        .await
-        .context("Failed to parse accounts response")
+    let body = resp.text().await.context("Failed to read accounts response body")?;
+    log::debug!("Accounts response body: {}", body);
+    serde_json::from_str(&body).context(format!("Failed to parse accounts response: {}", body))
 }

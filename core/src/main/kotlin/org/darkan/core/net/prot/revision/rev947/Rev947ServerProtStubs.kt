@@ -24,7 +24,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(3, "CAM_FORCEANGLE", 1)                        // handler: Camera::CAM_FORCEANGLE
     s(4, "UNKNOWN_4", 4)
     s(5, "UPDATE_INV_PARTIAL", -2)                   // handler: Inventory::UPDATE_INV_PARTIAL
-    s(6, "UNKNOWN_6", -1)
+    s(6, "HASHED_WORLD_TOKEN", -1)                   // empty invoke handler; Base64url token at world login
     s(7, "MESSAGE_FRIENDCHANNEL", -1)                // handler: Chat::MESSAGE_FRIENDCHANNEL
     s(8, "IF_SETPOSITION", 23)                       // unique size 23
     s(9, "UNKNOWN_9", -2)
@@ -51,7 +51,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(30, "CHANGE_LOBBY", -2)                        // handler: Lobby::CHANGE_LOBBY
     s(31, "UNKNOWN_31", -2)
     s(32, "UNKNOWN_32", 10)
-    s(33, "UNKNOWN_33", 4)
+    s(33, "IF_CLOSESUB", 4)                             // handler: Interfaces::IF_CLOSESUB_ACTIVE. Cross-ref: unstripped IF_CLOSESUB
     s(34, "IF_SETEVENTS", 10)                        // Interfaces constructor, SetServerActiveProperties
     s(35, "IF_SETEVENTS2", 12)                       // Interfaces constructor, SetServerActiveProperties
     s(36, "UPDATE_UID192", 28)                       // handler: PlayerInfo::REBUILD_PLAYERINFO_POSITIONS
@@ -105,7 +105,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(84, "CLANCHANNEL_FULL_CHAT", -2)               // handler: Chat::CLANCHANNEL_FULL_CHAT
     s(85, "UNKNOWN_85", 8)
     s(86, "UNKNOWN_86", -2)
-    s(87, "UNKNOWN_87", 5)
+    s(87, "MIDI_SONG", 5)                               // handler: Audio::MIDI_SONG. Cross-ref: unstripped MIDI_SONG
     s(88, "UNKNOWN_88", 10)
     s(89, "CAM_RESET", 0)                            // handler: Camera::CAM_RESET
     s(90, "UNKNOWN_90", -2)
@@ -121,7 +121,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(100, "UNKNOWN_100", 10)
     s(101, "MESSAGE_TYPE6", -2)                        // Ghidra: ChatHistory::AddChat with type 6 (NOT RUNCLIENTSCRIPT)
     s(102, "UPDATE_FRIENDLIST", -2)              // handler: UPDATE_SITESETTINGS at 0x00247a60
-    s(103, "UNKNOWN_103", 5)
+    s(103, "IF_SETHIDE", 5)                             // handler: Interfaces::IF_SETHIDE. 1B hide flag + 4B component hash
     s(104, "CLANSETTINGS_FULL", -2)                  // handler: Clans::CLANSETTINGS_FULL
     s(105, "MESSAGE_GAME", -1)                       // handler: Chat::MESSAGE_GAME
     s(106, "UNKNOWN_106", 10)
@@ -190,7 +190,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(169, "UNKNOWN_169", 2)
     s(170, "VARP_LONG", 10)                           // capture-verified: 8B long value + 2B varp ID
     s(171, "SERVER_TICK_END", 8)                     // handler: Misc::SERVER_TICK_END
-    s(172, "UNKNOWN_172", -2)
+    s(172, "REBUILD_NORMAL", -2)                        // handler: ClientState::REBUILD_NORMAL (0x002144e0). Cross-ref: unstripped REBUILD_NORMAL
     s(173, "UPDATE_ZONE_FULL_FOLLOWS", -2)           // handler: ZoneUpdates::UPDATE_ZONE_FULL_FOLLOWS_handler
     s(174, "SET_INTERACTION_FLAG_C", 1)              // handler: Misc::SET_INTERACTION_FLAG_C
     s(175, "UNKNOWN_175", 6)
@@ -216,7 +216,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(195, "TRIGGER_ONDIALOGABORT", 0)               // handler: ClientState::TRIGGER_ONDIALOGABORT
     s(196, "PROJANIM_SPECIFIC", 21)                  // unique size 21
     s(197, "UNKNOWN_197", 5)
-    s(198, "UNKNOWN_198", 8)
+    s(198, "ANTI_CHEAT_CHALLENGE", 8)                  // handler: HandleAntiCheatChallenge. Server 8B, client responds 9B. Every ~6s
     s(199, "UNKNOWN_199", 28)                        // unique size 28 (after handler matches)
     s(200, "SET_URL_STRING", -1)                     // handler: Misc::SET_URL_STRING
     s(201, "UNKNOWN_201", 3)

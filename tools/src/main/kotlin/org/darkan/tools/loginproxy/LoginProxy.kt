@@ -136,6 +136,8 @@ private enum class Phase {
     SERVER_CLIENT_VARS,   // Server: server client var exchange (steps 250-270)
     POST_LOGIN,           // ISAAC-encrypted traffic
     JS5,                  // JS5 file service (not login)
+    ACCT_CREATE_RESPONSE, // Account creation: server sends 1 byte response
+    ACCT_CREATE_PACKET,   // Account creation: client sends RSA+XTEA packet (no login opcode prefix)
     CLOSED,               // Connection ended
 }
 
@@ -151,6 +153,7 @@ fun main(args: Array<String>) {
     val listenPort = findArg(args, "--listen-port")?.toIntOrNull() ?: DEFAULT_LISTEN_PORT
     val httpPort = findArg(args, "--http-port")?.toIntOrNull() ?: DEFAULT_HTTP_PORT
     val captureDir = File(findArg(args, "--capture-dir") ?: DEFAULT_CAPTURE_DIR)
+    // Worldlist rewrite is always on — structurally decodes opcode 159 and replaces hostnames
 
     println("[proxy] Fetching jav_config from Jagex...")
     val (targetHost, targetPort, rawConfig) = resolveJagexServer()
@@ -247,9 +250,9 @@ private class ProxySession(
 
     // Track the raw byte position of the varShort size field for the WORLDLIST_FETCH_REPLY packet.
     // Set by parseServerPostLogin when it encounters opcode 150, used by processAndForwardPostLogin.
-    @Volatile private var worldlistSizeFieldPos = -1  // position in the s2cAccum byte array
-    @Volatile private var worldlistPayloadStart = -1  // first payload byte
-    @Volatile private var worldlistPayloadEnd = -1    // byte after last payload byte
+    // Worldlist reassembly: buffer segments until frame=1, then rewrite and forward
+    private val worldlistReassembly = ByteArrayOutputStream()
+    private val worldlistRawSegments = mutableListOf<ByteArray>() // raw segment bytes (opcode+size+payload)
 
     // S2C pending packet state: when we've ISAAC-decoded an opcode (and possibly
     // read the size) but the payload hasn't fully arrived, we save the decoded
@@ -300,10 +303,10 @@ private class ProxySession(
         // close the lobby connection and switch to the world server.
         val actualHost = targetHost
         val actualPort = targetPort
-        if (connectionType == 15) {
-            phase = Phase.JS5
-        } else {
-            phase = Phase.FIRST_RESPONSE
+        phase = when (connectionType) {
+            15 -> Phase.JS5
+            28 -> Phase.ACCT_CREATE_RESPONSE  // Account creation: server sends 1 byte, then client sends packet
+            else -> Phase.FIRST_RESPONSE
         }
 
         val targetSocket: Socket
@@ -372,6 +375,40 @@ private class ProxySession(
                 }
 
                 when (phase) {
+                    Phase.ACCT_CREATE_PACKET -> {
+                        // Account creation: client sends the full packet directly (no login opcode prefix)
+                        // Format: [2B varShort size] [payload: 2B pad, 2B major, 2B minor, 2B rsaSize, RSA block, XTEA data]
+                        c2sAccum.write(buf, 0, n)
+                        val accum = c2sAccum.toByteArray()
+
+                        if (accum.size >= 2) {
+                            val varShortSize = ((accum[0].toInt() and 0xFF) shl 8) or (accum[1].toInt() and 0xFF)
+                            val totalExpected = 2 + varShortSize
+
+                            if (accum.size >= totalExpected) {
+                                c2sAccum.reset()
+                                log("C->S", "[${accum.size}B] ACCT_CREATE_PACKET: varShort size=$varShortSize")
+                                logHex("C->S", accum, 0, minOf(accum.size, 128))
+
+                                val modifiedPacket = performAccountCreationMitm(accum, varShortSize)
+                                if (modifiedPacket != null) {
+                                    output.write(modifiedPacket)
+                                    output.flush()
+                                    log("C->S", "MITM: Forwarded modified account creation packet (${modifiedPacket.size}B)")
+                                } else {
+                                    output.write(accum, 0, totalExpected)
+                                    output.flush()
+                                    log("C->S", "MITM: FAILED -- forwarded original packet")
+                                }
+
+                                // After sending, wait for server's 1-byte login result
+                                phase = Phase.LOGIN_RESULT
+                            } else {
+                                log("C->S", "[${n}B] ACCT_CREATE_PACKET partial (${accum.size}/$totalExpected)")
+                            }
+                        }
+                    }
+
                     Phase.LOGIN_PACKET -> {
                         // Buffer the login packet for MITM
                         c2sAccum.write(buf, 0, n)
@@ -509,9 +546,9 @@ private class ProxySession(
                         }
                     }
                 } else if (phase == Phase.POST_LOGIN) {
-                    // Decode packets and rewrite worldlist hostnames
-                    val modified = decodeAndRewritePostLogin(buf, n)
-                    output.write(modified)
+                    // Single-pass: ISAAC-decode for logging, structurally rewrite opcode 159
+                    val result = processPostLoginS2C(buf, n)
+                    output.write(result)
                     output.flush()
                 } else {
                     // Forward immediately
@@ -733,6 +770,123 @@ private class ProxySession(
      *
      * Returns the full modified packet (opcode + varShort size + payload) or null on failure.
      */
+    /**
+     * RSA MITM for account creation packets.
+     * Format: [2B varShort size] [2B pad] [2B major] [2B minor] [2B rsaSize] [rsaBlock] [xteaData]
+     * Version fields are shorts (not ints like lobby login).
+     */
+    private fun performAccountCreationMitm(packet: ByteArray, varShortSize: Int): ByteArray? {
+        try {
+            val payload = packet.copyOfRange(2, 2 + varShortSize) // skip varShort length prefix
+            var pos = 0
+
+            fun g2(): Int {
+                val v = ((payload[pos].toInt() and 0xFF) shl 8) or (payload[pos + 1].toInt() and 0xFF)
+                pos += 2
+                return v
+            }
+
+            // Account creation format: [2B pad=0] [2B major] [2B minor=1]
+            val pad = g2()
+            val major = g2()
+            val minor = g2()
+            log("MITM", "Account creation version: $major.$minor (pad=$pad)")
+
+            // RSA block: [2B rsaSize] [rsaSize bytes]
+            val rsaSize = g2()
+            log("MITM", "RSA block size: $rsaSize bytes (at payload offset ${pos - 2})")
+
+            if (rsaSize <= 0 || rsaSize > 512 || pos + rsaSize > payload.size) {
+                log("MITM", "ERROR: Invalid RSA block size $rsaSize")
+                return null
+            }
+
+            val rsaBlockStart = pos
+            val rsaCiphertext = payload.copyOfRange(pos, pos + rsaSize)
+            pos += rsaSize
+            val postRsaData = payload.copyOfRange(pos, payload.size)
+            val preRsaData = payload.copyOfRange(0, rsaBlockStart - 2)
+
+            // Decrypt with our private key
+            log("MITM", "Decrypting RSA block (${rsaCiphertext.size}B) with our private key...")
+            val decrypted = RSA.crypt(rsaCiphertext, ourRsaMod, ourRsaExp)
+            log("MITM", "Decrypted RSA plaintext: ${decrypted.size}B")
+            logHex("MITM", decrypted, 0, decrypted.size)
+
+            // Parse magic + ISAAC keys
+            var dpos = 0
+            if (decrypted.isNotEmpty() && decrypted[0] != 10.toByte() && decrypted.size > 1 && decrypted[1] == 10.toByte()) {
+                dpos = 1
+            }
+
+            val magic = decrypted[dpos].toInt() and 0xFF
+            dpos++
+            if (magic != 10) {
+                log("MITM", "ERROR: RSA magic mismatch! Expected 10, got $magic. Wrong RSA key?")
+                logHex("MITM", decrypted, 0, decrypted.size)
+                return null
+            }
+
+            // Extract 4 ISAAC keys
+            val isaacKeys = IntArray(4)
+            for (i in 0..3) {
+                isaacKeys[i] = ((decrypted[dpos].toInt() and 0xFF) shl 24) or
+                        ((decrypted[dpos + 1].toInt() and 0xFF) shl 16) or
+                        ((decrypted[dpos + 2].toInt() and 0xFF) shl 8) or
+                        (decrypted[dpos + 3].toInt() and 0xFF)
+                dpos += 4
+            }
+            log("MITM", "ISAAC keys extracted: [${isaacKeys.joinToString(", ") { "0x${"%08x".format(it)}" }}]")
+
+            // Initialize ISAAC ciphers (same as lobby login: client=raw, server=keys+50)
+            log("MITM", "ISAAC ciphers initialized (C2S=raw keys, S2C=keys+50)")
+            c2sIsaac = Isaac(isaacKeys.copyOf())
+            val outKeys = isaacKeys.copyOf()
+            for (i in outKeys.indices) outKeys[i] += 50
+            s2cIsaac = Isaac(outKeys)
+
+            // Save keys
+            val keysFile = File(sessionDir, "isaac-keys.txt")
+            keysFile.writeText("ISAAC keys (decimal): ${isaacKeys.joinToString(", ")}\nISAAC keys (hex): ${isaacKeys.joinToString(", ") { "0x${"%08X".format(it)}" }}\n")
+            log("MITM", "Saved isaac-keys.txt")
+
+            // Re-encrypt with Jagex public key
+            val rsaPlaintext = decrypted.copyOfRange(if (decrypted[0] != 10.toByte() && decrypted.size > 1 && decrypted[1] == 10.toByte()) 1 else 0, decrypted.size)
+            log("MITM", "Re-encrypting RSA plaintext (${rsaPlaintext.size}B) with Jagex public key...")
+            val reEncrypted = RSA.crypt(rsaPlaintext, jagexRsaMod, jagexRsaExp)
+
+            var reEncBlock = if (reEncrypted.isNotEmpty() && (reEncrypted[0].toInt() and 0x80) != 0) {
+                ByteArray(1 + reEncrypted.size).also {
+                    it[0] = 0
+                    System.arraycopy(reEncrypted, 0, it, 1, reEncrypted.size)
+                }
+            } else {
+                reEncrypted
+            }
+
+            // Rebuild packet
+            val newPayload = ByteArrayOutputStream()
+            newPayload.write(preRsaData) // pad + versions
+            newPayload.write((reEncBlock.size shr 8) and 0xFF)
+            newPayload.write(reEncBlock.size and 0xFF)
+            newPayload.write(reEncBlock)
+            newPayload.write(postRsaData)
+            val newPayloadBytes = newPayload.toByteArray()
+
+            // Rebuild with varShort prefix
+            val result = ByteArray(2 + newPayloadBytes.size)
+            result[0] = ((newPayloadBytes.size shr 8) and 0xFF).toByte()
+            result[1] = (newPayloadBytes.size and 0xFF).toByte()
+            System.arraycopy(newPayloadBytes, 0, result, 2, newPayloadBytes.size)
+
+            return result
+        } catch (e: Exception) {
+            log("MITM", "ERROR during account creation RSA MITM: ${e::class.simpleName}: ${e.message}")
+            e.printStackTrace()
+            return null
+        }
+    }
+
     private fun performRsaMitm(packet: ByteArray, loginOpcode: Int, originalVarShortSize: Int): ByteArray? {
         try {
             // Payload starts after [1B opcode][2B varShort]
@@ -1106,6 +1260,23 @@ private class ProxySession(
                 }
             }
 
+            Phase.ACCT_CREATE_RESPONSE -> {
+                // Account creation: server sends 1 byte response (2 = success)
+                val responseCode = buf[0].toInt() and 0xFF
+                log("S->C", "[1B] ACCT_CREATE_RESPONSE: code=$responseCode (${if (responseCode == 2) "SUCCESS" else "FAILURE"})")
+                if (responseCode == 2) {
+                    log("S->C", "  -> Account creation connection OK. Client will send CREATE_ACCOUNT_CONNECT packet next.")
+                    phase = Phase.ACCT_CREATE_PACKET
+                } else {
+                    log("S->C", "  -> Account creation FAILED. Connection will close.")
+                    phase = Phase.CLOSED
+                }
+                // Forward remaining bytes if any
+                if (len > 1) {
+                    log("S->C", "  Extra ${len - 1} bytes after response")
+                }
+            }
+
             Phase.SECOND_RESPONSE -> {
                 s2cAccum.write(buf, 0, len)
                 val accum = s2cAccum.toByteArray()
@@ -1201,11 +1372,21 @@ private class ProxySession(
 
                 when (resultCode) {
                     2 -> {
-                        log("S->C", "  -> Login SUCCESS!")
-                        phase = Phase.LOGIN_DATA_LEN
-                        if (len > 1) {
-                            parseServerData(buf.copyOfRange(1, len), len - 1)
-                            return
+                        if (connectionType == 28) {
+                            // Account creation: no login data blob, go straight to ISAAC post-login
+                            log("S->C", "  -> Account creation SUCCESS! Entering POST_LOGIN (ISAAC active: ${s2cIsaac != null})")
+                            phase = Phase.POST_LOGIN
+                            if (len > 1) {
+                                parseServerData(buf.copyOfRange(1, len), len - 1)
+                                return
+                            }
+                        } else {
+                            log("S->C", "  -> Login SUCCESS!")
+                            phase = Phase.LOGIN_DATA_LEN
+                            if (len > 1) {
+                                parseServerData(buf.copyOfRange(1, len), len - 1)
+                                return
+                            }
                         }
                     }
                     25 -> {
@@ -1695,6 +1876,236 @@ private class ProxySession(
     }
 
     @Suppress("unused") // kept for reference — the new decodeAndRewritePostLogin replaces this
+    /**
+     * Single-pass POST_LOGIN S2C processor: ISAAC-decodes packets for logging,
+     * and structurally rewrites WORLDLIST_FETCH_REPLY (opcode 159) hostnames.
+     * Returns the byte array to forward to the client (most packets unchanged,
+     * only opcode 159 payloads are modified).
+     */
+    private fun processPostLoginS2C(buf: ByteArray, len: Int): ByteArray {
+        val cipher = s2cIsaac
+        if (cipher == null) {
+            log("S->C", "[${len}B] POST_LOGIN (no ISAAC -- passthrough)")
+            return buf.copyOfRange(0, len)
+        }
+
+        // We need TWO ISAAC instances stepping in lockstep:
+        // - One for the output bytes (actual stream to client, unchanged)
+        // - One for our decode (to identify packet boundaries and opcodes)
+        // But we only have one ISAAC. Solution: we DON'T modify opcode bytes.
+        // We copy raw bytes to output. For opcode 159, we only replace the PAYLOAD
+        // (which is NOT ISAAC-encrypted). The opcode bytes pass through untouched.
+
+        s2cAccum.write(buf, 0, len)
+        val data = s2cAccum.toByteArray()
+        val output = ByteArrayOutputStream(data.size + 256)
+        var pos = 0
+        var outPos = 0 // tracks how far we've written to output from data[]
+
+        fun flushTo(endPos: Int) {
+            if (endPos > outPos) {
+                output.write(data, outPos, endPos - outPos)
+                outPos = endPos
+            }
+        }
+
+        while (pos < data.size) {
+            val packetStart = pos
+            val opcode: Int
+            var size = -1
+
+            if (s2cPendingOpcode >= 0) {
+                opcode = s2cPendingOpcode
+                size = s2cPendingSize
+                s2cPendingOpcode = -1
+                s2cPendingSize = -1
+                if (size < 0) {
+                    val si = codec.serverProtSize(opcode)
+                    when (si) {
+                        0 -> size = 0
+                        -1 -> { if (pos >= data.size) { s2cPendingOpcode = opcode; s2cPendingSize = -1; break }; size = data[pos].toInt() and 0xFF; pos++ }
+                        -2 -> { if (pos + 1 >= data.size) { s2cPendingOpcode = opcode; s2cPendingSize = -1; break }; size = ((data[pos].toInt() and 0xFF) shl 8) or (data[pos+1].toInt() and 0xFF); pos += 2 }
+                        else -> size = si
+                    }
+                }
+            } else if (s2cPartialOpcodeFirstByte >= 0) {
+                val decoded = s2cPartialOpcodeFirstByte
+                s2cPartialOpcodeFirstByte = -1
+                if (pos >= data.size) { s2cPartialOpcodeFirstByte = decoded; break }
+                val rb2 = data[pos].toInt() and 0xFF; pos++
+                val d2 = (rb2 - cipher.nextInt()) and 0xFF
+                opcode = (decoded - 128) * 256 + d2
+            } else {
+                if (pos >= data.size) break
+                val rb = data[pos].toInt() and 0xFF; pos++
+                val decoded = (rb - cipher.nextInt()) and 0xFF
+                if (decoded < 128) {
+                    opcode = decoded
+                } else {
+                    if (pos >= data.size) { s2cPartialOpcodeFirstByte = decoded; break }
+                    val rb2 = data[pos].toInt() and 0xFF; pos++
+                    val d2 = (rb2 - cipher.nextInt()) and 0xFF
+                    opcode = (decoded - 128) * 256 + d2
+                }
+            }
+
+            if (opcode < 0 || opcode >= 218) {
+                log("S->C", "POST_LOGIN DESYNC: opcode $opcode out of range at byte ${pos - 1}")
+                s2cAccum.reset()
+                s2cIsaac = null
+                flushTo(data.size) // forward everything remaining as-is
+                return output.toByteArray()
+            }
+
+            if (size < 0) {
+                val si = codec.serverProtSize(opcode)
+                when (si) {
+                    0 -> size = 0
+                    -1 -> { if (pos >= data.size) { s2cPendingOpcode = opcode; s2cPendingSize = -1; break }; size = data[pos].toInt() and 0xFF; pos++ }
+                    -2 -> { if (pos + 1 >= data.size) { s2cPendingOpcode = opcode; s2cPendingSize = -1; break }; size = ((data[pos].toInt() and 0xFF) shl 8) or (data[pos+1].toInt() and 0xFF); pos += 2 }
+                    else -> size = si
+                }
+            }
+
+            val payloadStart = pos
+
+            if (pos + size > data.size) {
+                s2cPendingOpcode = opcode
+                s2cPendingSize = size
+                s2cAccum.reset()
+                if (pos < data.size) s2cAccum.write(data, pos, data.size - pos)
+                // Write everything up to payloadStart (opcode+size bytes) to output
+                flushTo(payloadStart)
+                return output.toByteArray()
+            }
+
+            val payload = data.copyOfRange(pos, pos + size)
+            pos += size
+
+            // Log the packet
+            if (opcode !in SUPPRESS_S2C) {
+                val name = codec.serverProtName(opcode)
+                log("S->C", "PKT opcode=$opcode (0x${"%02X".format(opcode)}) $name size=$size")
+                if (!prettyPrintServerPkt(opcode, payload, size)) {
+                    if (size > 0) logHex("S->C", payload, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN)
+                }
+            }
+
+            // Rewrite opcode 159 (WORLDLIST_FETCH_REPLY) hostnames IN-PLACE
+            // Replace each ".runescape.com" in the payload with null padding.
+            // This preserves packet size, ISAAC state, segmentation, and framing.
+            if (opcode == 159 && size > 0) {
+                val localhost = "localhost".toByteArray(Charsets.ISO_8859_1)
+                val marker = ".runescape.com".toByteArray(Charsets.ISO_8859_1)
+                var rewrites = 0
+                // Scan payload within data[] for hostnames and null-pad them
+                var si = payloadStart
+                val payloadEnd = payloadStart + size
+                while (si <= payloadEnd - marker.size) {
+                    var match = true
+                    for (j in marker.indices) {
+                        if (data[si + j] != marker[j]) { match = false; break }
+                    }
+                    if (match) {
+                        // Walk backwards to find hostname start (after null/version byte)
+                        var hostStart = si - 1
+                        while (hostStart > payloadStart && data[hostStart] != 0.toByte()) hostStart--
+                        hostStart++ // skip null/version byte
+                        val hostEnd = si + marker.size
+                        val hostLen = hostEnd - hostStart
+                        // Overwrite: "localhost" + nulls to fill
+                        if (hostLen >= localhost.size) {
+                            System.arraycopy(localhost, 0, data, hostStart, localhost.size)
+                            for (k in hostStart + localhost.size until hostEnd) data[k] = 0
+                            rewrites++
+                        }
+                        si = hostEnd
+                    } else {
+                        si++
+                    }
+                }
+                if (rewrites > 0) log("CTRL", "Worldlist in-place rewrite: $rewrites hostnames nullpadded")
+            }
+        }
+
+        flushTo(data.size)
+        s2cAccum.reset()
+        return output.toByteArray()
+    }
+
+    /**
+     * Structurally decode a WORLDLIST_FETCH_REPLY payload, replace all hostnames
+     * with "localhost", and re-encode. Returns null if decoding fails.
+     */
+    private fun rewriteWorldlistStructural(payload: ByteArray): ByteArray? {
+        try {
+            val out = ByteArrayOutputStream(payload.size)
+            var pos = 0
+
+            fun g1(): Int { val v = payload[pos].toInt() and 0xFF; pos++; return v }
+            fun g2(): Int { val v = ((payload[pos].toInt() and 0xFF) shl 8) or (payload[pos+1].toInt() and 0xFF); pos += 2; return v }
+            fun g4(): Int { val v = ((payload[pos].toInt() and 0xFF) shl 24) or ((payload[pos+1].toInt() and 0xFF) shl 16) or ((payload[pos+2].toInt() and 0xFF) shl 8) or (payload[pos+3].toInt() and 0xFF); pos += 4; return v }
+            fun smart(): Int = if ((payload[pos].toInt() and 0xFF) < 0x80) g1() else g2() - 0x8000
+            fun gjstr2(): String { g1(); val sb = StringBuilder(); while (pos < payload.size && payload[pos].toInt() != 0) { sb.append(payload[pos].toInt().toChar()); pos++ }; if (pos < payload.size) pos++; return sb.toString() }
+
+            fun w1(v: Int) { out.write(v) }
+            fun w2(v: Int) { out.write((v shr 8) and 0xFF); out.write(v and 0xFF) }
+            fun w4(v: Int) { out.write((v shr 24) and 0xFF); out.write((v shr 16) and 0xFF); out.write((v shr 8) and 0xFF); out.write(v and 0xFF) }
+            fun wSmart(v: Int) { if (v < 128) w1(v) else w2(v + 0x8000) }
+            fun wJagStr(s: String) { out.write(0); out.write(s.toByteArray(Charsets.ISO_8859_1)); out.write(0) }
+
+            // NOTE: the reassembled payload has NO frame byte — it was stripped during reassembly
+            val refresh = g1(); w1(refresh)
+
+            if (refresh == 2) {
+                val sep = g1(); w1(sep)
+
+                if (sep == 1) {
+                    val countryCount = smart(); wSmart(countryCount)
+                    log("CTRL", "Worldlist decode: $countryCount countries")
+                    repeat(countryCount) {
+                        val cid = smart(); wSmart(cid)
+                        val cname = gjstr2(); wJagStr(cname)
+                    }
+
+                    val minWorld = smart(); wSmart(minWorld)
+                    val maxWorld = smart(); wSmart(maxWorld)
+                    val worldCount = smart(); wSmart(worldCount)
+                    log("CTRL", "Worldlist decode: $worldCount worlds, range $minWorld-$maxWorld")
+
+                    var rewriteCount = 0
+                    repeat(worldCount) {
+                        val offset = smart(); wSmart(offset)
+                        val idx = g1(); w1(idx)
+                        val flags = g4(); w4(flags)
+                        val actPres = smart(); wSmart(actPres)
+                        if (actPres != 0) {
+                            val act = gjstr2(); wJagStr(act)
+                        }
+                        val hostname = gjstr2(); wJagStr("localhost"); rewriteCount++
+                        val addr = gjstr2(); wJagStr("localhost"); rewriteCount++
+                    }
+                    log("CTRL", "Worldlist decode: rewrote $rewriteCount hostnames")
+
+                    val rev = g4(); w4(rev)
+                }
+            }
+
+            // Player count section — copy remaining bytes verbatim
+            val remaining = payload.size - pos
+            if (remaining > 0) {
+                out.write(payload, pos, remaining)
+            }
+            log("CTRL", "Worldlist decode: parsed $pos/${payload.size} bytes, $remaining remaining (player counts)")
+
+            return out.toByteArray()
+        } catch (e: Exception) {
+            log("CTRL", "Worldlist structural decode FAILED at pos: ${e.message}")
+            e.printStackTrace()
+            return null
+        }
+    }
+
     private fun parseServerPostLogin(buf: ByteArray, len: Int) {
         val cipher = s2cIsaac
         if (cipher == null) {

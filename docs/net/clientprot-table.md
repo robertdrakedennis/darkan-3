@@ -34,10 +34,10 @@ Confidence levels:
 | 1 | 3 | 0x016edd70 | | | LOW | 3-byte group (NPC/OBJ ops) |
 | 2 | 4 | 0x016edd60 | | | LOW | 4-byte group (LOC/callback ops) |
 | 3 | 5 | 0x016edd50 | MOVE_SCRIPTED | 89 | MEDIUM | size count match |
-| 4 | 8 | 0x016edd40 | | | LOW | 8-byte group (IF_BUTTON/RESUME) |
-| 5 | 8 | 0x016edd30 | | | LOW | 8-byte group |
+| 4 | 8 | 0x016edd40 | **IF_BUTTON3** | | **CONFIRMED** | IfButtonXInner table[2]; format: short(comp) int(slot) short(item) |
+| 5 | 8 | 0x016edd30 | **IF_BUTTON7** | | **CONFIRMED** | IfButtonXInner table[6]; format: short(comp) int(slot) short(item) |
 | 6 | 15 | 0x016edd20 | OPNPC_T_EXTENDED | 26 | MEDIUM | size count match |
-| 7 | 6 | 0x016edd10 | | | NEW | new size (was 0 in 946?) |
+| 7 | 6 | 0x016edd10 | **EVENT_MOUSE_CLICK** | | **CONFIRMED** | SendEventMouseClick @ 0x002e05d0; writes int(y<<16|x) + byteAdd(timeDelta) + byte(flags) |
 | 8 | 4 | 0x016edd00 | | | LOW | 4-byte group |
 | 9 | 12 | 0x016edcf0 | | | LOW | 12-byte group (IF_BUTTON_T4/T9) |
 | 10 | 9 | 0x016edce0 | | | LOW | 9-byte group |
@@ -48,25 +48,25 @@ Confidence levels:
 | 15 | 6 | 0x016edc90 | | | NEW | new size |
 | 16 | 8 | 0x016edc80 | | | LOW | 8-byte group |
 | 17 | 7 | 0x016edc70 | | | LOW | 7-byte group |
-| 18 | 8 | 0x016edc60 | | | LOW | 8-byte group |
+| 18 | 8 | 0x016edc60 | **IF_BUTTON9** | | **CONFIRMED** | IfButtonXInner table[8]; format: short(comp) int(slot) short(item) |
 | 19 | VAR_BYTE | 0x016edc50 | | | LOW | varByte group |
 | 20 | 1 | 0x016edc40 | | | LOW | 1-byte group |
-| 21 | 8 | 0x016edc30 | | | LOW | 8-byte group |
+| 21 | 8 | 0x016edc30 | **IF_BUTTON8** | | **CONFIRMED** | IfButtonXInner table[7]; format: short(comp) int(slot) short(item) |
 | 22 | VAR_BYTE | 0x016edc20 | **FRIENDLIST_DEL** | 121 | **CONFIRMED** | SendFriendlistDel @ 0x003dcba0 |
 | 23 | 4 | 0x016edc10 | **WORLDLIST_FETCH** | 110 | **CONFIRMED** | SendWorldlistFetch @ 0x0023f2a0 |
 | 24 | VAR_BYTE | 0x016edc00 | **CLANCHANNEL_KICKUSER** | 78 | **CONFIRMED** | SendSocialRequest @ 0x003dc8a0 |
 | 25 | VAR_BYTE | 0x016edbf0 | | | LOW | varByte group |
 | 26 | VAR_BYTE | 0x016edbe0 | | | LOW | varByte group |
-| 27 | 0 | 0x016edbd0 | | | LOW | 0-byte group (keepalive/flag) |
+| 27 | 0 | 0x016edbd0 | **NO_TIMEOUT** | | **CONFIRMED** | ProcessConnections @ 0x001de850; keepalive sent every 50 ticks on login+game connections |
 | 28 | 18 | 0x016edbc0 | MOVE_GAME_EXTENDED | 92 | MEDIUM | unique size match |
-| 29 | 8 | 0x016edbb0 | | | LOW | 8-byte group |
-| 30 | 4 | 0x016edba0 | | | LOW | 4-byte group; used by SendSceneGraphReport |
+| 29 | 8 | 0x016edbb0 | **IF_BUTTON5** | | **CONFIRMED** | IfButtonXInner table[4]; format: short(comp) int(slot) short(item) |
+| 30 | 4 | 0x016edba0 | **TRANSMITVAR_VERIFYID** | | **CONFIRMED** | SendSceneGraphReport @ 0x00320ee5; writes int(verifyId) |
 | 31 | VAR_BYTE | 0x016edb90 | | | LOW | varByte group |
 | 32 | 4 | 0x016edb80 | | | LOW | 4-byte group |
 | 33 | 3 | 0x016edb70 | | | LOW | 3-byte group |
-| 34 | VAR_BYTE | 0x016edb60 | | | LOW | varByte group |
+| 34 | VAR_BYTE | 0x016edb60 | **CLIENT_DETAILOPTIONS_STATUS** | | **CONFIRMED** | SendMultiDisplayPackets @ 0x00321e30; SerialiseForServer graphics settings (1B count + data) |
 | 35 | VAR_BYTE | 0x016edb50 | | | LOW | varByte group |
-| 36 | 8 | 0x016edb40 | | | LOW | 8-byte group |
+| 36 | 8 | 0x016edb40 | **IF_BUTTON10** | | **CONFIRMED** | IfButtonXInner table[9]; format: short(comp) int(slot) short(item) |
 | 37 | 1 | 0x016edb30 | | | LOW | 1-byte group |
 | 38 | 1 | 0x016edb20 | | | LOW | 1-byte group |
 | 39 | VAR_SHORT | 0x016edb10 | | | LOW | varShort group |
@@ -77,16 +77,16 @@ Confidence levels:
 | 44 | 7 | 0x016edac0 | | | LOW | 7-byte group |
 | 45 | 9 | 0x016edab0 | | | NEW | extra 9-byte entry |
 | 46 | 3 | 0x016edaa0 | | | LOW | 3-byte group |
-| 47 | 4 | 0x016eda90 | | | LOW | 4-byte group |
+| 47 | 4 | 0x016eda90 | **EVENT_CAMERA_POSITION** | | **CONFIRMED** | SendMultiDisplayPackets @ 0x00321e30; writes shortAdd(yaw) + short(pitch) via QuaternionToJagexAngles |
 | 48 | VAR_BYTE | 0x016eda80 | **IGNORELIST_ADD** | 67 | **CONFIRMED** | SendIgnorelistAdd @ 0x003b6a40 |
 | 49 | 17 | 0x016eda70 | | | NEW | new size |
 | 50 | 3 | 0x016eda60 | | | LOW | 3-byte group |
-| 51 | 8 | 0x016eda50 | | | LOW | 8-byte group |
+| 51 | 8 | 0x016eda50 | **IF_BUTTON6** | | **CONFIRMED** | IfButtonXInner table[5]; format: short(comp) int(slot) short(item) |
 | 52 | 1 | 0x016eda40 | | | LOW | 1-byte group |
-| 53 | VAR_SHORT | 0x016eda30 | | | LOW | varShort group |
+| 53 | VAR_SHORT | 0x016eda30 | **EVENT_KEYBOARD** | | **CONFIRMED** | SendMultiDisplayPackets @ 0x00321e30; writes short(count) + entries of [byte(key) byte(deltaHi) byte(deltaMid) byte(deltaLo)] |
 | 54 | 3 | 0x016eda20 | | | LOW | 3-byte group |
 | 55 | 0 | 0x016eda10 | **MAP_BUILD_COMPLETE** | 21 | **CONFIRMED** | SendMapBuildComplete @ 0x00335aa0 |
-| 56 | 1 | 0x016eda00 | | | LOW | 1-byte group |
+| 56 | 1 | 0x016eda00 | **EVENT_APPLET_FOCUS** | | **CONFIRMED** | SendMultiDisplayPackets @ 0x00321e30; writes byte(hasFocus) via SDL_GetKeyboardFocus |
 | 57 | 1 | 0x016ed9f0 | | | LOW | 1-byte group |
 | 58 | 15 | 0x016ed9e0 | OPLOC_T_EXTENDED | 51 | MEDIUM | size count match |
 | 59 | 4 | 0x016ed9d0 | **DETECT_MODIFIED_CLIENT** | 95 | **CONFIRMED** | SendDetectModifiedClient @ 0x002992e0 |
@@ -107,14 +107,14 @@ Confidence levels:
 | 74 | VAR_SHORT | 0x016ed8e0 | **EVENT_TELEMETRY** | 45 | **CONFIRMED** | SendAppletFocusEvents @ 0x0023f7a0 |
 | 75 | VAR_BYTE | 0x016ed8d0 | | | LOW | varByte group |
 | 76 | VAR_SHORT | 0x016ed8c0 | | | LOW | varShort group |
-| 77 | 8 | 0x016ed8b0 | | | LOW | 8-byte group |
+| 77 | 8 | 0x016ed8b0 | **IF_BUTTON2** | | **CONFIRMED** | IfButtonXInner table[1]; format: short(comp) int(slot) short(item) |
 | 78 | VAR_SHORT | 0x016ed8a0 | **MOVE_GAME** | 102 | **CONFIRMED** | SendMoveGame @ 0x003e9b90 |
 | 79 | 9 | 0x016ed890 | | | NEW | extra 9-byte entry |
 | 80 | VAR_BYTE | 0x016ed880 | | | LOW | varByte group |
 | 81 | 11 | 0x016ed870 | **OPLOC_T2** | 70 | **CONFIRMED** | SendOpLocTLong @ 0x002047b0 |
 | 82 | 4 | 0x016ed860 | | | LOW | 4-byte group |
 | 83 | 18 | 0x016ed850 | | | NEW | extra 18-byte entry |
-| 84 | VAR_BYTE | 0x016ed840 | | | LOW | varByte group |
+| 84 | VAR_BYTE | 0x016ed840 | **RESUME_P_NAMEDIALOG** | | **CONFIRMED** | SendResumePNameDialog @ 0x00370340; writes byte(charCount) + pStringUTF8ToCP1252(text) |
 | 85 | 11 | 0x016ed830 | OPNPC_T2_EXTENDED | 90 | MEDIUM | size count match |
 | 86 | VAR_BYTE | 0x016ed820 | | | LOW | varByte group |
 | 87 | VAR_BYTE | 0x016ed810 | | | LOW | varByte group |
@@ -125,9 +125,9 @@ Confidence levels:
 | 92 | 22 | 0x016ed7c0 | | | NEW | new size |
 | 93 | VAR_BYTE | 0x016ed7b0 | **FRIENDLIST_ADD** | 39 | **CONFIRMED** | SendFriendlistAdd @ 0x003e2cd0 |
 | 94 | VAR_SHORT | 0x016ed7a0 | | | LOW | varShort group |
-| 95 | 8 | 0x016ed790 | | | LOW | 8-byte group |
-| 96 | 8 | 0x016ed780 | | | LOW | 8-byte group |
-| 97 | 9 | 0x016ed770 | | | NEW | extra 9-byte entry |
+| 95 | 8 | 0x016ed790 | **IF_BUTTON4** | | **CONFIRMED** | IfButtonXInner table[3]; format: short(comp) int(slot) short(item) |
+| 96 | 8 | 0x016ed780 | **IF_BUTTON1** | | **CONFIRMED** | IfButtonXInner table[0]; format: short(comp) int(slot) short(item) |
+| 97 | 9 | 0x016ed770 | **ANTI_CHEAT_REPLY** | | **CONFIRMED** | HandleAntiCheatChallenge @ 0x0021ba20 (ServerProt handler sends this); writes byte(~sessionIdx) + 4B(challenge1_rearranged) + 4B(challenge2_rearranged) |
 | 98 | 7 | 0x016ed760 | | | LOW | 7-byte group |
 | 99 | 2 | 0x016ed750 | | | LOW | 2-byte group |
 | 100 | VAR_SHORT | 0x016ed740 | | | LOW | varShort group |
@@ -135,7 +135,7 @@ Confidence levels:
 | 102 | 7 | 0x016ed720 | | | LOW | 7-byte group |
 | 103 | VAR_BYTE | 0x016ed710 | | | LOW | varByte group |
 | 104 | 3 | 0x016ed700 | | | LOW | 3-byte group |
-| 105 | VAR_BYTE | 0x016ed6f0 | | | LOW | varByte group |
+| 105 | VAR_BYTE | 0x016ed6f0 | **EVENT_MOUSE_MOVE** | | **CONFIRMED** | SendCameraMovementUpdate @ 0x00247000 (via vtable); delta-encoded mouse/camera positions with timing |
 | 106 | 4 | 0x016ed6e0 | | | LOW | 4-byte group |
 | 107 | 3 | 0x016ed6d0 | | | LOW | 3-byte group |
 | 108 | 6 | 0x016ed6c0 | **WINDOW_STATUS** | 82 | **CONFIRMED** | SendDisplayInfo @ 0x00321c60 (size 3->6) |
@@ -154,7 +154,7 @@ Confidence levels:
 | 121 | VAR_SHORT | 0x016ed600 | **MESSAGE_PRIVATE** | 52 | **CONFIRMED** | SendMessagePrivate @ 0x003adf60 |
 | 122 | 7 | 0x016ed5f0 | | | LOW | 7-byte group |
 | 123 | 3 | 0x016ed5e0 | | | LOW | 3-byte group |
-| 124 | VAR_BYTE | 0x016ed5d0 | | | LOW | varByte group |
+| 124 | VAR_BYTE | 0x016ed5d0 | **IF_BUTTON_D** | | **CONFIRMED** | IfButtonXInner extended path; writes byte(type+8) byte(len) byteAdd(opIndex) int_alt1(slot) string(data) short(item) |
 | 125 | 3 | 0x016ed5c0 | | | LOW | 3-byte group |
 | 126 | 9 | 0x016ed5b0 | | | NEW | extra 9-byte entry |
 | 127 | 3 | 0x016ed5a0 | | | LOW | 3-byte group |
@@ -206,6 +206,27 @@ These are the packets critical for lobby/world functionality, all verified in th
 | EVENT_TELEMETRY | 74 | VAR_SHORT | 0x0023f7a0 | Applet focus/telemetry events |
 | MOVE_GAME_EXTENDED | 28 | 18 | - | Extended movement packet |
 | OPLOC_T2 | 81 | 11 | 0x002047b0 | Use item on location (long form) |
+| NO_TIMEOUT | 27 | 0 | 0x001de850 (ProcessConnections) | Keepalive; sent every 50 ticks on both login+game connections |
+| IF_BUTTON1 | 96 | 8 | 0x00404b46 (IfButtonXInner) | Interface button click (op 1); short(comp) int(slot) short(item) |
+| IF_BUTTON2 | 77 | 8 | " | Interface button click (op 2) |
+| IF_BUTTON3 | 4 | 8 | " | Interface button click (op 3) |
+| IF_BUTTON4 | 95 | 8 | " | Interface button click (op 4) |
+| IF_BUTTON5 | 29 | 8 | " | Interface button click (op 5) |
+| IF_BUTTON6 | 51 | 8 | " | Interface button click (op 6) |
+| IF_BUTTON7 | 5 | 8 | " | Interface button click (op 7) |
+| IF_BUTTON8 | 21 | 8 | " | Interface button click (op 8) |
+| IF_BUTTON9 | 18 | 8 | " | Interface button click (op 9) |
+| IF_BUTTON10 | 36 | 8 | " | Interface button click (op 10) |
+| IF_BUTTON_D | 124 | VAR_BYTE | " | Extended button with dialog string data |
+| RESUME_P_NAMEDIALOG | 84 | VAR_BYTE | 0x00370340 | Name dialog resume; byte(charCount) + string(text) |
+| EVENT_MOUSE_CLICK | 7 | 6 | 0x002e05d0 | Mouse click; int(y<<16|x) byteAdd(timeDelta) byte(flags) |
+| EVENT_MOUSE_MOVE | 105 | VAR_BYTE | 0x00247000 (SendCameraMovementUpdate) | Delta-encoded mouse/camera positions |
+| EVENT_KEYBOARD | 53 | VAR_SHORT | 0x00321e30 (SendMultiDisplayPackets) | Key events; short(count) + entries |
+| EVENT_CAMERA_POSITION | 47 | 4 | " | Camera pitch/yaw; shortAdd(yaw) short(pitch) |
+| EVENT_APPLET_FOCUS | 56 | 1 | " | Window focus state; byte(hasFocus) |
+| CLIENT_DETAILOPTIONS_STATUS | 34 | VAR_BYTE | " | Graphics settings; byte(count) + serialised data |
+| TRANSMITVAR_VERIFYID | 30 | 4 | 0x00320ee5 (SendSceneGraphReport) | Var domain verify ID; int(verifyId) |
+| ANTI_CHEAT_REPLY | 97 | 9 | 0x0021ba20 (handler) | Anti-cheat challenge response; byte(~idx) + 8B rearranged challenge |
 
 ## Size Distribution (947 vs 946)
 
@@ -250,5 +271,15 @@ This means the 947 protocol is NOT a simple opcode shuffle from 946 -- many pack
    - SendFriendlistAdd, SendFriendlistDel, SendIgnorelistAdd, SendSocialRequest
    - SendMessagePublic, SendMessagePublicWithEffects, SendMessagePrivate
    - SendAppletFocusEvents, SendDisplayInfo, SendOpLocTLong, SendSceneGraphReport
+   - SendMultiDisplayPackets, SendCameraMovementUpdate, SendEventMouseClick
+   - SendResumePNameDialog, HandleAntiCheatChallenge, ProcessConnections
+   - IfButtonXInner (IF_BUTTON1-10 table at 0x0149aba0)
 5. Each Send function references a DAT_ address as the ClientProt object, which maps to exactly one opcode/size pair
 6. Cross-referenced the DAT_ addresses from Send functions with the opcode table to produce confirmed mappings
+7. Cross-referenced with unstripped binary (NXT_BETA_UNSTRIPPED, port 8080) to obtain real Jagex names:
+   - ClientWatch::MainLogic contains EVENT_MOUSE_CLICK, EVENT_MOUSE_MOVE, EVENT_KEYBOARD, EVENT_CAMERA_POSITION, EVENT_APPLET_FOCUS, CLIENT_DETAILOPTIONS_STATUS
+   - InterfaceManager::SendPauseComponentMessage references RESUME_PAUSEBUTTON
+   - opcode::Resume lambda #4 references RESUME_P_NAMEDIALOG
+   - ConnectionManager::ProcessConnections sends NO_TIMEOUT (keepalive) every 50 ticks
+   - DelayedStateChange::MainLogic sends TRANSMITVAR_VERIFYID
+   - ClientVarDomain::Service sends STORE_SERVERPERM_VARCS
