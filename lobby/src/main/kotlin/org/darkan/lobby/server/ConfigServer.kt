@@ -7,15 +7,19 @@ import io.ktor.server.netty.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.ktor.server.websocket.*
+import io.ktor.websocket.*
 import org.darkan.core.EnvVars
 import org.darkan.core.Logger.logFinest
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logTrace
 import org.darkan.core.Logger.logWarn
+import org.darkan.lobby.social.SocialGateway
 import world.gregs.voidps.cache.file.FileProvider
 import world.gregs.voidps.cache.secure.Whirlpool
 import java.math.BigInteger
 import java.util.zip.CRC32
+import kotlin.time.Duration.Companion.seconds
 
 class ConfigServer(private val fileProvider: FileProvider? = null) {
     private lateinit var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>
@@ -27,7 +31,17 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
     fun start() {
         logInfo("Client binary CRC32: $binaryCrc (path: ${EnvVars.clientBinaryPath})")
         server = embeddedServer(Netty, port = EnvVars.configHttpPort) {
+            install(WebSockets) {
+                pingPeriod = 15.seconds
+                timeout = 30.seconds
+                maxFrameSize = Long.MAX_VALUE
+            }
             routing {
+                // Social gateway WebSocket endpoint — world servers connect here
+                webSocket("/social/ws") {
+                    logInfo("World server WebSocket connected from ${call.request.local.remoteHost}")
+                    SocialGateway.handleWorldSocket(this)
+                }
                 get("/ms") {
                     logFinest("JS5 HTTP request: ${call.request.local.uri}")
                     serveJs5Http(call)

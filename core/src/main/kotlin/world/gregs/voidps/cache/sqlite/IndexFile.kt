@@ -117,6 +117,40 @@ class IndexFile(path: Path) : Closeable {
         }
     }
 
+    fun updateVersion(archiveId: Int, version: Int) {
+        try {
+            connection?.prepareStatement(
+                "UPDATE cache SET VERSION = ? WHERE KEY = ?"
+            )?.use { stmt ->
+                stmt.setInt(1, version)
+                stmt.setInt(2, archiveId)
+                stmt.executeUpdate()
+            }
+        } catch (e: SQLException) {
+            e.printStackTrace()
+        }
+    }
+
+    fun batchUpdateVersions(updates: Map<Int, Int>) {
+        if (updates.isEmpty()) return
+        try {
+            val conn = connection ?: return
+            conn.autoCommit = false
+            conn.prepareStatement("UPDATE cache SET VERSION = ? WHERE KEY = ?").use { stmt ->
+                for ((archiveId, version) in updates) {
+                    stmt.setInt(1, version)
+                    stmt.setInt(2, archiveId)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+            conn.commit()
+            conn.autoCommit = true
+        } catch (e: SQLException) {
+            e.printStackTrace()
+        }
+    }
+
     fun putRaw(archiveId: Int, data: ByteArray, version: Int, crc: Int) {
         try {
             connection?.prepareStatement(

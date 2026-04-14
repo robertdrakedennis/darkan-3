@@ -25,7 +25,7 @@ import org.darkan.core.net.prot.*
 import org.darkan.core.net.prot.handler.PacketHandlers
 import org.darkan.core.net.session.GameSession
 import org.darkan.lobby.LobbyState
-import org.darkan.lobby.social.SocialManager
+import org.darkan.lobby.social.SocialGateway
 import world.gregs.voidps.buffer.*
 import world.gregs.voidps.buffer.read.BufferReader
 import world.gregs.voidps.buffer.write.BufferWriter
@@ -130,11 +130,14 @@ class LoginServer {
         val sessionCheck = decryptedRsa.readLong()
         logTrace("RSA session check: $sessionCheck from $ip")
 
-        var password = ""
-        if (decryptedRsa.remaining > 0) {
-            password = decryptedRsa.readRSString()
-            logTrace("Password field present (${password.length} chars) from $ip")
-        }
+        // 947-1 RSA block layout after session check:
+        //   1. Auth token (RS string) — binary hash/token, not a typed password
+        //   2. Password (RS string) — the actual plaintext password
+        //   3. Two longs (unknown purpose)
+        val authToken = if (decryptedRsa.remaining > 0) decryptedRsa.readRSString() else ""
+        logTrace("RSA auth token: ${authToken.length} bytes from $ip")
+        val password = if (decryptedRsa.remaining > 0) decryptedRsa.readRSString() else ""
+        logTrace("RSA password: ${password.length} chars from $ip")
 
         while (decryptedRsa.remaining > 0) {
             val remaining = decryptedRsa.readByteArray(decryptedRsa.remaining.toInt())
@@ -171,7 +174,7 @@ class LoginServer {
         val existing = Accounts.findByUsername(username)
         val account = if (existing != null) {
             if (password.isNotEmpty() && !PasswordHash.verify(password, existing.passwordHash)) {
-                logInfo("Invalid password for ${existing.username} from $ip")
+                logInfo("Invalid password for ${existing.username} from $ip (password ${password.length} chars, hash=${existing.passwordHash.take(20)}...)")
                 output.finish(ResponseOpcode.INVALID_CREDENTIALS)
                 return
             }
@@ -182,6 +185,7 @@ class LoginServer {
                 output.finish(ResponseOpcode.INVALID_CREDENTIALS)
                 return
             }
+            logInfo("Creating new account '$username' with password (${password.length} chars) from $ip")
             Accounts.create(
                 username = username.formatForProtocol(),
                 email = "${username.formatForProtocol()}@darkan.local",
@@ -216,8 +220,8 @@ class LoginServer {
         val codec = Codec.get(947) ?: error("Rev947 codec not registered!")
         val session = GameSession(output, inCipher, outCipher, ip, codec, username = account.username)
 
-        // Register in SocialManager for presence tracking
-        SocialManager.registerPlayer(account, session)
+        // Register in SocialGateway for presence tracking
+        SocialGateway.registerLobbyPlayer(account, session)
 
         // Step 7: Send initial lobby packets
         sendLobbyInitPackets(session, account)
@@ -229,7 +233,7 @@ class LoginServer {
                 lobbySessionLoop(session)
             }
         } finally {
-            SocialManager.unregisterPlayer(account.username)
+            SocialGateway.unregisterLobbyPlayer(account.username)
         }
     }
 
@@ -265,10 +269,10 @@ class LoginServer {
         buf.writePrefixedString(account.displayName) // #23 displayName
         buf.writeByte(0)                          // #24 unknown9
         buf.writeInt(0)                           // #25 unknown10
-        buf.writeShort(300)                       // #26 worldId
-        buf.writePrefixedString("localhost")      // #27 serverHostname
-        buf.writeShort(43594)                     // #28 gamePort
-        buf.writeShort(443)                       // #29 httpsPort
+        buf.writeShort(EnvVars.worldId)               // #26 worldId
+        buf.writePrefixedString(EnvVars.worldHost)    // #27 serverHostname
+        buf.writeShort(EnvVars.worldPort)             // #28 gamePort (43595 — world server, NOT lobby)
+        buf.writeShort(443)                           // #29 httpsPort
         buf.writeLong(0x4461726B616E3333L)        // #30 sessionToken1 = "Darkan33"
         buf.writeLong(0x5365727665723033L)        // #31 sessionToken2 = "Server03"
 
@@ -355,11 +359,10 @@ class LoginServer {
         // 9. SET_RUN_ENERGY → SET_READY_FLAG → CHANGE_LOBBY
         session.send(UpdateRunenergy(1))
         session.send(SetReadyFlag())
-        session.send(UpdateIgnoreList())  // CHANGE_LOBBY (empty)
+        session.send(ChangeLobby())
 
-        // 10. Friend list
-        val friendEntries = SocialManager.buildFriendList(account)
-        session.send(UpdateFriendList(friendEntries))
+        // 10. Social init is handled by SocialGateway.registerLobbyPlayer() above
+        // (sends friend list, ignore list, chat filters, mutual friend notifications)
 
         // 11. World list — sent LAST (matching Jagex sequence)
         session.send(WorldListPacket(LobbyState.worldList, fullRefresh = true))

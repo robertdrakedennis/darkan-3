@@ -43,6 +43,28 @@ object EnvVars {
     val mongoUri: String = dotenv.get("MONGO_URI", "mongodb://localhost:27017")
     val mongoDatabase: String = dotenv.get("MONGO_DATABASE", "darkan3")
 
+    // Social gateway (world↔lobby WebSocket communication)
+    val socialGatewayUrl: String = dotenv.get("SOCIAL_GATEWAY_URL", "ws://localhost:$configHttpPort/social/ws")
+    val socialGatewayToken: String = dotenv.get("SOCIAL_GATEWAY_TOKEN", "darkan3-gateway-dev-token")
+    val lobbyApiPort: Int = configHttpPort  // WebSocket gateway runs on the config HTTP port
+
+    // Login token (lobby issues, world verifies)
+    val worldLoginTokenSecret: String = dotenv.get("WORLD_LOGIN_TOKEN_SECRET", "darkan3-world-login-dev-secret")
+    val worldLoginTokenTtlMs: Long = dotenv.get("WORLD_LOGIN_TOKEN_TTL_MS", "1800000").toLong()  // 30 minutes
+
+    // World server identity (used by world module to register with lobby)
+    val worldId: Int = dotenv.get("WORLD_ID", "300").toInt()
+    val worldName: String = dotenv.get("WORLD_NAME", "Darkan")
+    val worldHost: String = dotenv.get("WORLD_HOST", "localhost")
+    val worldPublicHost: String = dotenv.get("WORLD_PUBLIC_HOST", worldHost)
+    val worldActivity: String = dotenv.get("WORLD_ACTIVITY", "")
+    val worldMembers: Boolean = dotenv.get("WORLD_MEMBERS", "true").toBooleanStrict()
+    val worldQuickChat: Boolean = dotenv.get("WORLD_QUICKCHAT", "false").toBooleanStrict()
+    val worldPvp: Boolean = dotenv.get("WORLD_PVP", "false").toBooleanStrict()
+    val worldLootShare: Boolean = dotenv.get("WORLD_LOOTSHARE", "true").toBooleanStrict()
+    val worldCountry: String = dotenv.get("WORLD_COUNTRY", "USA")
+    val worldHighlighted: Boolean = dotenv.get("WORLD_HIGHLIGHTED", "false").toBooleanStrict()
+
     // ISAAC delta: added to XTEA key ints to derive server->client cipher seed
     // VERIFIED from rs2client rev 947-1 at 0x00dcbd90 — all four values are 50
     const val ISAAC_DELTA = 50

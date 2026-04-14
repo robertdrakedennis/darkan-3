@@ -59,6 +59,7 @@ class CacheDownloader(
                 var skipped = 0
                 var badSkipped = 0
                 var stale = 0
+                val versionUpdates = mutableMapOf<Int, Int>()
                 for (entry in archives) {
                     val key = (index.toLong() shl 32) or entry.id.toLong()
                     if (key in badArchives) {
@@ -67,21 +68,28 @@ class CacheDownloader(
                         val cached = existingVersions[entry.id]
                         if (cached == null) {
                             // Not cached at all
-                            queue.send(FileRequest(index, entry.id))
+                            queue.send(FileRequest(index, entry.id, entry.version, entry.crc))
                             totalFiles++
-                        } else if (cached.first != entry.version || cached.second != entry.crc) {
-                            // Cached but version/CRC changed — re-download
-                            queue.send(FileRequest(index, entry.id))
+                        } else if (cached.second != entry.crc) {
+                            // CRC changed — actual data difference, re-download
+                            queue.send(FileRequest(index, entry.id, entry.version, entry.crc))
                             totalFiles++
                             stale++
                         } else {
+                            // CRC matches — data is identical
+                            if (cached.first != entry.version) {
+                                versionUpdates[entry.id] = entry.version
+                            }
                             skipped++
                         }
                     }
                 }
+                if (versionUpdates.isNotEmpty()) {
+                    storage.batchUpdateVersions(index, versionUpdates)
+                }
                 val queued = archives.size - skipped - badSkipped
-                if (skipped > 0 || badSkipped > 0 || stale > 0)
-                    println("  Index $index: skipped $skipped cached, $stale stale (re-downloading), $badSkipped unservable, queued $queued")
+                if (skipped > 0 || badSkipped > 0 || stale > 0 || versionUpdates.isNotEmpty())
+                    println("  Index $index: skipped $skipped cached (${versionUpdates.size} version-updated), $stale stale (re-downloading), $badSkipped unservable, queued $queued")
             }
             progress.totalFiles.set(totalFiles)
             println("  $totalFiles TCP files to download (skipped already-cached)")

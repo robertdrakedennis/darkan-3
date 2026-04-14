@@ -35,6 +35,16 @@ class CacheStorage(private val basePath: Path) : Closeable {
         return getOrCreate(index).allVersions()
     }
 
+    @Synchronized
+    fun updateVersion(index: Int, archive: Int, version: Int) {
+        getOrCreate(index).updateVersion(archive, version)
+    }
+
+    @Synchronized
+    fun batchUpdateVersions(index: Int, updates: Map<Int, Int>) {
+        getOrCreate(index).batchUpdateVersions(updates)
+    }
+
     fun store(index: Int, archive: Int, data: ByteArray, version: Int, crc: Int) {
         val file = getOrCreate(index)
         synchronized(file) {

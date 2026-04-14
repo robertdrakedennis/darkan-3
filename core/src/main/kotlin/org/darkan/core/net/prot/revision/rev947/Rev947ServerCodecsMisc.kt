@@ -9,6 +9,24 @@ import world.gregs.voidps.buffer.*
  * Opcodes and sizes verified from rs2client binary.
  */
 internal fun Codec.registerRev947ServerCodecsMisc() {
+    // WorldLoginDetails (opcode 2, varByte) — world-login response blob.
+    // Sent pre-ISAAC (noIsaac=true) after the success response byte.
+    // Client reads: rights, modLevel, quickChat, verifiedEmail, aBool7322, quickChatOnly,
+    //               playerIndex, members, dob, memberWorld, worldName.
+    serverProt<WorldLoginDetails>(opcode = 2, size = ProtSize.VarByte) { out ->
+        out.writeByte(rights)
+        out.writeByte(modLevel)
+        out.writeBoolean(quickChat)
+        out.writeBoolean(verifiedEmail)
+        out.writeBoolean(aBool7322)
+        out.writeBoolean(quickChatOnly)
+        out.writeShort(playerIndex)
+        out.writeBoolean(members)
+        out.writeMedium(dob)
+        out.writeBoolean(memberWorld)
+        out.writeRSString(worldName)
+    }
+
     // RUNCLIENTSCRIPT (121, varShort) — RE-verified: invokes CS2 script
     // Wire: RS string (type descriptor) + args in REVERSED type order + script_id (4B BE)
     serverProt<RunClientScript>(opcode = 121, size = ProtSize.VarShort) { out ->
@@ -40,14 +58,14 @@ internal fun Codec.registerRev947ServerCodecsMisc() {
         out.writeByte(energy)
     }
 
-    // CHANGE_LOBBY (30, var_short) — handler: Lobby::CHANGE_LOBBY (was mislabeled UPDATE_IGNORELIST)
-    serverProt<UpdateIgnoreList>(opcode = 30, size = ProtSize.VarShort)
+    // CHANGE_LOBBY (30, var_short) — handler: Lobby::CHANGE_LOBBY
+    serverProt<ChangeLobby>(opcode = 30, size = ProtSize.VarShort)
 
     // UPDATE_FRIENDLIST (102, var_short) — handler: UPDATE_SITESETTINGS at 0x00247a60
     // RE-verified from rs2client rev 947-1. Structurally identical to 946 handler.
     // All reads big-endian, no byte transforms. Strings are null-terminated CP1252.
-    serverProt<UpdateFriendList>(opcode = 102, size = ProtSize.VarShort) { out ->
-        for (friend in friends) {
+    serverProt<FriendStatus>(opcode = 102, size = ProtSize.VarShort) { out ->
+        for (friend in updates) {
             out.writeByte(friend.warnMessage)
             out.writeRSString(friend.displayName)
             out.writeRSString(friend.previousName)

@@ -18,7 +18,7 @@ import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 
-data class FileRequest(val index: Int, val archive: Int)
+data class FileRequest(val index: Int, val archive: Int, val version: Int = 0, val crc: Int = 0)
 
 class JS5Connection(
     private val id: Int,
@@ -185,7 +185,8 @@ class JS5Connection(
                     pending.remove(key)
                     val container = buffer.array()
                     val crc = CRC.calculate(container, 0, container.size)
-                    storage.store(resp.index, resp.archive, container, 0, crc)
+                    val request = sentRequests.find { it.index == resp.index && it.archive == resp.archive }
+                    storage.store(resp.index, resp.archive, container, request?.version ?: 0, crc)
                     progress.complete(container.size)
                     completedThisConnection.incrementAndGet()
                     sentRequests.removeIf { it.index == resp.index && it.archive == resp.archive }

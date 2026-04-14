@@ -8,6 +8,7 @@ fun register947() = Codec.register(947) {
     registerRev947ServerCodecsVariable()
     registerRev947ServerCodecsInterface()
     registerRev947ServerCodecsMisc()
+    registerRev947ServerCodecsSocial()
     // Then fill in metadata for all remaining opcodes (putIfAbsent — won't overwrite real registrations)
     registerRev947ServerProtStubs()
     registerRev947ClientProtStubs()

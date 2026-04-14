@@ -1,5 +1,6 @@
 package org.darkan.core.net.prot.revision.rev947
 
+import kotlinx.io.readByteArray
 import org.darkan.core.net.prot.*
 import world.gregs.voidps.buffer.readRSString
 
@@ -58,7 +59,10 @@ internal fun Codec.registerRev947ClientProts() {
     clientProt<UnhandledClientProt>(opcode = 21, size = 8)
     // 22 = FriendListDel (registered above)
     // 23 = RequestWorldList (registered above)
-    clientProt<UnhandledClientProt>(opcode = 24, size = ProtSize.VarByte)   // CLANCHANNEL_KICKUSER
+    // CLANCHANNEL_KICKUSER: opcode 24, varByte — kick user from clan/friends channel
+    clientProt<ClanChannelKickUser>(opcode = 24, size = ProtSize.VarByte) {
+        ClanChannelKickUser(username = readRSString())
+    }
     clientProt<UnhandledClientProt>(opcode = 25, size = ProtSize.VarByte)
     clientProt<UnhandledClientProt>(opcode = 26, size = ProtSize.VarByte)
     // 27 = Ping (registered above)
@@ -118,7 +122,10 @@ internal fun Codec.registerRev947ClientProts() {
     clientProt<UnhandledClientProt>(opcode = 81, size = 11)                 // OPLOC_T2
     clientProt<UnhandledClientProt>(opcode = 82, size = 4)
     clientProt<UnhandledClientProt>(opcode = 83, size = 18)
-    clientProt<UnhandledClientProt>(opcode = 84, size = ProtSize.VarByte)
+    // RESUME_P_NAMEDIALOG: opcode 84, varByte — typed display name from name dialog
+    clientProt<ResumePNameDialog>(opcode = 84, size = ProtSize.VarByte) {
+        ResumePNameDialog(name = readRSString())
+    }
     clientProt<UnhandledClientProt>(opcode = 85, size = 11)
     clientProt<UnhandledClientProt>(opcode = 86, size = ProtSize.VarByte)
     clientProt<UnhandledClientProt>(opcode = 87, size = ProtSize.VarByte)
@@ -130,7 +137,13 @@ internal fun Codec.registerRev947ClientProts() {
     // 93 = FriendListAdd (registered above)
     clientProt<UnhandledClientProt>(opcode = 94, size = ProtSize.VarShort)
     clientProt<UnhandledClientProt>(opcode = 95, size = 8)
-    clientProt<UnhandledClientProt>(opcode = 96, size = 8)
+    // IF_BUTTON1: opcode 96, 8B fixed — first button click on interface component
+    clientProt<IfButton>(opcode = 96, size = 8) {
+        val interfaceHash = readInt()
+        val slotId = readShort().toInt() and 0xFFFF
+        val itemId = readShort().toInt() and 0xFFFF
+        IfButton(buttonId = 1, interfaceHash = interfaceHash, slotId = slotId, itemId = itemId)
+    }
     clientProt<UnhandledClientProt>(opcode = 97, size = 9)
     clientProt<UnhandledClientProt>(opcode = 98, size = 7)
     clientProt<UnhandledClientProt>(opcode = 99, size = 2)
@@ -154,8 +167,27 @@ internal fun Codec.registerRev947ClientProts() {
     clientProt<UnhandledClientProt>(opcode = 117, size = ProtSize.VarByte)
     clientProt<UnhandledClientProt>(opcode = 118, size = 7)
     clientProt<UnhandledClientProt>(opcode = 119, size = ProtSize.VarByte)
-    clientProt<UnhandledClientProt>(opcode = 120, size = ProtSize.VarByte)  // MESSAGE_PUBLIC
-    clientProt<UnhandledClientProt>(opcode = 121, size = ProtSize.VarShort) // MESSAGE_PRIVATE
+    // MESSAGE_PUBLIC: opcode 120, varByte — send public chat message
+    clientProt<MessagePublicSend>(
+        opcodes = intArrayOf(120),
+        size = ProtSize.VarByte
+    ) { packetSize ->
+        val color = readByte().toInt() and 0xFF
+        val effect = readByte().toInt() and 0xFF
+        val message = readByteArray(packetSize - 2)
+        MessagePublicSend(color = color, effect = effect, message = message)
+    }
+    // MESSAGE_PRIVATE: opcode 121, varShort — send private message to another player
+    clientProt<MessagePrivateSend>(
+        opcodes = intArrayOf(121),
+        size = ProtSize.VarShort
+    ) { packetSize ->
+        val toDisplayName = readRSString()
+        // Remaining bytes after the null-terminated string are the compressed message
+        val nameLen = toDisplayName.length + 1  // +1 for null terminator
+        val message = readByteArray(packetSize - nameLen)
+        MessagePrivateSend(toDisplayName = toDisplayName, message = message)
+    }
     clientProt<UnhandledClientProt>(opcode = 122, size = 7)
     clientProt<UnhandledClientProt>(opcode = 123, size = 3)
     clientProt<UnhandledClientProt>(opcode = 124, size = ProtSize.VarByte)

@@ -4,18 +4,19 @@ import org.darkan.core.net.prot.Codec
 import org.darkan.core.net.prot.ProtSize
 
 /**
- * Registers opcode metadata (name + size) for ALL 218 ServerProt opcodes in rev 947-1.
+ * Registers opcode metadata (name + size) for ALL 218 ServerProt opcodes.
  * Opcodes that have real encoder registrations (via serverProt<T>) will NOT be overwritten
  * because serverProtStub uses putIfAbsent.
  *
- * Extracted from rs2client.947-1 binary:
+ * Verified identical between rs2client.947-1 and rs2client.947-3:
  *   RegisterAll at 0x00181e10, BindHandlers at 0x001185aa
  *   g_serverProtVector at 0x016ee0a0, max opcode 0xD9 (217)
+ *   All 218 opcodes and sizes are unchanged between 947-1 and 947-3.
  *
- * 77 entries matched by handler name from BindHandlers.
+ * 79 entries matched by handler name from BindHandlers (77 from 947-1 + 2 newly identified in 947-3).
  * 8 entries matched by unique size after handler matches removed.
  * 1 new packet (opcode 149, size 17) not present in rev 946.
- * 132 entries unmatched (common sizes, unnamed FUN_ handlers).
+ * 130 entries unmatched (common sizes, unnamed FUN_ handlers).
  */
 internal fun Codec.registerRev947ServerProtStubs() {
     s(0, "UNKNOWN_0", -1)
@@ -39,7 +40,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(18, "UNKNOWN_18", 3)
     s(19, "UPDATE_RUNENERGY", 1)                     // handler: Misc::SET_RUN_ENERGY
     s(20, "UNKNOWN_20", 7)
-    s(21, "UNKNOWN_21", -1)
+    s(21, "MESSAGE_FRIENDCHAT", -1)                  // handler: Chat::MESSAGE_FRIENDCHAT (identified in 947-3)
     s(22, "UNKNOWN_22", 6)
     s(23, "UNKNOWN_23", 4)
     s(24, "NPC_OP", -1)                              // handler: NPCInfo::SET_NPC_OP
@@ -109,7 +110,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(88, "UNKNOWN_88", 10)
     s(89, "CAM_RESET", 0)                            // handler: Camera::CAM_RESET
     s(90, "UNKNOWN_90", -2)
-    s(91, "CUTSCENE", 35)                            // unique size 35
+    s(91, "CUTSCENE_DATA", 35)                       // handler: Misc::CUTSCENE_DATA (confirmed in 947-3)
     s(92, "UNKNOWN_92", 8)                            // NOT IF_SETGRAPHIC (capture proves IF_SETGRAPHIC is op 94)
     s(93, "UNKNOWN_93", 10)
     s(94, "IF_SETTOPLEVELINTERFACE", 19)              // Ghidra: direct top-level interface set (handler 0x0022ca10)
@@ -206,7 +207,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(185, "UNKNOWN_185", 1)
     s(186, "IF_OPENSUB_THUNK", -2)                   // handler: Interfaces::IF_OPENSUB_thunk
     s(187, "SET_WORLD_TARGET", -1)                   // handler: WorldData::SET_WORLD_TARGET
-    s(188, "UNKNOWN_188", -2)
+    s(188, "REBUILD_WORLDENTITY", -2)                // handler: ClientState::REBUILD_WORLDENTITY (identified in 947-3)
     s(189, "IF_MOVESUB", 3)                          // handler: Interfaces::IF_MOVESUB_thunk
     s(190, "UNKNOWN_190", 15)                        // unique size 15
     s(191, "UNKNOWN_191", 2)
