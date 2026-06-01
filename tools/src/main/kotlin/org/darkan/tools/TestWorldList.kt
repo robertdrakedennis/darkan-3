@@ -3,13 +3,13 @@ package org.darkan.tools
 import io.ktor.utils.io.*
 import kotlinx.coroutines.runBlocking
 import org.darkan.core.net.prot.WorldListPacket
-import org.darkan.core.net.prot.revision.rev947.register947
+import org.darkan.core.net.prot.revision.rev948.register948
 import org.darkan.core.worldlist.Country
 import org.darkan.core.worldlist.World
 import org.darkan.core.worldlist.WorldList
 
 fun main() = runBlocking {
-    val codec = register947()
+    val codec = register948()
     
     val wl = WorldList(300)
     wl.put(World(number = 300, hostname = "localhost", activity = "Darkan", country = Country.USA, members = true))

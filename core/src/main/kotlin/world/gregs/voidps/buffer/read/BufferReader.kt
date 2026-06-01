@@ -1,5 +1,6 @@
 package world.gregs.voidps.buffer.read
 
+import world.gregs.voidps.buffer.Cp1252
 import java.nio.ByteBuffer
 
 class BufferReader(
@@ -125,16 +126,16 @@ class BufferReader(
     }
 
     override fun readString(): String {
-        val sb = StringBuilder()
+        val bytes = ArrayList<Byte>()
         var b: Int
         while (buffer.hasRemaining()) {
             b = readUnsignedByte()
             if (b == 0) {
                 break
             }
-            sb.append(b.toChar())
+            bytes.add(b.toByte())
         }
-        return sb.toString()
+        return Cp1252.decode(bytes.toByteArray())
     }
 
     override fun readBytes(value: ByteArray) {

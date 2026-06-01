@@ -217,7 +217,7 @@ class LoginServer {
         logInfo("Login complete for $ip (lobby data: ${lobbyData.size} bytes)")
 
         // Create session with codec
-        val codec = Codec.get(947) ?: error("Rev947 codec not registered!")
+        val codec = Codec.get(948) ?: error("Rev948 codec not registered!")
         val session = GameSession(output, inCipher, outCipher, ip, codec, username = account.username)
 
         // Register in SocialGateway for presence tracking
@@ -314,12 +314,31 @@ class LoginServer {
 
         // No pre-interface world list — sent at the end of init (matching Jagex sequence)
 
-        // 5. IF_OPENTOP + IF_OPENSUB
-        session.send(IfOpenTopLobby(LOBBY_INTERFACE_ID))
-        for ((parentComponent, subIfId) in LOBBY_SUB_INTERFACES) {
-            session.send(IfOpenSubLobby(LOBBY_INTERFACE_ID, parentComponent, subIfId))
+        // 5. IF_SETTOPLEVELINTERFACE + IF_SETPOSITION — the REAL 948 Jagex lobby interface setup.
+        // Ground truth: capture/login-20260531-191837_s1/decoded.log (live MITM vs lobby6a).
+        // The 948 lobby does NOT use the generic in-game IF_OPENTOP(39)+IF_OPENSUB(94); using those
+        // left dangling interface components and the next-frame event flush dereffed a bad component
+        // pointer → SIGSEGV (docs/net/serverprot/948-worldlist-crash-diagnosis.md).
+        //
+        // IF_SETTOPLEVELINTERFACE (op 3, 19B): switches the active top-level interface to the lobby
+        // parent (906). Encoder verified byte-identical to the captured payload.
+        session.send(IfSetTopLevelInterface(topLevelId = LOBBY_INTERFACE_ID))
+        // IF_SETPOSITION (op 82, 23B) ×21: places each child interface into its slot on the parent.
+        //   layer       = 1 (capture byte 0x7F = writeByteSubtract(1)).
+        //   position    = packed parent component hash = (906 << 16) | slot.
+        //   componentId = the child interface id placed at that slot.
+        // The (slot → child) pairs and ORDER come straight from the capture (== LOBBY_SUB_INTERFACES).
+        for ((slot, childInterfaceId) in LOBBY_SUB_INTERFACES) {
+            val position = (LOBBY_INTERFACE_ID shl 16) or (slot and 0xFFFF)
+            session.send(
+                IfSetPosition(
+                    componentId = childInterfaceId,
+                    layer = 1,
+                    position = position,
+                )
+            )
         }
-        logInfo("Sent IF_OPENTOP($LOBBY_INTERFACE_ID) + ${LOBBY_SUB_INTERFACES.size}x IF_OPENSUB to ${session.ip}")
+        logInfo("Sent IF_SETTOPLEVELINTERFACE($LOBBY_INTERFACE_ID) + ${LOBBY_SUB_INTERFACES.size}x IF_SETPOSITION to ${session.ip}")
 
         // 5b. RUNCLIENTSCRIPT — timer display setup on sub-interface components (from Jagex capture)
         // Script 7486: sets up countdown timers. int0=timer minutes, int1=component hash.
@@ -356,16 +375,20 @@ class LoginServer {
         // Final news script — signals end of news entries
         session.send(RunClientScript.of(SCRIPT_LOBBY_NEWS_END))
 
-        // 9. SET_RUN_ENERGY → SET_READY_FLAG → CHANGE_LOBBY
+        // 9. SET_RUN_ENERGY → CHANGE_LOBBY. Capture tail order: ChangeLobby(49), WorldList(216)×5,
+        // then SetReadyFlag(75) LAST — it is the final render trigger, so it must fire after all
+        // interface components are positioned and the worldlist is delivered.
         session.send(UpdateRunenergy(1))
-        session.send(SetReadyFlag())
         session.send(ChangeLobby())
 
         // 10. Social init is handled by SocialGateway.registerLobbyPlayer() above
         // (sends friend list, ignore list, chat filters, mutual friend notifications)
 
-        // 11. World list — sent LAST (matching Jagex sequence)
+        // 11. World list — sent near the end (matching Jagex sequence)
         session.send(WorldListPacket(LobbyState.worldList, fullRefresh = true))
+
+        // 12. SET_READY_FLAG — last packet of the init burst; signals the client to render the lobby.
+        session.send(SetReadyFlag())
 
         session.flush()
         logInfo("Sent lobby init packets to ${session.ip}")

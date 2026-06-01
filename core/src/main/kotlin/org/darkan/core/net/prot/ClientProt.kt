@@ -49,7 +49,11 @@ data class RequestWorldList(val worldlistVersion: Int) : ClientProt
 
 // --- Interface ---
 
-/** IF_BUTTON1 (opcode 96, 8B fixed) — first button click on an interface component. */
+/**
+ * IF_BUTTON1..IF_BUTTON7 + IF_BUTTON10 (948: op 127/103/92/45/30/68/43/21, 8B fixed) — interface
+ * component CLICK. [buttonId] is the option index (1..7, 10). interfaceHash packs the interface id
+ * (ushr 16) and component id (and 0xFFFF). slotId/itemId identify the clicked sub-element.
+ */
 data class IfButton(val buttonId: Int, val interfaceHash: Int, val slotId: Int, val itemId: Int) : ClientProt
 
 /** RESUME_P_NAMEDIALOG (opcode 84, varByte) — typed display name from name dialog. */

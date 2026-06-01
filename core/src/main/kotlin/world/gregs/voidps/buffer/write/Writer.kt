@@ -1,5 +1,6 @@
 package world.gregs.voidps.buffer.write
 
+import world.gregs.voidps.buffer.Cp1252
 
 /**
  * All functions relative to writing directly to a packet are done by this class
@@ -62,8 +63,8 @@ interface Writer {
 
     fun writeString(value: String?) {
         if (value != null) {
-            for (char in value) {
-                writeByte(char.code)
+            for (byte in Cp1252.encode(value)) {
+                writeByte(byte.toInt() and 0xff)
             }
         }
         writeByte(0)
@@ -71,8 +72,8 @@ interface Writer {
 
     fun writePrefixedString(value: String) {
         writeByte(0)
-        for (char in value) {
-            writeByte(char.code)
+        for (byte in Cp1252.encode(value)) {
+            writeByte(byte.toInt() and 0xff)
         }
         writeByte(0)
     }

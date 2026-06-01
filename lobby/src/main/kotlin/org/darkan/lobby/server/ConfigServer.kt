@@ -156,7 +156,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
 
     private fun generateJavConfig(): String = buildString {
         val host = "localhost"
-        val port = EnvVars.lobbyPort
+        val lobbyPort = EnvVars.lobbyPort
 
         fun line(s: String) { append(s); append("\n") }
 
@@ -270,14 +270,18 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=38=1200")
         line("param=39=1829")                                    // lobby worldId (HTTP port = 1829+7000 = 8829)
         line("param=40=http://$host:${EnvVars.configHttpPort}")   // world server URL
-        line("param=41=$port")                                    // game port 1
-        line("param=42=$port")                                    // game port 2 (was SSL 443)
-        line("param=43=$port")                                    // game port 3
-        line("param=44=$port")                                    // game port 4 (was SSL 443)
-        line("param=45=$port")                                    // game port 5
-        line("param=46=$port")                                    // game port 6 (was SSL 443)
-        line("param=47=$port")                                    // game port 7
-        line("param=48=$port")                                    // game port 8 (was SSL 443)
+        // Game ports — client uses these for JS5 (TCP) AND world connections. In Jagex's
+        // architecture both services share one port; our split architecture (lobby 43594, world
+        // 43595) requires overriding via SET_WORLD_TARGET. We keep JS5 on the lobby port here
+        // and send SET_WORLD_TARGET from the lobby to steer world login to the world port.
+        line("param=41=$lobbyPort")                               // game port 1 (JS5 lives here)
+        line("param=42=$lobbyPort")                               // game port 2 (was SSL 443)
+        line("param=43=$lobbyPort")                               // game port 3
+        line("param=44=$lobbyPort")                               // game port 4 (was SSL 443)
+        line("param=45=$lobbyPort")                               // game port 5
+        line("param=46=$lobbyPort")                               // game port 6 (was SSL 443)
+        line("param=47=$lobbyPort")                               // game port 7
+        line("param=48=$lobbyPort")                               // game port 8 (was SSL 443)
         line("param=49=$host")                                    // content server host
         line("param=50=0")
         line("param=51=0")

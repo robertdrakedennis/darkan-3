@@ -4,7 +4,7 @@ import org.darkan.core.model.IFEvents
 import org.darkan.core.EnvVars
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.prot.Codec
-import org.darkan.core.net.prot.revision.rev947.register947
+import org.darkan.core.net.prot.revision.rev948.register948
 import world.gregs.voidps.cache.secure.RSA
 import com.sun.net.httpserver.HttpServer
 import java.io.*
@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 private const val JAV_CONFIG_URL = "https://www.runescape.com/k=5/l=0/jav_config.ws?binaryType=4"
 private const val DEFAULT_LISTEN_PORT = 43594
-private const val DEFAULT_HTTP_PORT = 8081
+private const val DEFAULT_HTTP_PORT = 55829
 private const val DEFAULT_CAPTURE_DIR = "capture"
 private const val FALLBACK_LOBBY_HOST = "lobby1.runescape.com"
 private const val FALLBACK_WORLD_HOST = "world1.runescape.com"
@@ -63,11 +63,21 @@ private val worldHostnames = java.util.concurrent.ConcurrentHashMap<Int, String>
 private const val MAX_HEX_DUMP_BYTES_DEFAULT = 256
 private const val MAX_HEX_DUMP_BYTES_POSTLOGIN = Int.MAX_VALUE
 
-/** Server opcodes to suppress from logs (keepalives, ticks, etc.) */
-private val SUPPRESS_S2C = setOf(146) // NO_TIMEOUT
+/**
+ * Server opcodes (ServerProt) to suppress from logs (keepalives, ticks, etc.).
+ * 948 validated names (per docs/net/948-serverprot-matrix.md): 146 = UNKNOWN_146 (sz2).
+ * NOTE: the validated 948 server keepalives are op54 NO_TIMEOUT (varByte) and op128 (empty periodic
+ * keepalive, currently UNKNOWN_128); add those here if server-side keepalive spam needs hiding.
+ */
+private val SUPPRESS_S2C = setOf(146) // 948: UNKNOWN_146
 
-/** Client opcodes to suppress from logs (keepalives, pings, mouse, camera, etc.) */
-private val SUPPRESS_C2S = setOf(15, 80, 1, 2, 17, 85, 31, 51) // NO_TIMEOUT, NO_TIMEOUT_2, EVENT_CAMERA_POSITION, CAMERA_DIRECTION, EVENT_MOUSE_CLICK, EVENT_MOUSE_MOVE, EVENT_CAMERA_POSITION_2, CAMERA_ANGLE
+/**
+ * Client opcodes (ClientProt) to suppress from logs (keepalives, pings, mouse, camera, etc.).
+ * 948 validated names (per docs/net/948-clientprot-matrix.md): the only true keepalive is op51
+ * NO_TIMEOUT; op15 = EVENT_MOUSE_CLICK; op17 = MOVE_SCRIPTED. The rest of this legacy list carries
+ * 947-stale identities under 948: 80 = IGNORELIST_ADD (NOT a keepalive), 1/2/31/85 = UNKNOWN.
+ */
+private val SUPPRESS_C2S = setOf(15, 80, 1, 2, 17, 85, 31, 51) // 948: EVENT_MOUSE_CLICK, IGNORELIST_ADD, UNKNOWN_1, UNKNOWN_2, MOVE_SCRIPTED, UNKNOWN_85, UNKNOWN_31, NO_TIMEOUT
 
 // ---- Connection type opcodes ----
 
@@ -147,7 +157,7 @@ private enum class Phase {
 // ---- Entry Point ----
 
 /** Protocol codec — initialized once at startup, used for opcode names/sizes. */
-private val codec: Codec = register947()
+private val codec: Codec = register948()
 
 fun main(args: Array<String>) {
     val listenPort = findArg(args, "--listen-port")?.toIntOrNull() ?: DEFAULT_LISTEN_PORT
@@ -1129,7 +1139,9 @@ private class ProxySession(
     private fun parseClientPostLogin(buf: ByteArray, len: Int) {
         val cipher = c2sIsaac
         if (cipher == null) {
-            log("C->S", "[${len}B] POST_LOGIN (no ISAAC -- passthrough)")
+            // ISAAC unavailable: cannot decode opcodes or frame the segment.
+            // Dump the full raw segment so the capture is still usable.
+            log("C->S", "[${len}B] POST_LOGIN raw segment (no ISAAC -- cannot frame, dumping raw bytes)")
             logHex("C->S", buf, 0, len, MAX_HEX_DUMP_BYTES_POSTLOGIN)
             return
         }
@@ -1665,6 +1677,10 @@ private class ProxySession(
     private fun decodeAndRewritePostLogin(buf: ByteArray, len: Int): ByteArray {
         val cipher = s2cIsaac
         if (cipher == null) {
+            // POST_LOGIN bytes bundled with the login response, but no ISAAC to
+            // frame them. Dump the raw segment so nothing is silently swallowed.
+            log("S->C", "[${len}B] POST_LOGIN raw segment (no ISAAC -- cannot frame, dumping raw bytes)")
+            logHex("S->C", buf, 0, len, MAX_HEX_DUMP_BYTES_POSTLOGIN)
             return buf.copyOfRange(0, len)
         }
 
@@ -1885,7 +1901,12 @@ private class ProxySession(
     private fun processPostLoginS2C(buf: ByteArray, len: Int): ByteArray {
         val cipher = s2cIsaac
         if (cipher == null) {
-            log("S->C", "[${len}B] POST_LOGIN (no ISAAC -- passthrough)")
+            // ISAAC unavailable (RSA MITM did not run/succeed): opcodes are still
+            // ISAAC-encrypted, so we cannot decode them or split this TCP segment
+            // into individual game packets. Dump the full raw segment anyway so the
+            // capture remains usable for manual analysis.
+            log("S->C", "[${len}B] POST_LOGIN raw segment (no ISAAC -- cannot frame, dumping raw bytes)")
+            logHex("S->C", buf, 0, len, MAX_HEX_DUMP_BYTES_POSTLOGIN)
             return buf.copyOfRange(0, len)
         }
 

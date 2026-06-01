@@ -67,7 +67,7 @@ fun main() {
 
         if (lobbyHost != null && js5Token != null && serverVersion != null) {
             val versionParts = serverVersion.split(".")
-            val major = versionParts.getOrNull(0)?.toIntOrNull() ?: 947
+            val major = versionParts.getOrNull(0)?.toIntOrNull() ?: 948
             val minor = versionParts.getOrNull(1)?.toIntOrNull() ?: 1
 
             println("\n" + "=" .repeat(70))
@@ -95,7 +95,7 @@ fun main() {
         captureMasterIndex(
             host = "localhost",
             port = 43594,
-            major = 947,
+            major = 948,
             minor = 1,
             token = "ev9+VAp5/tMKeNR/7MOuH6lKWS+rGkHK",
             label = "LOCAL"

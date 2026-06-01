@@ -2,7 +2,7 @@ package org.darkan.tools
 
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.prot.Codec
-import org.darkan.core.net.prot.revision.rev947.register947
+import org.darkan.core.net.prot.revision.rev948.register948
 import java.io.File
 import java.io.PrintWriter
 
@@ -15,7 +15,7 @@ fun main(args: Array<String>) {
         ?: error("No captures found")
     println("Extracting lobby data from: $dir")
 
-    val codec = register947()
+    val codec = register948()
     val keysLine = File("$dir/isaac-keys.txt").readLines().first { "hex" in it }
     val keys = Regex("0x([0-9A-Fa-f]+)").findAll(keysLine).map { it.groupValues[1].toLong(16).toInt() }.toList().toIntArray()
     val s2cKeys = IntArray(4) { keys[it] + 50 }

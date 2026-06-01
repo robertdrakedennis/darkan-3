@@ -22,8 +22,8 @@ fun fetchJavConfig(): Map<String, String> {
 fun main(args: Array<String>) {
     val host = args.getOrNull(0) ?: "content.runescape.com"
     val port = args.getOrNull(1)?.toIntOrNull() ?: 43594
-    val major = args.getOrNull(2)?.toIntOrNull() ?: 947
-    val minor = args.getOrNull(3)?.toIntOrNull() ?: 1
+    val major = args.getOrNull(2)?.toIntOrNull() ?: 948
+    val minor = args.getOrNull(3)?.toIntOrNull() ?: 2
     val connections = args.getOrNull(4)?.toIntOrNull() ?: 8
     val outputPath = args.getOrNull(5) ?: "./data/cache"
 

@@ -37,7 +37,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(15, "UNKNOWN_15", -2)
     s(16, "UNKNOWN_16", 4)
     s(17, "IF_OPENSUB", 8)                           // Interfaces constructor slot #1
-    s(18, "UNKNOWN_18", 3)
+    s(18, "UPDATE_ZONE_FULL_FOLLOWS", 3)             // handler: ZoneUpdates::UPDATE_ZONE_FULL_FOLLOWS @ 0x00199360 (947-3 A3). 3B: level + zoneX + zoneY. NOT op 173.
     s(19, "UPDATE_RUNENERGY", 1)                     // handler: Misc::SET_RUN_ENERGY
     s(20, "UNKNOWN_20", 7)
     s(21, "MESSAGE_FRIENDCHAT", -1)                  // handler: Chat::MESSAGE_FRIENDCHAT (identified in 947-3)
@@ -55,7 +55,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(33, "IF_CLOSESUB", 4)                             // handler: Interfaces::IF_CLOSESUB_ACTIVE. Cross-ref: unstripped IF_CLOSESUB
     s(34, "IF_SETEVENTS", 10)                        // Interfaces constructor, SetServerActiveProperties
     s(35, "IF_SETEVENTS2", 12)                       // Interfaces constructor, SetServerActiveProperties
-    s(36, "UPDATE_UID192", 28)                       // handler: PlayerInfo::REBUILD_PLAYERINFO_POSITIONS
+    s(36, "HANDSHAKE_UID", 28)                       // handler: HANDSHAKE_UID @ 0x00228d70 (947-3 A4). CRC32-verified UID identity binding, NOT player-positions reset. 24B UID + 4B CRC32 BE.
     s(37, "UNKNOWN_37", 2)
     s(38, "UNKNOWN_38", 5)
     s(39, "CHAT_FILTER_SETTINGS", -1)                // handler: Chat::CHAT_FILTER_SETTINGS
@@ -76,7 +76,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(54, "NPC_HEADICON_SPECIFIC", -1)               // handler: NPCInfo::NPC_HEADICON_SPECIFIC
     s(55, "CLIENT_SETVARCBIT_LARGE", 6)              // Variables constructor slot #11
     s(56, "UNKNOWN_56", 10)
-    s(57, "UNKNOWN_57", 3)
+    s(57, "UPDATE_ZONE_PARTIAL_FOLLOWS", 3)          // handler: ZoneUpdates::UPDATE_ZONE_PARTIAL_FOLLOWS @ 0x0018f7b0 (947-3 A3). 3B: level + zoneX + zoneY.
     s(58, "MESSAGE_QUICKCHAT_CLANCHAT", -1)          // handler: Chat::MESSAGE_QUICKCHAT_CLANCHAT
     s(59, "JCOINS_UPDATE", 4)                        // handler: Misc::SET_DISPLAY_INT
     s(60, "UNKNOWN_60", 7)
@@ -109,7 +109,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(87, "MIDI_SONG", 5)                               // handler: Audio::MIDI_SONG. Cross-ref: unstripped MIDI_SONG
     s(88, "UNKNOWN_88", 10)
     s(89, "CAM_RESET", 0)                            // handler: Camera::CAM_RESET
-    s(90, "UNKNOWN_90", -2)
+    s(90, "REBUILD_NORMAL", -2)                      // handler: ClientState::REBUILD_NORMAL_SIMPLE @ 0x002140c0 (947-3 A2). Simple-form rebuild for normal world login. Magic 0x7B prefix.
     s(91, "CUTSCENE_DATA", 35)                       // handler: Misc::CUTSCENE_DATA (confirmed in 947-3)
     s(92, "UNKNOWN_92", 8)                            // NOT IF_SETGRAPHIC (capture proves IF_SETGRAPHIC is op 94)
     s(93, "UNKNOWN_93", 10)
@@ -138,14 +138,14 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(116, "SET_PLAYER_OP_3", 1)                     // handler: Misc::SET_PLAYER_OP_3
     s(117, "IF_SETANGLE", 32)                        // unique size 32
     s(118, "UNKNOWN_118", 25)
-    s(119, "UNKNOWN_119", 10)                         // NOT VARP_LONG (capture proves VARP_LONG is op 170)
+    s(119, "UNKNOWN_119", -1)                        // varByte per RegisterAll/InitEntry size=-1 (947-3 Ghidra A0); NOT VARP_LONG (capture proves VARP_LONG is op 170)
     s(120, "UNKNOWN_120", 0)
     s(121, "RUNCLIENTSCRIPT", -2)                    // capture: lobby news with date strings, 15-274B entries
     s(122, "UNKNOWN_122", 8)
     s(123, "UNKNOWN_123", 8)
     s(124, "UNKNOWN_124", 12)
     s(125, "MESSAGE_CLANCHANNEL_SYSTEM", -1)         // handler: Chat::MESSAGE_CLANCHANNEL
-    s(126, "UNKNOWN_126", -2)
+    s(126, "UPDATE_ZONE_PARTIAL_ENCLOSED", -2)       // handler: ZoneUpdates::UPDATE_ZONE_PARTIAL_ENCLOSED @ 0x0018f610 (947-3 A3). varShort: zoneHeader + inline sub-opcode stream.
     s(127, "UNKNOWN_127", 11)
     s(128, "UNKNOWN_128", 6)
     s(129, "MESSAGE_PRIVATE_ECHO", -1)               // handler: Chat::MESSAGE_PRIVATE_ECHO
@@ -165,7 +165,7 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(143, "UNKNOWN_143", 1)
     s(144, "SET_INTERACTION_FLAG_D", 3)              // handler: Misc::SET_INTERACTION_FLAG_D
     s(145, "UNKNOWN_145", 14)
-    s(146, "IF_SETGRAPHIC_ACTIVE", -1)               // handler: Interfaces::IF_SETGRAPHIC_ACTIVE_handler
+    s(146, "IF_SET_HTTP_IMAGE", -1)                  // handler: Interfaces::IF_SET_HTTP_IMAGE @ 0x0025cde0 (947-3 A1). varByte: CP1252 image URL. NOT IF_SETGRAPHIC_ACTIVE.
     s(147, "LOGOUT", 0)                              // handler: Misc::LOGOUT
     s(148, "UNKNOWN_148", 9)
     s(149, "NEW_PACKET_149", 17)                     // NEW in 947-1, not present in rev 946
@@ -191,14 +191,15 @@ internal fun Codec.registerRev947ServerProtStubs() {
     s(169, "UNKNOWN_169", 2)
     s(170, "VARP_LONG", 10)                           // capture-verified: 8B long value + 2B varp ID
     s(171, "SERVER_TICK_END", 8)                     // handler: Misc::SERVER_TICK_END
-    s(172, "REBUILD_NORMAL", -2)                        // handler: ClientState::REBUILD_NORMAL (0x002144e0). Cross-ref: unstripped REBUILD_NORMAL
-    s(173, "UPDATE_ZONE_FULL_FOLLOWS", -2)           // handler: ZoneUpdates::UPDATE_ZONE_FULL_FOLLOWS_handler
+    s(172, "REBUILD_REGION", -2)                     // handler: ClientState::REBUILD_REGION @ 0x001c0480 (947-3 A2). Multi-scene grid form for INSTANCED regions. NOT the world-login rebuild — see op 90.
+    s(173, "UNKNOWN_173", -2)                        // handler @ 0x002516b0 (947-3 A3). NOT UPDATE_ZONE_FULL_FOLLOWS — reads 8B+4B+1B header then dispatches 14-case jump table at 0x00dcb820 (likely social/clan batching). Out of A3 scope.
     s(174, "SET_INTERACTION_FLAG_C", 1)              // handler: Misc::SET_INTERACTION_FLAG_C
     s(175, "UNKNOWN_175", 6)
     s(176, "UNKNOWN_176", -2)
     s(177, "UPDATE_INV_GROUP", -2)                   // handler: Inventory::UPDATE_INV_GROUP
     s(178, "UPDATE_PLAYER_CHAT", -2)                 // handler: PlayerInfo::UPDATE_PLAYER_CHAT
-    s(179, "FRIENDCHAT_JOIN", -1)                    // handler: Chat::FRIENDCHAT_JOIN
+    s(179, "SWITCH_WORLD", -1)                       // handler: WorldData::SWITCH_WORLD (947-3 @ 0x001c1bd5)
+                                                      // Ghidra's "FRIENDCHAT_JOIN" label was fabricated — real handler is world transfer.
     s(180, "PLAYER_INFO_DECODE_2", -2)               // handler: PlayerInfo::PLAYER_INFO_DECODE_2
     s(181, "UNKNOWN_181", 6)
     s(182, "UNKNOWN_182", 5)

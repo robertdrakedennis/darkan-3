@@ -58,6 +58,37 @@ internal fun Codec.registerRev947ServerCodecsMisc() {
         out.writeByte(energy)
     }
 
+    // JCOINS_UPDATE (59, 4B) — handler: Misc::SET_DISPLAY_INT
+    serverProt<JcoinsUpdate>(opcode = 59, size = 4) { out ->
+        out.writeInt(balance)
+    }
+
+    // NOTE: the previous registration of `UpdateZoneFullFollows` at opcode 173 has been removed.
+    // Per `docs/net/serverprot/zone-updates-947-3.md` §1, opcode 173 is NOT a zone-update frame;
+    // the real UPDATE_ZONE_FULL_FOLLOWS lives at opcode 18 (see Rev947ServerCodecsZone.kt). The
+    // deprecated data class survives only as a transitional alias until B8 migrates call sites.
+
+    // SET_WORLD_TARGET (187, varByte) — populates the LOBBY login slot (next lobby login target).
+    // Does NOT trigger a world transfer. Handler at 0x00222390 in 947-3 (WorldData::SET_WORLD_TARGET).
+    // Wire: string hostname + ushort worldId + ushort port1 + ushort port2.
+    serverProt<SetWorldTarget>(opcode = 187, size = ProtSize.VarByte) { out ->
+        out.writeRSString(hostname)
+        out.writeShort(worldId)
+        out.writeShort(port1)
+        out.writeShort(port2)
+    }
+
+    // SWITCH_WORLD (179, varByte) — triggers lobby→world transfer. Previously mislabeled
+    // FRIENDCHAT_JOIN in Ghidra. Handler at 0x001c1bd5 in 947-3. Wire format:
+    //   string hostname + ushort worldId + ushort port1 + ushort port2 + ubyte pendingFlag
+    serverProt<SwitchWorld>(opcode = 179, size = ProtSize.VarByte) { out ->
+        out.writeRSString(hostname)
+        out.writeShort(worldId)
+        out.writeShort(port1)
+        out.writeShort(port2)
+        out.writeByte(pendingFlag)
+    }
+
     // CHANGE_LOBBY (30, var_short) — handler: Lobby::CHANGE_LOBBY
     serverProt<ChangeLobby>(opcode = 30, size = ProtSize.VarShort)
 

@@ -120,13 +120,13 @@ suspend fun ByteWriteChannel.writeFlags(flags: Int) {
 }
 
 suspend fun ByteWriteChannel.writeRSString(value: String) {
-    writeFully(value.toByteArray())
+    writeFully(Cp1252.encode(value))
     writeByte(0)
 }
 
 suspend fun ByteWriteChannel.writePrefixedString(value: String) {
     writeByte(0)
-    writeFully(value.toByteArray())
+    writeFully(Cp1252.encode(value))
     writeByte(0)
 }
 
@@ -140,7 +140,7 @@ suspend fun ByteWriteChannel.writeJagString(value: String) {
 }
 
 fun BytePacketBuilder.writeRSString(value: String) {
-    writeFully(value.toByteArray())
+    writeFully(Cp1252.encode(value))
     writeByte(0)
 }
 
@@ -221,25 +221,21 @@ suspend fun ByteWriteChannel.finish(value: Int) {
 }
 
 fun Source.readRSString(): String {
-    val sb = StringBuilder()
+    val bytes = ArrayList<Byte>()
     var b: Int
     while (remaining > 0) {
         b = readByte().toInt()
         if (b == 0) {
             break
         }
-        sb.append(b.toChar())
+        bytes.add(b.toByte())
     }
-    return sb.toString()
+    return Cp1252.decode(bytes.toByteArray())
 }
 
 fun Source.readJagString(): String {
     readByte()
-    var s = ""
-    var b: Int
-    while ((readByte().toInt().also { b = it }) != 0)
-        s += b.toChar()
-    return s
+    return readRSString()
 }
 
 fun Source.readFlags(): Int {
@@ -317,15 +313,15 @@ fun Source.readSmart(): Int {
 }
 
 suspend fun ByteReadChannel.readRSString(): String {
-    val sb = StringBuilder()
+    val bytes = ArrayList<Byte>()
     var b: Int
     while (true) {
         b = readByte().toInt()
         if (b == 0)
             break
-        sb.append(b.toChar())
+        bytes.add(b.toByte())
     }
-    return sb.toString()
+    return Cp1252.decode(bytes.toByteArray())
 }
 
 suspend fun ByteReadChannel.readJagString(): String {

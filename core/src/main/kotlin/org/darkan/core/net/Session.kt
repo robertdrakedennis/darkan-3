@@ -106,8 +106,23 @@ open class Session(
                 val opcode = (input.readUByte() - cipher) and 0xff
                 val clientProt = codec.clientProtsByOpcode[opcode]
                 if (clientProt == null) {
-                    logError("Missing ClientProt with opcode $opcode")
-                    return
+                    // No decoder registered for this opcode. Frame it from the stub
+                    // size metadata so the stream stays in sync, deliver it as an
+                    // UnhandledClientProt, and continue. Only an opcode with no size
+                    // metadata at all is fatal.
+                    val info = codec.clientProtInfo[opcode]
+                    if (info == null) {
+                        logError("Missing ClientProt with opcode $opcode")
+                        return
+                    }
+                    val skipSize = when (info.size) {
+                        is ProtSize.Fixed -> info.size.length
+                        ProtSize.VarByte -> input.readUByte()
+                        ProtSize.VarShort -> input.readUShort()
+                    }
+                    input.readPacket(skipSize)
+                    readChannel.send(UnhandledClientProt(opcode, info.name, skipSize))
+                    continue
                 }
                 val size = when (clientProt.size) {
                     is ProtSize.Fixed -> clientProt.size.length

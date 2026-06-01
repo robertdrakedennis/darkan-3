@@ -6,7 +6,7 @@ import org.darkan.core.Logger
 import org.darkan.core.mongo.Accounts
 import org.darkan.core.mongo.MongoManager
 import org.darkan.core.net.prot.handler.PacketHandlers
-import org.darkan.core.net.prot.revision.rev947.register947
+import org.darkan.core.net.prot.revision.rev948.register948
 import org.darkan.world.server.WorldServer
 
 fun main() {
@@ -24,7 +24,7 @@ fun main() {
     runBlocking { Accounts.ensureIndexes() }
 
     // Register protocol codec
-    register947()
+    register948()
     Logger.log("Main", "Registered rev947 codec")
 
     // Load packet handlers from the world server packet package

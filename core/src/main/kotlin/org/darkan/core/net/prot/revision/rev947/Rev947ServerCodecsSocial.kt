@@ -36,30 +36,11 @@ internal fun Codec.registerRev947ServerCodecsSocial() {
         }
     }
 
-    // FRIENDCHAT_JOIN (179, varByte) — friend chat channel member list.
-    // Wire format from reference encoder adapted for 947.
-    // When clear=true: write single 0 byte.
-    // When clear=false: ownerDisplayName + channelId(8B) + kickRank(1B) + memberCount(1B) + members
-    serverProt<FriendsChatChannel>(opcode = 179, size = ProtSize.VarByte) { out ->
-        if (clear || ownerDisplayName == null) {
-            // Signal channel leave / no channel
-            out.writeLong(0)
-            return@serverProt
-        }
-        out.writeRSString(ownerDisplayName!!)
-        // Channel name encoded as base37-like long (simplified: write as 8-byte zero for now)
-        // TODO: proper base37 encoding of chatName
-        out.writeLong(0)
-        out.writeByte(minRankCanKick)
-        val members = players ?: emptyArray()
-        out.writeByte(members.size)
-        for (player in members) {
-            out.writeRSString(player.displayName)
-            out.writeShort(player.worldId)
-            out.writeByte(player.rank)
-            out.writeRSString(player.worldName)
-        }
-    }
+    // FriendsChatChannel encoder removed. Opcode 179 is actually SWITCH_WORLD, not FRIENDCHAT_JOIN
+    // (Ghidra's ProtEntry label was fabricated; handler at 0x001c1bd5 in 947-3 is the world-switch
+    // packet). The real FRIENDCHAT_JOIN opcode is unknown — sending FriendsChatChannel will log
+    // "Missing ServerProt encoder" until we identify the correct opcode.
+    // TODO: RE agent should trace FC channel-join CS2 handler to find the real opcode.
 
     // CLANCHANNEL_FULL (28, varShort) — full clan channel member list.
     // Handler at 0x001be8b0. Wire: channelByte(1B) + channel data.
@@ -158,18 +139,9 @@ internal fun Codec.registerRev947ServerCodecsSocial() {
         out.writeRSString(token)
     }
 
-    // REBUILD_NORMAL (172, varShort) — builds the map scene.
-    // 947 format from handler at 0x002144e0:
-    //   mapSize(1B) + chunkX(2B) + chunkZ(2B) + forceRefresh(1B) + xteas(16B per region)
-    serverProt<RebuildNormal>(opcode = 172, size = ProtSize.VarShort) { out ->
-        out.writeByte(mapSize)
-        out.writeShort(chunkX)
-        out.writeShort(chunkZ)
-        out.writeBoolean(forceRefresh)
-        for (keys in xteaKeys) {
-            for (key in keys) {
-                out.writeInt(key)
-            }
-        }
-    }
+    // NOTE: the previous registration of the deprecated `RebuildNormal` at opcode 172 has been
+    // removed. Per `docs/net/serverprot/rebuild-947-3.md` §2, opcode 172 implements REBUILD_REGION
+    // (multi-scene grid) — completely different byte layout from the legacy "REBUILD_NORMAL".
+    // The simple-form REBUILD_NORMAL handler lives at opcode 90 (see Rev947ServerCodecsRebuild.kt).
+    // The deprecated data class survives only as a transitional alias until B8 migrates call sites.
 }

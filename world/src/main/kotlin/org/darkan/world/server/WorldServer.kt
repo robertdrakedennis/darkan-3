@@ -22,7 +22,11 @@ import org.darkan.core.net.prot.handler.PacketHandlers
 import org.darkan.core.net.session.GameSession
 import org.darkan.core.mongo.Accounts
 import org.darkan.core.social.gateway.*
+import org.darkan.world.entity.Player
+import org.darkan.world.net.NpcInfoBuilder
+import org.darkan.world.net.PlayerInfoBuilder
 import org.darkan.world.social.SocialClient
+import org.darkan.world.world.Players
 import world.gregs.voidps.buffer.*
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.secure.RSA
@@ -71,6 +75,11 @@ object WorldServer {
         socialClient = SocialClient(scope) { msg -> handleSocialMessage(msg) }
         socialClient.start()
 
+        // Start the per-tick PLAYER_INFO / NPC_INFO / zone-bundle dispatcher (B7).
+        // Must come AFTER socialClient.start() so that any player tick-driven social
+        // packets have a live social client to forward through.
+        WorldTick.start()
+
         logInfo("Starting world server...")
         serverSocket = runBlocking {
             aSocket(selectorManager).tcp().bind("0.0.0.0", port) { reuseAddress = true }
@@ -98,6 +107,8 @@ object WorldServer {
 
     fun stop() {
         try {
+            // Stop the tick driver first so no half-built packets land on closing sockets.
+            WorldTick.stop()
             job.cancel()
             dispatcher.close()
             if (::serverSocket.isInitialized) serverSocket.close()
@@ -277,7 +288,24 @@ object WorldServer {
 
             val session = GameSession(output, inCipher, outCipher, ip, codec, username = account.username)
 
-            // Step 12: Send WorldLoginDetails (pre-ISAAC, via noIsaac=true)
+            // Step 12: Allocate world-side Player and register in the global pool.
+            // Player.index is mutable so we can construct first (with a placeholder index of
+            // 0) then have Players.allocate write back the assigned slot id atomically. The
+            // slot id MUST match WorldLoginDetails.playerIndex (sent next) AND the PLAYER_INFO
+            // 30-bit local-tile prefix that goes out on the first tick.
+            //
+            // Note: the Player constructor eagerly builds [Viewport] with `owner.index = 0`
+            // in `highResIndices[0]` (the local-player slot). We patch that entry below to
+            // match the allocated slot — otherwise the high-res cohort would point at slot
+            // 0, which is the protocol "no player" sentinel.
+            val player = Player(index = 0, account = account, session = session)
+            val playerIndex = Players.allocate(player) { idx -> player.index = idx }
+            // Realign the viewport's high-res-indices[0] with the assigned slot id. This
+            // SHOULD be done by Viewport but it captures owner.index at construction time;
+            // doing it here avoids a refactor of Viewport's init order.
+            player.viewport.highResIndices[0] = playerIndex
+
+            // Step 13: Send WorldLoginDetails (pre-ISAAC, via noIsaac=true)
             session.send(
                 WorldLoginDetails(
                     rights = if (EnvVars.debug) 2 else account.rights,
@@ -286,7 +314,7 @@ object WorldServer {
                     verifiedEmail = false,
                     aBool7322 = false,
                     quickChatOnly = false,
-                    playerIndex = 1, // TODO: assign from player index pool
+                    playerIndex = playerIndex,
                     members = EnvVars.worldMembers,
                     dob = 0,
                     memberWorld = EnvVars.worldMembers,
@@ -296,10 +324,17 @@ object WorldServer {
             )
             session.flush()
 
-            // Step 13: Send world init packets
+            // Step 14: Send world init packets
             sendWorldInitPackets(session, account)
 
-            // Step 14: Register player and notify lobby
+            // Step 15: Send initial PLAYER_INFO / NPC_INFO so the client renders the
+            // local avatar before the tick loop's first per-tick build lands. After this
+            // the WorldTick loop will drive subsequent updates at 600ms cadence.
+            session.send(PlayerInfoBuilder.buildInit(player))
+            session.send(NpcInfoBuilder.buildInit(player))
+            session.flush()
+
+            // Step 16: Register player and notify lobby
             playersByUsername[username] = session
 
             CoroutineScope(dispatcher).launch {
@@ -315,13 +350,17 @@ object WorldServer {
                 }
             }
 
-            // Step 15: Session loop
+            // Step 17: Session loop
             try {
                 coroutineScope {
                     launch { session.readPackets(input) }
                     worldSessionLoop(session)
                 }
             } finally {
+                // Release the player slot so subsequent logins can reuse it; do this BEFORE
+                // notifying the lobby so a fast reconnect won't observe a stale slot still
+                // claimed.
+                Players.release(playerIndex)
                 playersByUsername.remove(username)
                 CoroutineScope(dispatcher).launch {
                     try {
@@ -337,56 +376,107 @@ object WorldServer {
     }
 
     /**
-     * Send the minimum world init packets after login.
-     * Based on docs/net/account-creation-sequence.md Phase 1.
+     * Send world init packets after login. Based on docs/net/account-creation-sequence.md Phase 1.
+     *
+     * Routes to either character creation (interface 1349) or the game HUD (1477) based
+     * on whether the account has completed character creation. We intentionally do NOT
+     * send RUNCLIENTSCRIPT(1246) — the display name prompt — because display names are
+     * managed via the web, not in-client.
      */
     private suspend fun sendWorldInitPackets(session: GameSession, account: org.darkan.core.model.Account) {
-        // 1. Session token
-        session.send(HashedWorldToken(java.util.Base64.getUrlEncoder().withoutPadding()
-            .encodeToString(java.security.SecureRandom().let { r -> ByteArray(32).also { r.nextBytes(it) } })))
+        sendWorldLoginCore(session)
 
-        // 2. Reset varps and send defaults
+        if (!account.characterCreated) {
+            logInfo("Opening character creation UI for ${session.ip} (${account.displayName})")
+            sendCharacterCreationUI(session)
+        } else {
+            logInfo("Opening game HUD for ${session.ip} (${account.displayName})")
+            // Per A1 §1.1: IF_OPENTOP is opcode 68 (6B) — the wire format is
+            // (topLevelId BE u32, subId LE u16). For the main game HUD root we open
+            // sub-component 0 (the root frame inside interface 1477).
+            session.send(IfOpenTop(topLevelId = GAME_HUD_INTERFACE, subId = 0))
+        }
+
+        session.flush()
+    }
+
+    /** Core world login packets common to both character creation and game HUD paths. */
+    private suspend fun sendWorldLoginCore(session: GameSession) {
+        // 1. Session token (HASHED_WORLD_TOKEN)
+        val tokenBytes = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+        val token = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes)
+        session.send(HashedWorldToken(token))
+
+        // 2. Reset client varcache
         session.send(ResetClientVarcache())
 
-        // 3. Stats (29 skills, all level 1 except Hitpoints=10)
+        // 3. Stats (29 skills, all level 1 except Hitpoints=10 with 1154 xp)
         for (i in 0..28) {
-            if (i == 3) session.send(UpdateStat(i, 1154, 10))  // Hitpoints
+            if (i == 3) session.send(UpdateStat(i, 1154, 10))
             else session.send(UpdateStat(i, 0, 1))
         }
 
-        // 4. Map build — place player at Lumbridge (chunk 400, 400 = tile 3200, 3200)
-        // The client needs a REBUILD_NORMAL to load the scene.
-        // XTEA keys are all zeros for now (unencrypted regions).
-        val chunkX = 400  // tile 3200 / 8
-        val chunkZ = 400  // tile 3200 / 8
-        val regionX = chunkX / 8  // region 50
-        val regionZ = chunkZ / 8  // region 50
-        // Collect XTEA keys for the 13x13 region grid around the player (104x104 map = 13 regions)
-        val xteaKeys = mutableListOf<IntArray>()
-        for (rx in (regionX - 6)..(regionX + 6)) {
-            for (rz in (regionZ - 6)..(regionZ + 6)) {
-                xteaKeys.add(intArrayOf(0, 0, 0, 0))  // zeros = unencrypted
-            }
-        }
-        session.send(RebuildNormal(
-            chunkX = chunkX,
-            chunkZ = chunkZ,
-            forceRefresh = true,
-            xteaKeys = xteaKeys.toTypedArray(),
-        ))
+        // 4. Map build — place player at Lumbridge (tile 3200, 3200 = chunk 400, 400)
+        //
+        // Per A2 §3 / `docs/net/serverprot/rebuild-947-3.md`, REBUILD_NORMAL is opcode 90
+        // (varShort) and its simple form has the byte layout:
+        //   chunkX BE u16, forceRefresh u8, regionLow LE u16, magic 0x7B, chunkZ BE u16,
+        //   packedCoordA BE u32, packedCoordB BE u32
+        // where packedCoord = (plane << 28) | (y << 14) | x.
+        //
+        // MVP: regionLow defaults to 0 (no config-provider world area), and we pack
+        // packedCoordA/B with the player's tile so the BuildArea scene cache lookup
+        // resolves to the same chunk we encoded into the bit-packed PLAYER_INFO position.
+        val chunkX = 400
+        val chunkZ = 400
+        val playerTileX = chunkX * 8 + 4    // tile centre within the chunk
+        val playerTileY = chunkZ * 8 + 4
+        val packedCoord = (0 shl 28) or ((playerTileY and 0x3FFF) shl 14) or (playerTileX and 0x3FFF)
+        session.send(
+            RebuildNormalSimple(
+                chunkX = chunkX,
+                chunkZ = chunkZ,
+                forceRefresh = true,
+                regionLow = 0,
+                packedCoordA = packedCoord,
+                packedCoordB = packedCoord,
+            )
+        )
 
-        // 5. Set player right-click options
+        // 5. RuneCoin balance display
+        session.send(JcoinsUpdate(0))
+
+        // 6. Player right-click options (standard 4: Follow, Trade, Req Assist, Examine)
         session.send(SetPlayerOp(3, "Follow"))
         session.send(SetPlayerOp(4, "Trade with"))
         session.send(SetPlayerOp(6, "Req Assist"))
         session.send(SetPlayerOp(8, "Examine"))
 
-        // 6. Open top-level interface (1349 = character creation, 1477 = game HUD)
-        // For now use the game HUD since character creation needs more setup
-        session.send(IfOpenTopLobby(1477))
+        // 7. Empty ignore list
+        session.send(UpdateIgnoreList(emptyList()))
+    }
 
-        session.flush()
-        logInfo("Sent world init packets to ${session.ip} (${account.displayName})")
+    /**
+     * Open the character creation UI (interface 1349).
+     *
+     * Per docs/net/account-creation-sequence.md Phase 2, the full sequence involves ~40
+     * IF_SETPOSITION calls and ~800 IF_SETEVENTS2 calls to wire up all the sub-interfaces
+     * and enable click events on every option. This is a minimal first-pass — we send just
+     * the setup scripts and the top-level interface to see what the client renders.
+     *
+     * We explicitly do NOT send RUNCLIENTSCRIPT(1246) — that would prompt the client to
+     * enter a display name, but display names are managed via the web.
+     */
+    private suspend fun sendCharacterCreationUI(session: GameSession) {
+        // Pre-interface setup scripts (exact args from capture)
+        session.send(RunClientScript.of(16300, 0, 0, 0, 0))
+        session.send(RunClientScript.of(671, 0, 0, 0, 0))
+        session.send(RunClientScript.of(20611))
+
+        // Open the character creation root interface per A1 §1.1 (op 68, 6B).
+        session.send(IfOpenTop(topLevelId = CHARACTER_CREATION_INTERFACE, subId = 0))
+
+        // TODO: IF_SETPOSITION ×40 + IF_SETEVENTS2 ×800 for sub-interfaces (see account-creation-sequence.md)
     }
 
     /**
@@ -472,4 +562,10 @@ object WorldServer {
     }
 
     private const val KEEPALIVE_INTERVAL_MS = 15_000L
+
+    /** Top-level interface ID for the character creation / gamemode selection screen. */
+    private const val CHARACTER_CREATION_INTERFACE = 1349
+
+    /** Top-level interface ID for the main in-game HUD. */
+    private const val GAME_HUD_INTERFACE = 1477
 }

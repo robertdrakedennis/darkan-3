@@ -32,7 +32,7 @@ object EnvVars {
     val worldPort: Int = dotenv.get("WORLD_PORT", "43595").toInt()
     val cachePath: String = dotenv.get("CACHE_PATH", "./data/cache")
     val memCache: Boolean = dotenv.get("MEM_CACHE", "false").toBooleanStrict()
-    val majorVersion: Int = dotenv.get("MAJOR_VERSION", "947").toInt()
+    val majorVersion: Int = dotenv.get("MAJOR_VERSION", "948").toInt()
     val minorVersion: Int = dotenv.get("MINOR_VERSION", "1").toInt()
     val cacheThreadUsage: Double = dotenv.get("CACHE_THREAD_USAGE", "1.0").toDouble()
     val configHttpPort: Int = dotenv.get("CONFIG_HTTP_PORT", "8829").toInt()
@@ -70,7 +70,13 @@ object EnvVars {
     const val ISAAC_DELTA = 50
 
     // Jagex login RSA public key (1024-bit) — used by the proxy to re-encrypt intercepted RSA blocks
-    // VERIFIED from rs2client rev 947-1 at 0x01120558
-    const val JAGEX_LOGIN_RSA_MODULUS_HEX = "8f389edb4b56fdafc410be11bd0b4dd2ca95085134ac9a00f7768275412e635c05c99b8b6bd10edbaa274e653aed80909ac08f3c35c238f80b40b7d158e351db8039b2d4d8c99891fdc29d1a3182c55ef046bab429f060d101f8ac66d6484dc12b9e63e0d4a83264741aeab3d841045211928c3c6ca72deb5ff2331929efafe9"
+    // VERIFIED from rs2client rev 948-2 at .rodata 0x0104a428 (jag::LoginManager::RSA_LOGIN_MODULUS_HEX)
+    const val JAGEX_LOGIN_RSA_MODULUS_HEX = "aad4a7804c34bb788d52dbd5f70e5721528d7f01c6aa1a93b7322ea0127f40682f2d766a26728f0758ce47c9cde8003a170381352a143320ae3cc884a9116008ec09104ecdbafbcd0f537dfba67c7340ea3ca30caf91c20f8d98ac9b9a613b25cd23f586d3fae88823f1ea48aeeb31c9897c17c45aeb0771521a5c2df3cb0799"
     const val JAGEX_LOGIN_RSA_EXPONENT = 65537
+
+    // Jagex JS5 master-index RSA public key (4096-bit) — used by the proxy to re-sign
+    // master-index payloads from Jagex so the client's embedded key verifies them.
+    // VERIFIED from rs2client rev 948-2 at .rodata 0x0104a530 (jag::Js5MasterIndex::RSA_JS5_MODULUS_HEX)
+    const val JAGEX_JS5_RSA_MODULUS_HEX = "a6400fbcbd9dd09f48045caf3f543dd6b1c4da6ac89e13e17df3627ddb8a23bf7726849525ee28f7cacca19433a774e859bfbdbb3ee26cf5cf8006bb0eec29e2addc66031ff5fc7a05408772047c5f40bc967539e2423d27dbb655f4f9e94266ec7a9d0386930c001e6a81cf0a0e2881a6bdf3c5c135f8339ce6a012093c98643c1727d18960c4b64aae59364fd0b981ea3899a39bbf5e1c6c2b489537aa4df42800f52be33b73bcdc8379948b0f3a85a3d143aca429e562abe5dd7ef2822c7d90aa23082e2ef901abc92cc80e5bbe40d29894ea8c8c97819debcd219234ad4aa670c23000a443533664126f4861d460ffe3a396237b77fe7ef291b7e21f53526448b0b9483fd703e0465748fc97c7d9fcd9617ea2f8228fa4c2170312705c6a556bdfefd009dedc059e00ca8073cd2bb58d69ab4b84253ed7f78a5384e1b8019b46955d1fa5ec4e41cc43402253a78469b3b30d973e089f186eaa6e691a38c5336c8cee64f1733dcd37e3a6bd962905b68b57d3a9c24a7839bb9aec5a47a8a778616d777f1f99e19e30f825b1177e00d970f3a2ba2c2b3b166bcbb2fbd14ea1bb3b012989ed30e574c7c53bf0cf82d59b9cfaa9e5a0d46591cddb9eedc8e276804c1063f06f377e388363984ed85b2eb500973b943ee4ff68e7de028eb3e10641803acf95a6b358e7fa0175bfda660e492e6a5b901efe99bf55561743dc8299"
+    const val JAGEX_JS5_RSA_EXPONENT = 65537
 }

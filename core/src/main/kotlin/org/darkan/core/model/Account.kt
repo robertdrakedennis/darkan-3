@@ -17,6 +17,8 @@ data class Account(
     var banned: Long = 0,              // timestamp when ban expires (0 = not banned)
     var muted: Long = 0,               // timestamp when mute expires (0 = not muted)
     var lastIp: String? = null,
+    /** True once the player has completed character creation (gamemode + appearance chosen). */
+    var characterCreated: Boolean = false,
     var social: Social = Social(),
 ) {
     fun isBanned() = banned > 0 && System.currentTimeMillis() < banned

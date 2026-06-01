@@ -6,7 +6,7 @@ import org.darkan.core.Logger
 import org.darkan.core.mongo.Accounts
 import org.darkan.core.mongo.MongoManager
 import org.darkan.core.net.prot.handler.PacketHandlers
-import org.darkan.core.net.prot.revision.rev947.register947
+import org.darkan.core.net.prot.revision.rev948.register948
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.file.FileProvider
 import world.gregs.voidps.cache.file.prefetchKeys
@@ -32,7 +32,7 @@ fun main() {
     LobbyState.init()
 
     // Register protocol codec and packet handlers
-    register947()
+    register948()
     Logger.log("Main", "Registered rev947 codec")
     PacketHandlers.loadHandlersFromPackage("org.darkan.lobby.server.packet")
 
