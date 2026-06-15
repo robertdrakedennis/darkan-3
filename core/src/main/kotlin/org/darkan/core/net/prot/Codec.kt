@@ -2,6 +2,9 @@ package org.darkan.core.net.prot
 
 import io.ktor.utils.io.*
 import kotlinx.io.Source
+import org.darkan.core.Logger.logError
+import org.darkan.core.Logger.logInfo
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.reflect.KClass
 import kotlin.reflect.KFunction
 import kotlin.reflect.full.primaryConstructor
@@ -10,6 +13,15 @@ class Codec {
     val serverProts = mutableMapOf<KClass<out ServerProt>, ServerProtCodec>()
     val clientProtsByOpcode = mutableMapOf<Int, ClientProtCodec<*>>()
     private val opcodeToClassMap = mutableMapOf<Int, KClass<out ClientProt>>()
+
+    /**
+     * Decoder-less packets (e.g. the per-second Ping keepalive) are stateless singletons —
+     * resolve the reflective instance once per class and reuse it for every packet.
+     */
+    private val decoderlessInstances = ConcurrentHashMap<KClass<out ClientProt>, ClientProt>()
+
+    /** ServerProt types already reported as lacking an encoder in this codec (log once, not per send). */
+    private val reportedUnsupportedServerProts = ConcurrentHashMap.newKeySet<KClass<out ServerProt>>()
 
     /** Opcode-indexed metadata for ALL server prots (name + size), for proxy/debug use. */
     val serverProtInfo = mutableMapOf<Int, ProtInfo>()
@@ -98,17 +110,38 @@ class Codec {
     fun <T : ClientProt> createInstanceForOpcode(opcode: Int): T? {
         val protClass = opcodeToClassMap[opcode] ?: return null
 
-        return try {
+        val cached = decoderlessInstances[protClass]
+        if (cached != null) return cached as T
+
+        val instance = try {
             if (protClass.isValue) {
-                val constructor = protClass.primaryConstructor
-                return if (constructor != null) createValueClassInstance(constructor) as T else null
+                protClass.primaryConstructor?.let { createValueClassInstance(it) }
             } else {
-                val constructor = protClass.constructors.firstOrNull { it.parameters.isEmpty() }
-                return constructor?.call() as T
+                protClass.constructors.firstOrNull { it.parameters.isEmpty() }?.call()
             }
         } catch (e: Exception) {
+            logError("Failed to instantiate ClientProt ${protClass.simpleName} for opcode $opcode", e)
             return null
         }
+        if (instance == null) {
+            logError("No usable constructor for ClientProt ${protClass.simpleName} (opcode $opcode)")
+            return null
+        }
+        decoderlessInstances[protClass] = instance as ClientProt
+        return instance as T
+    }
+
+    /**
+     * True if this codec has an encoder entry registered for [type]. When it does not,
+     * the capability gap is logged once (INFO) so callers can [gate sends][org.darkan.core.net.Session.sendIfSupported]
+     * without producing per-send warn spam.
+     */
+    fun supportsServerProt(type: KClass<out ServerProt>): Boolean {
+        if (serverProts.containsKey(type)) return true
+        if (reportedUnsupportedServerProts.add(type)) {
+            logInfo("ServerProt ${type.simpleName} has no encoder registered in this codec revision — sends of it will be skipped")
+        }
+        return false
     }
 
     private fun <T : Any> createValueClassInstance(constructor: KFunction<T>): T {
@@ -149,8 +182,10 @@ class Codec {
         private val codecs = mutableMapOf<Int, Codec>()
 
         fun register(revision: Int, init: Codec.() -> Unit): Codec {
-            val codec = Codec().apply(init)
-            return codecs.getOrPut(revision) { codec }
+            // Only run init for a NEW revision — running it for an already-registered one
+            // would leak global side effects (mask-encoder singletons, ActiveMaskKeys)
+            // from the discarded Codec instance.
+            return codecs.getOrPut(revision) { Codec().apply(init) }
         }
 
         fun get(revision: Int) = codecs[revision]

@@ -6,15 +6,27 @@ mod ui;
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::fs::File;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::WindowBuilder;
 use tokio::sync::mpsc;
 
 use config::{load_config, load_credentials, Paths};
-use ui::ipc::{AppCommand, IpcEvent, IpcState};
+use ui::ipc::{AppCommand, IpcState};
 use ui::webview::UserEvent;
+
+/// Process-wide shared reqwest client. Building one Client per request creates a
+/// fresh TLS config + connection pool each time, so keep-alive is lost across the
+/// token-exchange → session-create → user-fetch → accounts-fetch chain. Reuse one.
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+/// Returns the shared HTTP client (cheap clone — the inner state is `Arc`-backed).
+pub fn http_client() -> reqwest::Client {
+    HTTP_CLIENT
+        .get_or_init(reqwest::Client::new)
+        .clone()
+}
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -66,20 +78,11 @@ fn main() -> Result<()> {
     let webview =
         ui::webview::create_main_webview(&main_window, state.clone(), proxy.clone())?;
 
-    // Send init event once page loads (small delay to ensure JS is ready)
-    let init_state = state.clone();
-    let init_proxy = proxy.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        let sessions = init_state.build_session_infos();
-        let config = init_state.config.lock().unwrap().clone();
-        let event = IpcEvent::Init { config, sessions };
-        let js = format!(
-            "window.__bolt_callback({})",
-            serde_json::to_string(&event).unwrap()
-        );
-        let _ = init_proxy.send_event(UserEvent::EvalScript(js));
-    });
+    // The Init event is no longer pushed on a timer (a fixed sleep both adds
+    // latency and races JS readiness). Instead the frontend posts a `ready` IPC
+    // message once app.js boots, and `IpcState::handle_message` responds with
+    // Init — see IpcMessage::Ready. This guarantees the payload lands after the
+    // page's __bolt_callback is installed.
 
     // Auth window state
     let mut auth_window: Option<tao::window::Window> = None;
@@ -240,10 +243,10 @@ async fn refresh_saved_sessions(
     mut creds: config::Credentials,
     paths: &Paths,
 ) -> config::Credentials {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or(std::time::Duration::ZERO)
         .as_millis() as u64;
 
     let mut to_remove = Vec::new();

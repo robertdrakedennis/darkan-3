@@ -43,13 +43,28 @@ object EnvVars {
     val mongoUri: String = dotenv.get("MONGO_URI", "mongodb://localhost:27017")
     val mongoDatabase: String = dotenv.get("MONGO_DATABASE", "darkan3")
 
+    /**
+     * Resolve a shared secret from the environment. The well-known dev default is only
+     * acceptable when DEBUG=true — in production a guessable token would let anyone
+     * impersonate a world server / forge login tokens, so fail fast instead.
+     */
+    private fun requireSecret(name: String, devDefault: String): String {
+        val value = dotenv.get(name)
+        if (value != null && value.isNotBlank()) return value
+        if (debug) return devDefault
+        error(
+            "Missing required secret $name: set it in the environment or .env. " +
+                "The built-in dev default is only used when DEBUG=true."
+        )
+    }
+
     // Social gateway (world↔lobby WebSocket communication)
     val socialGatewayUrl: String = dotenv.get("SOCIAL_GATEWAY_URL", "ws://localhost:$configHttpPort/social/ws")
-    val socialGatewayToken: String = dotenv.get("SOCIAL_GATEWAY_TOKEN", "darkan3-gateway-dev-token")
+    val socialGatewayToken: String by lazy { requireSecret("SOCIAL_GATEWAY_TOKEN", "darkan3-gateway-dev-token") }
     val lobbyApiPort: Int = configHttpPort  // WebSocket gateway runs on the config HTTP port
 
     // Login token (lobby issues, world verifies)
-    val worldLoginTokenSecret: String = dotenv.get("WORLD_LOGIN_TOKEN_SECRET", "darkan3-world-login-dev-secret")
+    val worldLoginTokenSecret: String by lazy { requireSecret("WORLD_LOGIN_TOKEN_SECRET", "darkan3-world-login-dev-secret") }
     val worldLoginTokenTtlMs: Long = dotenv.get("WORLD_LOGIN_TOKEN_TTL_MS", "1800000").toLong()  // 30 minutes
 
     // World server identity (used by world module to register with lobby)

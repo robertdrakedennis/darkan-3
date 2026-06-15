@@ -7,6 +7,10 @@ import kotlin.math.roundToInt
 
 class ObjectEncoder : DefinitionEncoder<ObjectDefinition> {
 
+    override fun Writer.encode(definition: ObjectDefinition) {
+        encode(definition, definition)
+    }
+
     override fun Writer.encode(definition: ObjectDefinition, members: ObjectDefinition) {
         if (definition.id == -1) {
             return

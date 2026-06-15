@@ -1,5 +1,6 @@
 package org.darkan.tools
 
+import org.darkan.tools.util.parseRefTable
 import world.gregs.voidps.buffer.read.BufferReader
 import world.gregs.voidps.cache.compress.DecompressionContext
 import world.gregs.voidps.cache.secure.CRC
@@ -95,10 +96,11 @@ fun main() {
             continue
         }
         try {
-            val (crcs, versions) = parseRefTableCrcs(context, refData)
-            refTableCrcs[indexId] = crcs
-            refTableVersions[indexId] = versions
-            println("  Index $indexId: ${crcs.size} archive CRCs parsed from ref table")
+            val refTable = parseRefTable(context, refData)
+                ?: throw RuntimeException("decompression failed or unknown ref table format")
+            refTableCrcs[indexId] = refTable.crcById()
+            refTableVersions[indexId] = refTable.versionById()
+            println("  Index $indexId: ${refTable.entries.size} archive CRCs parsed from ref table")
         } catch (e: Exception) {
             println("  Index $indexId: FAILED to parse ref table: ${e.message}")
         }
@@ -297,8 +299,9 @@ private fun validateContainer(
         )
     }
 
-    val compression = data[0].toInt() and 0xFF
-    val compressedSize = readBEInt(data, 1)
+    val headerReader = BufferReader(data)
+    val compression = headerReader.readUnsignedByte()
+    val compressedSize = headerReader.readInt()
 
     val headerSize = 5 + if (compression != 0) 4 else 0
     val expectedTotalSize = headerSize + compressedSize
@@ -309,7 +312,7 @@ private fun validateContainer(
     val extraBytes = if (data.size > expectedTotalSize) data.size - expectedTotalSize else 0
     val oversized = extraBytes > 0
 
-    val decompressedSize = if (compression != 0 && data.size >= 9) readBEInt(data, 5) else compressedSize
+    val decompressedSize = if (compression != 0 && data.size >= 9) headerReader.readInt() else compressedSize
 
     // Attempt decompression
     var decompressionOk: Boolean? = null
@@ -354,59 +357,6 @@ private fun validateContainer(
     )
 }
 
-private fun parseRefTableCrcs(
-    context: DecompressionContext,
-    rawTable: ByteArray
-): Pair<Map<Int, Int>, Map<Int, Int>> {
-    val decompressed = context.decompress(rawTable)
-        ?: throw RuntimeException("Failed to decompress ref table")
-
-    val reader = BufferReader(decompressed)
-    val version = reader.readUnsignedByte()
-    if (version < 5 || version > 7) throw RuntimeException("Bad ref table version: $version")
-    if (version >= 6) reader.readInt() // revision
-
-    val flags = reader.readUnsignedByte()
-    val archiveCount = if (version >= 7) reader.readBigSmart() else reader.readUnsignedShort()
-
-    // Archive IDs (delta-encoded)
-    var previous = 0
-    val archiveIds = IntArray(archiveCount) {
-        val archiveId = if (version >= 7)
-            reader.readBigSmart() + previous
-        else
-            reader.readUnsignedShort() + previous
-        previous = archiveId
-        archiveId
-    }
-
-    // Name hashes (if flags & 1)
-    if (flags and 1 != 0) reader.skip(archiveCount * 4)
-
-    // CRCs
-    val crcs = IntArray(archiveCount) { reader.readInt() }
-
-    // Unknown hashes (if flags & 8)
-    if (flags and 8 != 0) reader.skip(archiveCount * 4)
-
-    // Whirlpool (if flags & 2)
-    if (flags and 2 != 0) reader.skip(archiveCount * 64)
-
-    // Sizes (if flags & 4)
-    if (flags and 4 != 0) reader.skip(archiveCount * 8)
-
-    // Versions
-    val versions = IntArray(archiveCount) { reader.readInt() }
-
-    val crcMap = mutableMapOf<Int, Int>()
-    val versionMap = mutableMapOf<Int, Int>()
-    for (i in 0 until archiveCount) {
-        crcMap[archiveIds[i]] = crcs[i]
-        versionMap[archiveIds[i]] = versions[i]
-    }
-    return Pair(crcMap, versionMap)
-}
-
 private fun reportResult(prefix: String, result: IntegrityResult, verbose: Boolean = false) {
     val status = buildString {
         append("${result.dataSize}B")
@@ -426,9 +376,3 @@ private fun reportResult(prefix: String, result: IntegrityResult, verbose: Boole
     }
     println("$prefix: $status")
 }
-
-private fun readBEInt(data: ByteArray, offset: Int): Int =
-    ((data[offset].toInt() and 0xFF) shl 24) or
-    ((data[offset + 1].toInt() and 0xFF) shl 16) or
-    ((data[offset + 2].toInt() and 0xFF) shl 8) or
-    (data[offset + 3].toInt() and 0xFF)

@@ -35,6 +35,14 @@ class Viewport(val owner: Player) {
     val visibleNpcs: MutableList<Int> = mutableListOf()
 
     /**
+     * NPC indices whose NPC_INFO Phase 2 add-record has already been sent to THIS viewer.
+     * Per-viewer (not global Npc state): with multiple players, only the first-built viewer
+     * would otherwise ever receive an add record. Entries are removed when the NPC leaves
+     * [visibleNpcs] so a re-entering NPC is re-added.
+     */
+    val sentNpcAdds: MutableSet<Int> = mutableSetOf()
+
+    /**
      * Build area centre in chunk (zone) coordinates. Default Lumbridge: tile
      * (3200, 3200) -> chunk (400, 400). [buildAreaSize] is 13 chunks (= 104 tiles)
      * matching the standard NXT viewport.

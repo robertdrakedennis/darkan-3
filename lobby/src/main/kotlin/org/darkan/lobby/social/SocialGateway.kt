@@ -87,8 +87,11 @@ object SocialGateway {
     // =====================================================================
 
     /**
-     * Register a lobby player after successful login.
-     * Sends friend list, ignore list, chat filter, and notifies mutual friends.
+     * Register a lobby player after successful login (presence only).
+     * The player's own social state (friend list, ignore list, chat filter) is NOT sent here —
+     * it must be sent AFTER the lobby interface is built, via [initializeSocial], which the login
+     * flow calls from sendLobbyInitPackets(). Sending UPDATE_FRIENDLIST (op26) before the
+     * friends-tab components exist makes the client drop it (empty/broken friends list).
      */
     suspend fun registerLobbyPlayer(account: Account, session: GameSession) {
         lobbyByUsername[account.username] = LobbyUser(
@@ -101,7 +104,6 @@ object SocialGateway {
         )
         usernameByDisplayLower[account.displayName.lowercase()] = account.username
         logInfo("SocialGateway: ${account.displayName} registered in lobby (${lobbyByUsername.size} online)")
-        initializeSocial(account)
     }
 
     /**
@@ -365,6 +367,19 @@ object SocialGateway {
         }
     }
 
+    /**
+     * Capability-gated [sendToUser]: skips the send when the active codec has no encoder for
+     * the packet type (e.g. FriendlistLoaded / UpdateIgnoreList, whose 948 opcodes are not
+     * RE'd yet). The gap is logged once at INFO by [Codec.supportsServerProt] instead of
+     * producing a warn per send — both lobby sessions and world-bound envelopes use the same
+     * revision codec, so the check is valid for either delivery path.
+     */
+    private suspend fun sendToUserIfSupported(username: String, packet: ServerProt) {
+        val codec = Codec.get(EnvVars.majorVersion)
+        if (codec != null && !codec.supportsServerProt(packet::class)) return
+        sendToUser(username, packet)
+    }
+
     private suspend fun sendToWorld(worldId: Int, msg: SocialGatewayWireMessage) {
         val session = worldsById[worldId] ?: return
         val text = SocialGatewayWireJson.json.encodeToString(SocialGatewayWireMessage.serializer(), msg)
@@ -394,7 +409,7 @@ object SocialGateway {
      * Sends the full friend list, ignore list, chat filter, and mutual-friend
      * notifications using a single batch DB query instead of N+1 individual lookups.
      */
-    private suspend fun initializeSocial(account: Account) {
+    suspend fun initializeSocial(account: Account) {
         val username = account.username
 
         // ONE batch DB query for all friends + ignores
@@ -408,7 +423,7 @@ object SocialGateway {
             val friendAccount = accountsByUsername[friendUsername] ?: return@mapNotNull null
             friendStatusUpdateFor(account, friendAccount)
         }
-        sendToUser(username, FriendlistLoaded())
+        sendToUserIfSupported(username, FriendlistLoaded())
         sendToUser(username, FriendStatus(friendUpdates))
 
         // Build + send ignore list
@@ -416,7 +431,7 @@ object SocialGateway {
             val display = accountsByUsername[ign]?.displayName ?: ign.formatForDisplay()
             UpdateIgnoreList.IgnoreEntry(displayName = display, previousName = "")
         }
-        sendToUser(username, UpdateIgnoreList(ignores))
+        sendToUserIfSupported(username, UpdateIgnoreList(ignores))
 
         // Send chat filter echo
         sendToUser(username, ChatFilterSettingsPrivateChat(account.social.status))
@@ -455,8 +470,11 @@ object SocialGateway {
     }
 
     private suspend fun notifyMutualFriendsAbout(account: Account) {
-        for (friendUsername in account.social.friends.keys) {
-            val friendAccount = Accounts.findByUsername(friendUsername) ?: continue
+        if (account.social.friends.isEmpty()) return
+        // ONE batch DB query for all friends instead of a findByUsername per friend.
+        val friendAccounts = Accounts.findByUsernames(account.social.friends.keys)
+        for (friendAccount in friendAccounts) {
+            val friendUsername = friendAccount.username
             if (!friendAccount.social.friends.containsKey(account.username)) continue
             if (presenceByUsername[friendUsername] == null && lobbyByUsername[friendUsername] == null) continue
 
@@ -469,8 +487,10 @@ object SocialGateway {
         val account = Accounts.findByUsername(toUsername) ?: return
         val friendAccounts = Accounts.findByUsernames(account.social.friends.keys)
         val updates = friendAccounts.map { friendStatusUpdateFor(account, it) }
+        // FriendlistLoaded must come FIRST (sets client LOADED=1, "ready for data"),
+        // then FriendStatus populates the list — same documented order as initializeSocial.
+        sendToUserIfSupported(account.username, FriendlistLoaded())
         sendToUser(account.username, FriendStatus(updates))
-        sendToUser(account.username, FriendlistLoaded())
     }
 
     private suspend fun sendIgnoreListFull(toUsername: String) {
@@ -481,7 +501,7 @@ object SocialGateway {
             val display = ignoreMap[ign]?.displayName ?: ign.formatForDisplay()
             UpdateIgnoreList.IgnoreEntry(displayName = display, previousName = "")
         }
-        sendToUser(account.username, UpdateIgnoreList(ignores))
+        sendToUserIfSupported(account.username, UpdateIgnoreList(ignores))
     }
 
     // =====================================================================

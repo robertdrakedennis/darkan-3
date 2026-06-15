@@ -14,7 +14,7 @@ import org.darkan.core.Logger.logError
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logTrace
 import org.darkan.core.Logger.logWarn
-import org.darkan.core.formatPlayerNameForProtocol
+import org.darkan.core.formatForProtocol
 import org.darkan.core.net.*
 import org.darkan.core.net.login.LoginToken
 import org.darkan.core.net.prot.*
@@ -72,7 +72,10 @@ object WorldServer {
         selectorManager = ActorSelectorManager(dispatcher)
         val scope = CoroutineScope(dispatcher)
 
-        socialClient = SocialClient(scope) { msg -> handleSocialMessage(msg) }
+        socialClient = SocialClient(
+            scope,
+            onConnected = { resendPresenceSnapshot() },
+        ) { msg -> handleSocialMessage(msg) }
         socialClient.start()
 
         // Start the per-tick PLAYER_INFO / NPC_INFO / zone-bundle dispatcher (B7).
@@ -214,7 +217,7 @@ object WorldServer {
 
         val stringUsername = xtea.readBoolean()
         val username = (if (stringUsername) xtea.readRSString() else xtea.readLong().toRSString())
-            .formatPlayerNameForProtocol()
+            .formatForProtocol()
 
         val displayMode = xtea.readUByte().toInt()
         val screenWidth = xtea.readUShort().toInt()
@@ -300,58 +303,61 @@ object WorldServer {
             // 0, which is the protocol "no player" sentinel.
             val player = Player(index = 0, account = account, session = session)
             val playerIndex = Players.allocate(player) { idx -> player.index = idx }
-            // Realign the viewport's high-res-indices[0] with the assigned slot id. This
-            // SHOULD be done by Viewport but it captures owner.index at construction time;
-            // doing it here avoids a refactor of Viewport's init order.
-            player.viewport.highResIndices[0] = playerIndex
-
-            // Step 13: Send WorldLoginDetails (pre-ISAAC, via noIsaac=true)
-            session.send(
-                WorldLoginDetails(
-                    rights = if (EnvVars.debug) 2 else account.rights,
-                    modLevel = 0,
-                    quickChat = false,
-                    verifiedEmail = false,
-                    aBool7322 = false,
-                    quickChatOnly = false,
-                    playerIndex = playerIndex,
-                    members = EnvVars.worldMembers,
-                    dob = 0,
-                    memberWorld = EnvVars.worldMembers,
-                    worldName = EnvVars.worldName,
-                ),
-                noIsaac = true,
-            )
-            session.flush()
-
-            // Step 14: Send world init packets
-            sendWorldInitPackets(session, account)
-
-            // Step 15: Send initial PLAYER_INFO / NPC_INFO so the client renders the
-            // local avatar before the tick loop's first per-tick build lands. After this
-            // the WorldTick loop will drive subsequent updates at 600ms cadence.
-            session.send(PlayerInfoBuilder.buildInit(player))
-            session.send(NpcInfoBuilder.buildInit(player))
-            session.flush()
-
-            // Step 16: Register player and notify lobby
-            playersByUsername[username] = session
-
-            CoroutineScope(dispatcher).launch {
-                try {
-                    socialClient.sendPlayerOnline(
-                        username = account.username,
-                        displayName = account.displayName,
-                        rightsCrown = account.rights,
-                        privateStatus = account.social.status,
-                    )
-                } catch (e: Exception) {
-                    logError("Failed to notify lobby of player online: ${account.username}", e)
-                }
-            }
-
-            // Step 17: Session loop
+            // From this point the slot MUST be released on any exit path — an exception
+            // during init (e.g. a failed flush) would otherwise leak one of the 2048 slots
+            // permanently. The single try/finally below guarantees it.
             try {
+                // Realign the viewport's high-res-indices[0] with the assigned slot id. This
+                // SHOULD be done by Viewport but it captures owner.index at construction time;
+                // doing it here avoids a refactor of Viewport's init order.
+                player.viewport.highResIndices[0] = playerIndex
+
+                // Step 13: Send WorldLoginDetails (pre-ISAAC, via noIsaac=true)
+                session.send(
+                    WorldLoginDetails(
+                        rights = if (EnvVars.debug) 2 else account.rights,
+                        modLevel = 0,
+                        quickChat = false,
+                        verifiedEmail = false,
+                        aBool7322 = false,
+                        quickChatOnly = false,
+                        playerIndex = playerIndex,
+                        members = EnvVars.worldMembers,
+                        dob = 0,
+                        memberWorld = EnvVars.worldMembers,
+                        worldName = EnvVars.worldName,
+                    ),
+                    noIsaac = true,
+                )
+                session.flush()
+
+                // Step 14: Send world init packets
+                sendWorldInitPackets(session, account)
+
+                // Step 15: Send initial PLAYER_INFO / NPC_INFO so the client renders the
+                // local avatar before the tick loop's first per-tick build lands. After this
+                // the WorldTick loop will drive subsequent updates at 600ms cadence.
+                session.send(PlayerInfoBuilder.buildInit(player))
+                session.send(NpcInfoBuilder.buildInit(player))
+                session.flush()
+
+                // Step 16: Register player and notify lobby
+                playersByUsername[username] = session
+
+                CoroutineScope(dispatcher).launch {
+                    try {
+                        socialClient.sendPlayerOnline(
+                            username = account.username,
+                            displayName = account.displayName,
+                            rightsCrown = account.rights,
+                            privateStatus = account.social.status,
+                        )
+                    } catch (e: Exception) {
+                        logError("Failed to notify lobby of player online: ${account.username}", e)
+                    }
+                }
+
+                // Step 17: Session loop
                 coroutineScope {
                     launch { session.readPackets(input) }
                     worldSessionLoop(session)
@@ -361,12 +367,13 @@ object WorldServer {
                 // notifying the lobby so a fast reconnect won't observe a stale slot still
                 // claimed.
                 Players.release(playerIndex)
-                playersByUsername.remove(username)
-                CoroutineScope(dispatcher).launch {
-                    try {
-                        socialClient.sendPlayerOffline(username)
-                    } catch (e: Exception) {
-                        logError("Failed to notify lobby of player offline: $username", e)
+                if (playersByUsername.remove(username, session)) {
+                    CoroutineScope(dispatcher).launch {
+                        try {
+                            socialClient.sendPlayerOffline(username)
+                        } catch (e: Exception) {
+                            logError("Failed to notify lobby of player offline: $username", e)
+                        }
                     }
                 }
             }
@@ -402,10 +409,12 @@ object WorldServer {
 
     /** Core world login packets common to both character creation and game HUD paths. */
     private suspend fun sendWorldLoginCore(session: GameSession) {
-        // 1. Session token (HASHED_WORLD_TOKEN)
+        // 1. Session token (HASHED_WORLD_TOKEN) — no RE'd 948 opcode yet (948 op 6 is
+        // LOC_PREFETCH); sendIfSupported skips it with a single INFO log instead of
+        // per-login warn spam until the 948 destination is documented.
         val tokenBytes = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
         val token = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes)
-        session.send(HashedWorldToken(token))
+        session.sendIfSupported(HashedWorldToken(token))
 
         // 2. Reset client varcache
         session.send(ResetClientVarcache())
@@ -452,8 +461,9 @@ object WorldServer {
         session.send(SetPlayerOp(6, "Req Assist"))
         session.send(SetPlayerOp(8, "Examine"))
 
-        // 7. Empty ignore list
-        session.send(UpdateIgnoreList(emptyList()))
+        // 7. Empty ignore list — 948 op 130 encoder is intentionally disabled (wire format
+        // unconfirmed, see Rev948ServerCodecsSocial); skip with a one-time INFO log.
+        session.sendIfSupported(UpdateIgnoreList(emptyList()))
     }
 
     /**
@@ -485,8 +495,10 @@ object WorldServer {
      * Sends periodic keepalives.
      */
     private suspend fun worldSessionLoop(session: GameSession) {
-        var packetCount = 0
+        var packetCount = 0L
         var lastKeepaliveSent = System.currentTimeMillis()
+        var rateWindowStart = lastKeepaliveSent
+        var rateWindowCount = 0
 
         try {
             // Send initial keepalive
@@ -501,31 +513,69 @@ object WorldServer {
 
                 if (packet != null) {
                     packetCount++
-                    PacketHandlers.handleBlocking<GameSession>(session, packet)
+                    rateWindowCount++
+                    PacketHandlers.handle<GameSession>(session, packet)
                 }
 
                 // Flush any queued responses
                 session.flush()
 
-                // Send periodic keepalives
+                // Send periodic keepalives — flushed immediately so they aren't delayed
+                // until the next loop iteration.
                 val now = System.currentTimeMillis()
                 if (now - lastKeepaliveSent > KEEPALIVE_INTERVAL_MS) {
                     session.send(NoTimeout())
+                    session.flush()
                     lastKeepaliveSent = now
                 }
 
-                if (packetCount > 100_000) {
-                    logError("Too many packets from ${session.ip}, disconnecting")
+                // Windowed rate check (NOT a lifetime cap — a healthy client would trip
+                // a lifetime cap eventually). Disconnect so the socket actually closes.
+                if (now - rateWindowStart >= PACKET_RATE_WINDOW_MS) {
+                    rateWindowStart = now
+                    rateWindowCount = 0
+                } else if (rateWindowCount > MAX_PACKETS_PER_RATE_WINDOW) {
+                    logError("Packet flood from ${session.ip}: >$MAX_PACKETS_PER_RATE_WINDOW packets in ${PACKET_RATE_WINDOW_MS}ms, disconnecting")
+                    session.disconnect()
                     break
                 }
             }
         } catch (e: Exception) {
-            logTrace("World session ended for ${session.ip}: ${e::class.simpleName}: ${e.message}")
+            if (Session.isExpectedDisconnect(e)) {
+                logTrace("World session ended for ${session.ip}: ${e::class.simpleName}: ${e.message}")
+            } else {
+                logError("World session error for ${session.ip} (${session.username})", e)
+            }
         }
         logInfo("World session closed for ${session.ip} (${session.username}) after $packetCount packets")
     }
 
     // --- Social message handling ---
+
+    /**
+     * Replays PlayerOnline for every logged-in player after the gateway connection is
+     * (re)established. Messages sent while the gateway was down are dropped, so without
+     * this a lobby restart would leave presence permanently desynced.
+     */
+    private suspend fun resendPresenceSnapshot() {
+        val snapshot = ArrayList<Player>()
+        Players.forEach { snapshot.add(it) }
+        for (player in snapshot) {
+            try {
+                socialClient.sendPlayerOnline(
+                    username = player.account.username,
+                    displayName = player.account.displayName,
+                    rightsCrown = player.account.rights,
+                    privateStatus = player.account.social.status,
+                )
+            } catch (e: Exception) {
+                logError("Failed to resend presence for ${player.account.username}", e)
+            }
+        }
+        if (snapshot.isNotEmpty()) {
+            logInfo("Resent presence snapshot for ${snapshot.size} player(s) to the social gateway")
+        }
+    }
 
     private fun handleSocialMessage(msg: SocialGatewayWireMessage) {
         when (msg) {
@@ -562,6 +612,16 @@ object WorldServer {
     }
 
     private const val KEEPALIVE_INTERVAL_MS = 15_000L
+
+    /** Rolling window for the inbound packet-rate check. */
+    private const val PACKET_RATE_WINDOW_MS = 10_000L
+
+    /**
+     * Max client packets per [PACKET_RATE_WINDOW_MS] window. A healthy client sends ~1
+     * keepalive/s plus input events — 2000/10s (200/s sustained) is far above legitimate
+     * traffic while still catching floods quickly.
+     */
+    private const val MAX_PACKETS_PER_RATE_WINDOW = 2_000
 
     /** Top-level interface ID for the character creation / gamemode selection screen. */
     private const val CHARACTER_CREATION_INTERFACE = 1349

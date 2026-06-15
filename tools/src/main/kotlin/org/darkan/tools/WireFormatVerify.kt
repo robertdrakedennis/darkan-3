@@ -9,6 +9,7 @@ import org.darkan.core.model.IFEvents
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.prot.*
 import org.darkan.core.net.prot.revision.rev948.register948
+import org.darkan.tools.util.toHex
 import world.gregs.voidps.buffer.*
 import java.io.File
 import kotlin.reflect.KClass
@@ -17,8 +18,7 @@ import kotlin.system.exitProcess
 /**
  * Phase 4 wire-format correctness gate.
  *
- * Generalizes [VerifyLobbyInterfaces] (which hardcoded op3/op82): instead of hardcoded sample
- * bytes, this tool drives the verification entirely from a LIVE capture's raw byte streams,
+ * Drives the verification entirely from a LIVE capture's raw byte streams,
  * de-ISAAC'd with the exact framing logic proven in [DecodeCapture] / [FramingRegression].
  *
  * For every opcode present in the capture:
@@ -39,12 +39,11 @@ import kotlin.system.exitProcess
  * with the reason; its byte framing is already covered by [FramingRegression].
  *
  * Run: ./gradlew :tools:wireFormatVerify
+ *   (override the capture session: -PwireFormatCapture="capture/login-..._s1")
  * Nonzero exit on any FAIL.
  */
 
 private const val DEFAULT_CAPTURE = "capture/login-20260531-191837_s1"
-
-private fun ByteArray.toHex(): String = joinToString(" ") { "%02x".format(it.toInt() and 0xFF) }
 
 /** First byte index at which two arrays differ (length mismatch counts at the shorter length). */
 private fun firstDiff(a: ByteArray, b: ByteArray): Int {
@@ -255,9 +254,10 @@ private data class Row(
     val detail: String = "",
 )
 
-fun main(): Unit = runBlocking {
+fun main(args: Array<String>): Unit = runBlocking {
     val codec = register948()
-    val captureDir = File(DEFAULT_CAPTURE).let { if (it.isDirectory) it else error("Capture dir not found: $DEFAULT_CAPTURE") }
+    val capturePath = args.getOrNull(0) ?: DEFAULT_CAPTURE
+    val captureDir = File(capturePath).let { if (it.isDirectory) it else error("Capture dir not found: $capturePath") }
     println("WireFormatVerify — capture: ${captureDir.path}\n")
 
     val s2cBodies = collectBodies(captureDir, codec, server = true)

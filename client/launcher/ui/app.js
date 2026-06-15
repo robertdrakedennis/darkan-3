@@ -310,4 +310,9 @@
       settingsModal.style.display = "none";
     }
   });
+
+  // Signal the Rust backend that the frontend is ready. The backend replies
+  // with the "init" event (config + saved sessions). This replaces the old
+  // fixed startup delay, which both added latency and could race JS readiness.
+  send({ type: "ready" });
 })();

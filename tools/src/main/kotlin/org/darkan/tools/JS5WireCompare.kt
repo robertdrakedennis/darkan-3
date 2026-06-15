@@ -1,10 +1,11 @@
 package org.darkan.tools
 
-import java.io.ByteArrayOutputStream
+import org.darkan.tools.cachedownloader.JS5Protocol
+import org.darkan.tools.util.JavConfig
+import org.darkan.tools.util.toHex
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.net.Socket
-import java.net.URL
 
 /**
  * Compares JS5 wire bytes between Jagex live servers and our local server
@@ -12,10 +13,6 @@ import java.net.URL
  *
  * Run with: ./gradlew :tools:run -PmainClass=org.darkan.tools.JS5WireCompareKt
  */
-
-private const val BLOCK_SIZE = 102_400
-private const val RESPONSE_HEADER_LEN = 10
-private const val CONTINUATION_HEADER_LEN = 5
 
 // Files to compare — archive/group pairs that the client requests early
 private val FILES_TO_COMPARE = listOf(
@@ -32,46 +29,16 @@ fun main() {
     // Fetch live config
     println("=".repeat(70))
     println("Fetching live jav_config.ws...")
-    val configUrl = "https://www.runescape.com/k=5/l=0/jav_config.ws?binaryType=4"
-    val configText = try { URL(configUrl).readText() } catch (e: Exception) {
+    val config = try { JavConfig.fetch() } catch (e: Exception) {
         println("ERROR fetching config: ${e.message}")
         println("Skipping live server comparison — will only dump local server data")
         null
     }
 
-    var liveHost: String? = null
-    var liveToken: String? = null
-    var liveMajor = 948
-    var liveMinor = 1
-
-    if (configText != null) {
-        val params = mutableMapOf<Int, String>()
-        val config = mutableMapOf<String, String>()
-        for (line in configText.lines()) {
-            val t = line.trim()
-            when {
-                t.startsWith("param=") -> {
-                    val rest = t.removePrefix("param=")
-                    val eq = rest.indexOf('=')
-                    if (eq > 0) {
-                        val num = rest.substring(0, eq).toIntOrNull()
-                        if (num != null) params[num] = rest.substring(eq + 1)
-                    }
-                }
-                t.contains('=') && !t.startsWith("msg=") -> {
-                    val eq = t.indexOf('=')
-                    config[t.substring(0, eq)] = t.substring(eq + 1)
-                }
-            }
-        }
-        liveHost = params[3]
-        liveToken = params[29]
-        val sv = config["server_version"]
-        if (sv != null) {
-            val parts = sv.split(".")
-            liveMajor = parts.getOrNull(0)?.toIntOrNull() ?: 948
-            liveMinor = parts.getOrNull(1)?.toIntOrNull() ?: 1
-        }
+    val liveHost = config?.params?.get(3)
+    val liveToken = config?.params?.get(29)
+    val (liveMajor, liveMinor) = config?.serverVersion(948, 1) ?: (948 to 1)
+    if (config != null) {
         println("Live: host=$liveHost, version=$liveMajor.$liveMinor, token=$liveToken")
     }
 
@@ -102,27 +69,28 @@ fun main() {
     println("=== COMPARISON ===")
     println("=".repeat(70))
 
+    val headerLen = JS5Protocol.RESPONSE_HEADER_LEN
     for ((key, localData) in localResults) {
         val (idx, grp) = key
         val liveData = liveResults[key]
         println("\n--- $idx/$grp ---")
         println("  LOCAL: ${localData.wire.size} wire bytes, container=${localData.container.size} bytes")
-        println("  LOCAL header: ${localData.wire.take(RESPONSE_HEADER_LEN).joinToString(" ") { "%02x".format(it) }}")
-        println("  LOCAL container first 32: ${localData.container.take(32).joinToString(" ") { "%02x".format(it) }}")
+        println("  LOCAL header: ${localData.wire.copyOfRange(0, headerLen).toHex()}")
+        println("  LOCAL container first 32: ${localData.container.copyOfRange(0, minOf(32, localData.container.size)).toHex()}")
 
         if (liveData != null) {
             println("  LIVE:  ${liveData.wire.size} wire bytes, container=${liveData.container.size} bytes")
-            println("  LIVE  header: ${liveData.wire.take(RESPONSE_HEADER_LEN).joinToString(" ") { "%02x".format(it) }}")
-            println("  LIVE  container first 32: ${liveData.container.take(32).joinToString(" ") { "%02x".format(it) }}")
+            println("  LIVE  header: ${liveData.wire.copyOfRange(0, headerLen).toHex()}")
+            println("  LIVE  container first 32: ${liveData.container.copyOfRange(0, minOf(32, liveData.container.size)).toHex()}")
 
             // Compare headers
-            val localHeader = localData.wire.take(RESPONSE_HEADER_LEN)
-            val liveHeader = liveData.wire.take(RESPONSE_HEADER_LEN)
-            if (localHeader == liveHeader) {
+            val localHeader = localData.wire.copyOfRange(0, headerLen)
+            val liveHeader = liveData.wire.copyOfRange(0, headerLen)
+            if (localHeader.contentEquals(liveHeader)) {
                 println("  HEADER: MATCH")
             } else {
                 println("  HEADER: MISMATCH!")
-                for (i in 0 until RESPONSE_HEADER_LEN) {
+                for (i in 0 until headerLen) {
                     if (i < localHeader.size && i < liveHeader.size && localHeader[i] != liveHeader[i]) {
                         println("    byte[$i]: local=0x${"%02x".format(localHeader[i])} live=0x${"%02x".format(liveHeader[i])}")
                     }
@@ -169,92 +137,26 @@ fun captureFiles(
 
     try {
         // Handshake
-        val tokenBytes = token.toByteArray(Charsets.US_ASCII)
-        val payloadSize = 4 + 4 + tokenBytes.size + 1 + 1
-        output.writeByte(0x0F)
-        output.writeByte(payloadSize)
-        output.writeInt(major)
-        output.writeInt(minor)
-        output.write(tokenBytes)
-        output.writeByte(0)
-        output.writeByte(0)
-        output.flush()
-
-        val sync = input.readByte().toInt() and 0xFF
+        val sync = JS5Protocol.handshake(output, input, major, minor, token)
         if (sync != 0) {
             println("  Bad SYNC: $sync")
             return results
         }
 
         // ACK + READY
-        output.write(byteArrayOf(0x06, 0x00, 0x00, 0x05, 0x00, 0x00, 0x03, 0xB2.toByte(), 0x00, 0x00))
-        output.write(byteArrayOf(0x03, 0x00, 0x00, 0x05, 0x00, 0x00, 0x03, 0xB2.toByte(), 0x00, 0x00))
-        output.flush()
+        JS5Protocol.sendConnectionInit(output, major)
         println("  Handshake complete")
 
         for ((idx, grp) in files) {
             println("  Requesting $idx/$grp...")
-            output.writeByte(0x01) // urgent
-            output.writeByte(idx)
-            output.writeInt(grp)
-            output.writeInt(0)
-            output.flush()
+            JS5Protocol.sendFileRequest(output, idx, grp, major = 0, flags = 0x01)
 
-            val captured = readCapturedResponse(input)
-            results[idx to grp] = captured
-            println("  Got $idx/$grp: ${captured.wire.size} wire bytes")
+            val response = JS5Protocol.readResponse(input, captureWire = true)
+            results[idx to grp] = CapturedFile(response.wire!!, response.container)
+            println("  Got $idx/$grp: ${response.wire!!.size} wire bytes")
         }
     } finally {
         socket.close()
     }
     return results
 }
-
-fun readCapturedResponse(input: DataInputStream): CapturedFile {
-    val headerBytes = ByteArray(RESPONSE_HEADER_LEN)
-    input.readFully(headerBytes)
-
-    val compressionByte = headerBytes[5].toInt() and 0xFF
-    val compressedSize = readBEInt(headerBytes, 6)
-
-    val payloadSize = compressedSize + if (compressionByte != 0) 4 else 0
-
-    val rawWire = ByteArrayOutputStream(RESPONSE_HEADER_LEN + payloadSize * 2)
-    rawWire.write(headerBytes)
-
-    val container = ByteArrayOutputStream(5 + payloadSize)
-    container.write(compressionByte)
-    container.write((compressedSize shr 24) and 0xFF)
-    container.write((compressedSize shr 16) and 0xFF)
-    container.write((compressedSize shr 8) and 0xFF)
-    container.write(compressedSize and 0xFF)
-
-    var bytesRead = 0
-    var blockOffset = RESPONSE_HEADER_LEN
-
-    while (bytesRead < payloadSize) {
-        val blockRemaining = BLOCK_SIZE - blockOffset
-        val toRead = minOf(blockRemaining, payloadSize - bytesRead)
-        val buf = ByteArray(toRead)
-        input.readFully(buf)
-        rawWire.write(buf)
-        container.write(buf)
-        bytesRead += toRead
-        blockOffset += toRead
-
-        if (blockOffset == BLOCK_SIZE && bytesRead < payloadSize) {
-            val contHeader = ByteArray(CONTINUATION_HEADER_LEN)
-            input.readFully(contHeader)
-            rawWire.write(contHeader)
-            blockOffset = CONTINUATION_HEADER_LEN
-        }
-    }
-
-    return CapturedFile(rawWire.toByteArray(), container.toByteArray())
-}
-
-private fun readBEInt(data: ByteArray, offset: Int): Int =
-    ((data[offset].toInt() and 0xFF) shl 24) or
-    ((data[offset + 1].toInt() and 0xFF) shl 16) or
-    ((data[offset + 2].toInt() and 0xFF) shl 8) or
-    (data[offset + 3].toInt() and 0xFF)

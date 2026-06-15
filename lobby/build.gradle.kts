@@ -12,4 +12,12 @@ tasks.named<JavaExec>("run") {
 
 dependencies {
     implementation(project(":core"))
+
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.ktor.http)
+    implementation(libs.ktor.network)
+    implementation(libs.ktor.websockets)
+    implementation(libs.ktor.server.core)
+    implementation(libs.ktor.server.netty)
+    implementation(libs.ktor.server.websockets)
 }

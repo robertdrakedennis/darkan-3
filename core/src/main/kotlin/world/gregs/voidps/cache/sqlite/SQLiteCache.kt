@@ -25,7 +25,15 @@ class SQLiteCache private constructor(
     private val archives: Array<IntArray?> = arrayOfNulls(indexCount)
     private val fileCounts: Array<IntArray?> = arrayOfNulls(indexCount)
     private val files: Array<Array<IntArray?>?> = arrayOfNulls(indexCount)
-    private val hashes: MutableMap<Int, Int> = Int2IntOpenHashMap(32767)
+
+    /** Name-hash -> archive id lookups, keyed per index to avoid cross-index hash collisions. */
+    private val hashes: Array<Int2IntOpenHashMap?> = arrayOfNulls(indexCount)
+
+    /** Single-entry memo of the last decompressed multi-file group (see [data]). */
+    private val groupLock = Any()
+    private var groupIndex = -1
+    private var groupArchive = -1
+    private var groupFiles: Array<ByteArray?>? = null
 
     override lateinit var versionTable: ByteArray
 
@@ -55,6 +63,15 @@ class SQLiteCache private constructor(
         return indexFiles[index]?.getRaw(archive)
     }
 
+    override fun sectorSize(index: Int, archive: Int): Int {
+        if (index == 255) {
+            if (archive >= indexFiles.size) return -1
+            return indexFiles[archive]?.getRawTable()?.size ?: -1
+        }
+        if (index >= indexFiles.size) return -1
+        return indexFiles[index]?.getLength(archive) ?: -1
+    }
+
     override fun indexCount() = _indices.size
 
     override fun indices() = _indices
@@ -67,7 +84,7 @@ class SQLiteCache private constructor(
 
     override fun lastArchiveId(indexId: Int) = archives.getOrNull(indexId)?.lastOrNull() ?: -1
 
-    override fun archiveId(index: Int, hash: Int) = hashes[hash] ?: -1
+    override fun archiveId(index: Int, hash: Int) = hashes.getOrNull(index)?.get(hash) ?: -1
 
     override fun files(index: Int, archive: Int) = files.getOrNull(index)?.getOrNull(archive) ?: IntArray(0)
 
@@ -76,23 +93,42 @@ class SQLiteCache private constructor(
     override fun lastFileId(indexId: Int, archive: Int) = files.getOrNull(indexId)?.getOrNull(archive)?.lastOrNull() ?: -1
 
     override fun data(index: Int, archive: Int, file: Int, xtea: IntArray?): ByteArray? {
-        val raw = sector(index, archive) ?: return null
-        val context = DecompressionContext()
         val keys = if (xtea != null && index == Index.MAPS) xtea else null
-        val decompressed = context.decompress(raw, keys) ?: return null
-
         val fileCount = fileCounts.getOrNull(index)?.getOrNull(archive) ?: return null
         val fileIds = files.getOrNull(index)?.getOrNull(archive) ?: return null
 
         if (fileCount <= 1) {
-            return if (file == 0 || fileIds.contains(file)) decompressed else null
+            if (file != 0 && !fileIds.contains(file)) return null
+            val raw = sector(index, archive) ?: return null
+            return decompressionContexts.get().decompress(raw, keys)
         }
 
         val matchingIndex = fileIds.indexOf(file)
         if (matchingIndex == -1) return null
 
-        val archiveFiles = parseMultiFileArchive(decompressed, fileCount) ?: return null
-        return archiveFiles.getOrNull(matchingIndex)
+        // Encrypted groups (XTEA map data) are never memoized - retries with different
+        // keys must re-read and re-decipher the raw container.
+        if (keys != null) {
+            val raw = sector(index, archive) ?: return null
+            val decompressed = decompressionContexts.get().decompress(raw, keys) ?: return null
+            val archiveFiles = parseMultiFileArchive(decompressed, fileCount) ?: return null
+            return archiveFiles.getOrNull(matchingIndex)
+        }
+
+        // Single-entry memo: definition loading requests files of the same group
+        // sequentially, so decompress and split each group only once instead of
+        // once per file (256-file groups for items/npcs/objects).
+        synchronized(groupLock) {
+            if (groupIndex != index || groupArchive != archive || groupFiles == null) {
+                val raw = sector(index, archive) ?: return null
+                val decompressed = decompressionContexts.get().decompress(raw) ?: return null
+                val archiveFiles = parseMultiFileArchive(decompressed, fileCount) ?: return null
+                groupFiles = archiveFiles
+                groupIndex = index
+                groupArchive = archive
+            }
+            return groupFiles?.getOrNull(matchingIndex)
+        }
     }
 
     private fun parseMultiFileArchive(decompressed: ByteArray, fileCount: Int): Array<ByteArray?>? {
@@ -180,6 +216,10 @@ class SQLiteCache private constructor(
         private const val WHIRLPOOL_FLAG = 0x2
         private const val WHIRLPOOL_SIZE = 64
 
+        /** One decompression context (native Inflater etc.) per thread - never per call. */
+        private val decompressionContexts: ThreadLocal<DecompressionContext> =
+            ThreadLocal.withInitial { DecompressionContext() }
+
         fun load(): Cache {
             val path = Paths.get(EnvVars.cachePath)
             return load(
@@ -208,7 +248,12 @@ class SQLiteCache private constructor(
                             .removePrefix("js5-")
                             .removeSuffix(".jcache")
                             .toInt()
-                        indexFiles[indexId] = IndexFile(file)
+                        indexFiles[indexId] = try {
+                            IndexFile(file)
+                        } catch (e: Exception) {
+                            logWarn("Skipping unreadable cache index $indexId ($file): ${e.message}", e)
+                            null
+                        }
                         if (indexId != 255 && indexId > maxIndex) maxIndex = indexId
                     }
             }
@@ -223,14 +268,15 @@ class SQLiteCache private constructor(
             } else null
 
             val cache = SQLiteCache(indexFiles, indexCount)
-            val context = DecompressionContext()
             val whirlpool = Whirlpool()
 
-            for (indexId in cache._indices) {
-                try {
-                    cache.parseRefTable(context, indexId, versionTable, whirlpool)
-                } catch (e: Exception) {
-                    logWarn("Failed to parse ref table for index $indexId: ${e.message}")
+            DecompressionContext().use { context ->
+                for (indexId in cache._indices) {
+                    try {
+                        cache.parseRefTable(context, indexId, versionTable, whirlpool)
+                    } catch (e: Exception) {
+                        logWarn("Failed to parse ref table for index $indexId: ${e.message}")
+                    }
                 }
             }
 
@@ -285,9 +331,12 @@ class SQLiteCache private constructor(
             versionTable?.fileCount(indexId, highest + 1)
 
             if (flags and NAME_FLAG != 0) {
+                val indexHashes = Int2IntOpenHashMap(archiveCount)
+                indexHashes.defaultReturnValue(-1)
                 for (i in 0 until archiveCount) {
-                    hashes[reader.readInt()] = archiveIds[i]
+                    indexHashes[reader.readInt()] = archiveIds[i]
                 }
+                hashes[indexId] = indexHashes
             }
             // CRCs
             reader.skip(archiveCount * 4)

@@ -13,8 +13,8 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.IOException
 import java.net.Socket
-import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -36,6 +36,11 @@ class JS5Connection(
     private val inflight = Semaphore(20)
     private val completedThisConnection = AtomicInteger(0)
 
+    // Set just before the deliberate end-of-work socket close so the receiver (blocked in a
+    // socket read) can tell the resulting SocketException apart from a genuine mid-download error.
+    @Volatile
+    private var closing = false
+
     suspend fun run() {
         delay(id * 500L)
 
@@ -53,6 +58,18 @@ class JS5Connection(
                     val req = sentRequests.poll() ?: break
                     retryQueue.add(req)
                     inflight.release()
+                }
+
+                // Terminal condition: nothing to retry, nothing in flight, and the shared
+                // queue is closed and drained. Reconnecting would just spin on an empty
+                // workload forever, so this worker is done.
+                if (retryQueue.isEmpty() && sentRequests.isEmpty()) {
+                    val remaining = queue.tryReceive().getOrNull()
+                    if (remaining != null) {
+                        retryQueue.add(remaining)
+                    } else if (queue.isClosedForReceive) {
+                        return
+                    }
                 }
 
                 if (completedThisConnection.get() == 0 && retryQueue.isNotEmpty()) {
@@ -82,6 +99,7 @@ class JS5Connection(
     }
 
     private suspend fun connect() {
+        closing = false
         val socket = withContext(Dispatchers.IO) {
             Socket(host, port).also { it.soTimeout = 30_000 }
         }
@@ -99,21 +117,31 @@ class JS5Connection(
                 JS5Protocol.sendConnectionInit(output, major)
             }
 
-            coroutineScope {
-                val senderJob = launch(Dispatchers.IO) { sender(output) }
-                val receiverJob = launch(Dispatchers.IO) { receiver(input) }
-                senderJob.join()
-                while (sentRequests.isNotEmpty()) {
-                    delay(100)
+            // Mid-download errors (receiver/sender IO failures) must propagate to run(),
+            // which re-queues the in-flight requests and reconnects with backoff.
+            try {
+                coroutineScope {
+                    val senderJob = launch(Dispatchers.IO) { sender(output) }
+                    val receiverJob = launch(Dispatchers.IO) { receiver(input) }
+                    senderJob.join()
+                    while (sentRequests.isNotEmpty()) {
+                        delay(100)
+                    }
+                    // All requested files have arrived; tear the connection down. The receiver
+                    // is blocked in a socket read, so closing the socket is what unblocks it.
+                    // Mark closing and pre-cancel the receiver first so the SocketException
+                    // raised by our own close is treated as normal termination, not an error.
+                    closing = true
+                    receiverJob.cancel()
+                    withContext(Dispatchers.IO) { socket.close() }
                 }
-                withContext(Dispatchers.IO) { socket.close() }
-                receiverJob.cancel()
+            } catch (e: IOException) {
+                // Only the self-inflicted close above may be swallowed; genuine IO failures
+                // while not closing must still reach run() for re-queue + reconnect.
+                if (!closing) throw e
             }
-        } catch (_: Exception) {
         } finally {
-            withContext(Dispatchers.IO) {
-                try { socket.close() } catch (_: Exception) {}
-            }
+            try { socket.close() } catch (_: Exception) {}
         }
     }
 
@@ -133,7 +161,10 @@ class JS5Connection(
     }
 
     private fun receiver(input: DataInputStream) {
-        val pending = HashMap<Long, PendingResponse>()
+        // Jagex interleaves block segments of different responses on one connection, so
+        // each segment's 5-byte id header is read here and routed to the matching
+        // JS5Protocol.ResponseAssembler (the canonical block-framing implementation).
+        val pending = HashMap<Long, JS5Protocol.ResponseAssembler>()
         var segmentCount = 0
 
         try {
@@ -144,46 +175,13 @@ class JS5Connection(
                 segmentCount++
 
                 val key = (headerIndex.toLong() shl 32) or headerArchive.toLong()
-
                 val resp = pending.getOrPut(key) {
-                    PendingResponse(headerIndex, headerArchive)
-                }
-                resp.offset = 5
-
-                if (resp.buffer == null) {
-                    val compression = input.readUnsignedByte()
-                    val compressedSize = input.readInt()
-                    resp.offset = 10
-
-                    if (compressedSize < 0 || compressedSize > 50_000_000) {
-                        throw IllegalStateException(
-                            "Bad compressedSize=$compressedSize for index=$headerIndex archive=$headerArchive"
-                        )
-                    }
-
-                    val totalDataLen = compressedSize + (if (compression != 0) 4 else 0)
-                    val container = ByteBuffer.allocate(5 + totalDataLen)
-                    container.put(compression.toByte())
-                    container.putInt(compressedSize)
-                    resp.buffer = container
-                    resp.totalSize = 5 + totalDataLen
+                    JS5Protocol.ResponseAssembler(headerIndex, headerArchive)
                 }
 
-                val buffer = resp.buffer!!
-                val remaining = resp.totalSize - buffer.position()
-                val blockSpace = JS5Protocol.BLOCK_SIZE - resp.offset
-                val toRead = remaining.coerceAtMost(blockSpace)
-
-                if (toRead > 0) {
-                    val tmp = ByteArray(toRead)
-                    input.readFully(tmp)
-                    buffer.put(tmp)
-                    resp.offset += toRead
-                }
-
-                if (buffer.position() == resp.totalSize) {
+                if (resp.readSegment(input)) {
                     pending.remove(key)
-                    val container = buffer.array()
+                    val container = resp.container!!
                     val crc = CRC.calculate(container, 0, container.size)
                     val request = sentRequests.find { it.index == resp.index && it.archive == resp.archive }
                     storage.store(resp.index, resp.archive, container, request?.version ?: 0, crc)
@@ -196,17 +194,11 @@ class JS5Connection(
         } catch (_: kotlinx.coroutines.CancellationException) {
         } catch (_: InterruptedException) {
         } catch (e: Exception) {
+            // Closing is only set once every in-flight request has completed, so any
+            // exception after that point is teardown noise from our own socket close.
+            if (closing) return
             System.err.println("\nConnection $id receiver error after $segmentCount segments, ${completedThisConnection.get()} completed, ${pending.size} pending: ${e::class.simpleName}: ${e.message}")
             throw e
         }
     }
-}
-
-private class PendingResponse(
-    val index: Int,
-    val archive: Int
-) {
-    var buffer: ByteBuffer? = null
-    var totalSize: Int = 0
-    var offset: Int = 0
 }

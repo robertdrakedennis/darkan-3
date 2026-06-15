@@ -1,5 +1,6 @@
 package org.darkan.core.mongo
 
+import com.mongodb.client.model.CountOptions
 import com.mongodb.client.model.Filters
 import com.mongodb.client.model.IndexOptions
 import com.mongodb.client.model.Indexes
@@ -35,8 +36,15 @@ object Accounts {
     }
 
     suspend fun findByDisplayName(displayName: String): Account? {
-        return collection.find(Filters.eq("displayName", displayName)).firstOrNull()
-            ?: collection.find(Filters.eq("username", displayName.lowercase().replace(" ", "_"))).firstOrNull()
+        val usernameKey = displayName.lowercase().replace(" ", "_")
+        // Single round-trip: match either field, then prefer the display-name hit.
+        val matches = collection.find(
+            Filters.or(
+                Filters.eq("displayName", displayName),
+                Filters.eq("username", usernameKey),
+            )
+        ).toList()
+        return matches.firstOrNull { it.displayName == displayName } ?: matches.firstOrNull()
     }
 
     /** Batch lookup for friend list initialization — avoids N+1 queries. */
@@ -46,7 +54,11 @@ object Accounts {
     }
 
     suspend fun exists(username: String): Boolean {
-        return collection.find(Filters.eq("username", username.lowercase())).firstOrNull() != null
+        // countDocuments with limit 1 avoids deserializing a full Account just to null-check.
+        return collection.countDocuments(
+            Filters.eq("username", username.lowercase()),
+            CountOptions().limit(1)
+        ) > 0
     }
 
     /** Create a new account. Returns the created account. */
@@ -56,7 +68,7 @@ object Accounts {
             username = proto,
             email = email.lowercase(),
             displayName = displayName ?: proto.formatForDisplay(),
-            passwordHash = PasswordHash.hash(password),
+            passwordHash = PasswordHash.hashSuspend(password),
         )
         collection.insertOne(account)
         Logger.log("Accounts", "Created account: ${account.username} (${account.displayName})")

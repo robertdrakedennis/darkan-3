@@ -14,7 +14,7 @@ class OverlayDecoder : ConfigDecoder<OverlayDefinition>(FLOOR_OVERLAY) {
             1 -> colour = calculateHsl(buffer.readUnsignedMedium())
             2 -> texture = buffer.readUnsignedByte()
             3 -> {
-                texture = buffer.readShort()
+                texture = buffer.readUnsignedShort()
                 if (texture == 65535) {
                     texture = -1
                 }

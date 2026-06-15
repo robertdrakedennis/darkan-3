@@ -19,6 +19,9 @@ class LobbyServer(val js5: JS5Server, val loginServer: LoginServer = LoginServer
     private lateinit var serverSocket: ServerSocket
     private lateinit var selectorManager: SelectorManager
 
+    /** Per-IP connection limiter for login connections (JS5 has its own inside [JS5Server]). */
+    private val loginLimiter = MultilogLimiter()
+
     suspend fun start(): Job {
         val executor = Executors.newCachedThreadPool()
         dispatcher = executor.asCoroutineDispatcher()
@@ -68,11 +71,26 @@ class LobbyServer(val js5: JS5Server, val loginServer: LoginServer = LoginServer
             val output = socket.openWriteChannel(autoFlush = false)
 
             try {
-                when (val reqOpcode = input.readByte().toInt()) {
+                // Pre-auth read from an unauthenticated peer — bound it so a silent
+                // connection can't hold the coroutine (and a socket) open forever.
+                val reqOpcode = withTimeoutOrNull(PRE_AUTH_READ_TIMEOUT_MS) { input.readByte().toInt() }
+                when (reqOpcode) {
+                    null -> logTrace("Pre-auth handshake read timed out from $ip — disconnecting")
                     RequestOpcode.JS5_INIT -> js5.init(input, output, ip)
                     RequestOpcode.CONNECT_LOGIN,
                     RequestOpcode.LOGIN,
-                    RequestOpcode.LOBBY -> loginServer.handleLogin(input, output, ip, reqOpcode)
+                    RequestOpcode.LOBBY -> {
+                        if (!loginLimiter.add(ip)) {
+                            logInfo("Login connection rejected (multilog limit): $ip")
+                            output.finish(ResponseOpcode.LOGIN_LIMIT_EXCEEDED)
+                        } else {
+                            try {
+                                loginServer.handleLogin(input, output, ip, reqOpcode)
+                            } finally {
+                                loginLimiter.remove(ip)
+                            }
+                        }
+                    }
                     else -> {
                         logInfo("Connection from $ip with unhandled opcode: $reqOpcode (0x${"%02x".format(reqOpcode)})")
                         output.finish(ResponseOpcode.INVALID_LOGIN_SERVER)
@@ -89,5 +107,10 @@ class LobbyServer(val js5: JS5Server, val loginServer: LoginServer = LoginServer
         } finally {
             socket.close()
         }
+    }
+
+    companion object {
+        /** Max time an unauthenticated peer may take to send the connection-type byte. */
+        private const val PRE_AUTH_READ_TIMEOUT_MS = 10_000L
     }
 }

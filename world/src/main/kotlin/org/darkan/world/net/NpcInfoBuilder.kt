@@ -94,10 +94,13 @@ object NpcInfoBuilder {
         }
 
         // Phase 2: gBit(16, serverIndex) loop, terminated by 0xFFFF.
-        // For MVP no newly-spawned NPCs — we just emit the sentinel.
+        // Add-records are tracked PER VIEWER via viewport.sentNpcAdds — global Npc state
+        // (like Npc.spawned) must not be mutated here, otherwise only the first-built
+        // viewer each tick would receive the add record. Npc.spawned is cleared once per
+        // tick by WorldTick after every viewer has been built.
         for (npcIdx in viewport.visibleNpcs) {
             val npc = Npcs.get(npcIdx) ?: continue
-            if (!npc.spawned) continue
+            if (!viewport.sentNpcAdds.add(npcIdx)) continue // already added for this viewer
             // Per A5 §"Phase 2": gBit(16, serverIndex) + coordBitWidth deltaX + 2 bits level
             //                    + coordBitWidth deltaY + 16 bits typeId + 1 unknown bit
             //                    + 3 bits facing + 1 bit hasExtInfo.
@@ -115,7 +118,6 @@ object NpcInfoBuilder {
             val hasExt = hasFlaggableNpcExtendedInfo(npc.pendingUpdates)
             bitOut.writeBits(1, if (hasExt) 1 else 0)
             if (hasExt) flaggedForExtInfo.add(npcIdx)
-            npc.spawned = false  // Clear spawn flag — only emit once.
         }
         // Sentinel: gBit(16, 0xFFFF) terminates Phase 2.
         bitOut.writeBits(16, 0xFFFF)

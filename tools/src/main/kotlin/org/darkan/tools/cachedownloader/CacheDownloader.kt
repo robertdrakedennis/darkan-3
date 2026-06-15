@@ -2,6 +2,8 @@ package org.darkan.tools.cachedownloader
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import org.darkan.tools.util.RefTableEntry
+import org.darkan.tools.util.parseRefTable
 import world.gregs.voidps.buffer.read.BufferReader
 import world.gregs.voidps.cache.compress.DecompressionContext
 import world.gregs.voidps.cache.secure.CRC
@@ -10,8 +12,6 @@ import java.io.DataOutputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.nio.file.Paths
-
-data class ArchiveEntry(val id: Int, val crc: Int, val version: Int)
 
 class CacheDownloader(
     private val host: String,
@@ -133,7 +133,7 @@ class CacheDownloader(
         }
     }
 
-    private suspend fun downloadHttpIndex(index: Int, archives: Array<ArchiveEntry>) {
+    private suspend fun downloadHttpIndex(index: Int, archives: List<RefTableEntry>) {
         val existingVersions = storage.allVersions(index)
         var remaining = archives.filter { entry ->
             val cached = existingVersions[entry.id]
@@ -151,7 +151,7 @@ class CacheDownloader(
         while (remaining.isNotEmpty()) {
             pass++
             val completed = java.util.concurrent.atomic.AtomicInteger(0)
-            val failedEntries = java.util.concurrent.ConcurrentLinkedQueue<ArchiveEntry>()
+            val failedEntries = java.util.concurrent.ConcurrentLinkedQueue<RefTableEntry>()
             val total = remaining.size
 
             if (pass > 1) println("  Index $index pass $pass: retrying $total archives...")
@@ -257,7 +257,7 @@ class CacheDownloader(
         }
     }
 
-    private fun validateIndices(archivesByIndex: Map<Int, Array<ArchiveEntry>>): Pair<Set<Int>, Set<Long>> {
+    private fun validateIndices(archivesByIndex: Map<Int, List<RefTableEntry>>): Pair<Set<Int>, Set<Long>> {
         val servable = mutableSetOf<Int>()
         val badArchives = mutableSetOf<Long>()
 
@@ -292,7 +292,7 @@ class CacheDownloader(
         }
     }
 
-    private fun downloadRefTables(): Map<Int, Array<ArchiveEntry>> {
+    private fun downloadRefTables(): Map<Int, List<RefTableEntry>> {
         val context = DecompressionContext()
 
         var (sock, inp, out) = JS5Protocol.connect(host, port, major, minor, token)
@@ -300,7 +300,7 @@ class CacheDownloader(
 
         val (indexEntries, indexCount) = downloadMasterIndex(inp, out, context)
 
-        val archivesByIndex = mutableMapOf<Int, Array<ArchiveEntry>>()
+        val archivesByIndex = mutableMapOf<Int, List<RefTableEntry>>()
         var requestsOnConnection = 0
         val maxRequestsPerConnection = 30
 
@@ -387,59 +387,14 @@ class CacheDownloader(
     private fun downloadIndexRefTable(
         inp: DataInputStream, out: DataOutputStream,
         indexId: Int, context: DecompressionContext
-    ): Array<ArchiveEntry>? {
+    ): List<RefTableEntry>? {
         JS5Protocol.sendFileRequest(out, 255, indexId, major)
         val refResponse = JS5Protocol.readResponse(inp)
 
         val refCrc = CRC.calculate(refResponse.container)
         storage.storeRefTable(refResponse.archive, refResponse.container, 0, refCrc)
 
-        return parseRefTable(context, refResponse.container)
-    }
-
-    private fun parseRefTable(context: DecompressionContext, rawTable: ByteArray): Array<ArchiveEntry>? {
-        val decompressed = context.decompress(rawTable) ?: return null
-        val reader = BufferReader(decompressed)
-
-        val version = reader.readUnsignedByte()
-        if (version < 5 || version > 7) return null
-        if (version >= 6) reader.readInt() // revision
-
-        val flags = reader.readUnsignedByte()
-        val archiveCount = if (version >= 7) reader.readBigSmart() else reader.readUnsignedShort()
-
-        // Archive IDs (delta-encoded)
-        var previous = 0
-        val archiveIds = IntArray(archiveCount) {
-            val archiveId = if (version >= 7)
-                reader.readBigSmart() + previous
-            else
-                reader.readUnsignedShort() + previous
-            previous = archiveId
-            archiveId
-        }
-
-        // Name hashes (if flags & 1)
-        if (flags and 1 != 0) reader.skip(archiveCount * 4)
-
-        // CRCs
-        val crcs = IntArray(archiveCount) { reader.readInt() }
-
-        // Unknown hashes (if flags & 8)
-        if (flags and 8 != 0) reader.skip(archiveCount * 4)
-
-        // Whirlpool (if flags & 2)
-        if (flags and 2 != 0) reader.skip(archiveCount * 64)
-
-        // Sizes (if flags & 4)
-        if (flags and 4 != 0) reader.skip(archiveCount * 8)
-
-        // Versions
-        val versions = IntArray(archiveCount) { reader.readInt() }
-
-        return Array(archiveCount) { i ->
-            ArchiveEntry(archiveIds[i], crcs[i], versions[i])
-        }
+        return parseRefTable(context, refResponse.container)?.entries
     }
 
     private data class IndexEntry(val crc: Int, val version: Int, val files: Int, val size: Int)

@@ -258,7 +258,6 @@ pub async fn refresh_token(
 }
 
 /// Revoke an access token (used during logout)
-#[allow(dead_code)]
 pub async fn revoke_token(client: &reqwest::Client, access_token: &str) -> Result<()> {
     let params = [
         ("token", access_token),
@@ -301,7 +300,7 @@ fn parse_token_response(resp: TokenResponse) -> Result<AuthTokens> {
 
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or(Duration::ZERO)
         .as_millis() as u64;
 
     Ok(AuthTokens {

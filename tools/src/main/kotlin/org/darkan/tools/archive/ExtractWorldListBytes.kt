@@ -1,4 +1,7 @@
-package org.darkan.tools
+// org.darkan.tools.archive: unmaintained one-shot experiments kept for reference only.
+// These tools were written against specific captures/revisions, are not part of any
+// build task, and may rely on stale capture data or stale opcode identities.
+package org.darkan.tools.archive
 
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.prot.revision.rev948.register948
@@ -33,7 +36,7 @@ fun main() {
         if (pos + pktSize > raw.size) break
         val data = raw.copyOfRange(pos, pos + pktSize)
         pos += pktSize
-        
+
         if (opcode == 159) {
             segments.add(data) // full packet data including frame byte
             val frame = data[0].toInt() and 0xFF
@@ -41,7 +44,7 @@ fun main() {
             if (frame == 1) break
         }
     }
-    
+
     // Write each segment to a file for the server to replay
     val outDir = File("data/worldlist-capture")
     outDir.mkdirs()

@@ -1,6 +1,7 @@
 package org.darkan.core.net.prot.handler
 
 import kotlinx.coroutines.runBlocking
+import org.darkan.core.Logger.logError
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logWarn
 import org.darkan.core.getClasses
@@ -28,7 +29,10 @@ object PacketHandlers {
                 }
             logInfo("Packet handlers loaded for ${PACKET_HANDLERS.size} packets...")
         } catch (e: Exception) {
-            e.printStackTrace()
+            // A classpath/scanning failure here would otherwise yield a silently
+            // handler-less server — surface it and fail fast.
+            logError("Failed to load packet handlers from package $pack", e)
+            throw e
         }
     }
 
@@ -44,11 +48,10 @@ object PacketHandlers {
     fun <T> getHandler(packet: Class<out ClientProt>) = PACKET_HANDLERS[packet] as? PacketHandler<T, ClientProt>
 
     /**
-     * Blocking dispatch for Java callers (e.g. Player.processPackets on the world thread).
-     * Handlers that call only non-suspend legacy Java code complete synchronously.
+     * Suspend dispatch for coroutine callers (the lobby/world session loops).
      */
     @Suppress("UNCHECKED_CAST")
-    fun <T> handleBlocking(player: T, packet: ClientProt) {
+    suspend fun <T> handle(player: T, packet: ClientProt) {
         if (packet is UnhandledClientProt) {
             logWarn("Unhandled ClientProt: opcode=${packet.opcode} name=${packet.name} size=${packet.size}")
             return
@@ -58,6 +61,14 @@ object PacketHandlers {
             logWarn("No handler for ${packet::class.java.simpleName}")
             return
         }
-        runBlocking { handler.handle(player, packet) }
+        handler.handle(player, packet)
+    }
+
+    /**
+     * Blocking dispatch for Java callers (e.g. Player.processPackets on the world thread).
+     * Handlers that call only non-suspend legacy Java code complete synchronously.
+     */
+    fun <T> handleBlocking(player: T, packet: ClientProt) {
+        runBlocking { handle(player, packet) }
     }
 }

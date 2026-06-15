@@ -13,10 +13,15 @@ import java.util.zip.Inflater
 /**
  * Context per thread for decompressing data in parallel
  */
-class DecompressionContext {
+class DecompressionContext : AutoCloseable {
     private val gzipInflater = Inflater(true)
     private val bzip2Compressor: BZIP2Compressor by lazy { BZIP2Compressor() }
     private val lzmaDecoder: Decoder by lazy { Decoder() }
+
+    /** Releases the native [Inflater] resources held by this context. */
+    override fun close() {
+        gzipInflater.end()
+    }
 
     fun decompress(data: ByteArray, keys: IntArray? = null): ByteArray? {
         // Check for ZLIB magic (ZLB) before standard container format
@@ -57,8 +62,17 @@ class DecompressionContext {
                 return try {
                     val decompressed = ByteArray(decompressedSize)
                     gzipInflater.setInput(data, offset + 10, data.size - (offset + 18))
-                    gzipInflater.finished()
-                    gzipInflater.inflate(decompressed)
+                    var count = 0
+                    while (count < decompressedSize && !gzipInflater.finished()) {
+                        val inflated = gzipInflater.inflate(decompressed, count, decompressedSize - count)
+                        if (inflated == 0) {
+                            break
+                        }
+                        count += inflated
+                    }
+                    if (count != decompressedSize) {
+                        logWarn("GZIP size mismatch: expected $decompressedSize bytes, inflated $count.")
+                    }
                     decompressed
                 } catch (exception: Exception) {
                     logWarn("Error decompressing gzip data.")

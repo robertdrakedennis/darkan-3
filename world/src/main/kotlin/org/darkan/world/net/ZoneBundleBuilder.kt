@@ -1,17 +1,6 @@
 package org.darkan.world.net
 
-import org.darkan.core.net.prot.LocAdd
-import org.darkan.core.net.prot.LocAnimSpecific
-import org.darkan.core.net.prot.LocDel
-import org.darkan.core.net.prot.LocMerge
-import org.darkan.core.net.prot.LocPrefetch
-import org.darkan.core.net.prot.MapAnim
-import org.darkan.core.net.prot.ObjAdd
-import org.darkan.core.net.prot.ObjCount
-import org.darkan.core.net.prot.ObjDel
-import org.darkan.core.net.prot.ObjReveal
 import org.darkan.core.net.prot.ServerProt
-import org.darkan.core.net.prot.SoundArea
 import org.darkan.core.net.prot.UpdateZonePartialEnclosed
 import org.darkan.core.net.prot.UpdateZonePartialFollows
 import org.darkan.world.entity.Player
@@ -98,25 +87,14 @@ object ZoneBundleBuilder {
     }
 
     /**
-     * LOC_ANIM is the ONLY sub-op with a bound handler inside UPDATE_ZONE_PARTIAL_ENCLOSED
-     * per A3 §1 MAJOR FINDING #2. We don't currently have a ServerProt data class for the
-     * raw LOC_ANIM (because no standalone main-table opcode exists per A3 §3.5) — so the
-     * detection is structural: any packet NOT matching one of the standalone main opcodes
-     * we already model is treated as bundle-eligible LOC_ANIM-ish content.
+     * Always false: no ServerProt data class models the enclosed LOC_ANIM sub-packet yet
+     * (no standalone main-table opcode exists per A3 §3.5), and the 948 enclosed sub-opcode
+     * table has not been RE'd — so nothing is currently bundle-eligible and every zone
+     * update takes the FOLLOWS-then-standalone path.
      *
-     * For MVP no LOC_ANIM packets are queued; this function returns false for every known
-     * standalone-mainstandalone op type so the FOLLOWS-then-standalone path is taken.
+     * TODO: once the 948 UPDATE_ZONE_PARTIAL_ENCLOSED sub-opcode table is documented in
+     * docs/net/serverprot/ and a LOC_ANIM ServerProt exists, detect it here so LOC_ANIM-only
+     * zones are bundled into one enclosed packet.
      */
-    private fun isLocAnim(packet: ServerProt): Boolean {
-        // None of the existing ServerProt zone data classes represent LOC_ANIM (no standalone
-        // main opcode exists per A3 §3.5). Return false for every standalone-main packet we
-        // know about so they fall into the FOLLOWS-then-standalone path. When LOC_ANIM
-        // ServerProt is added in B7/B8, update this to test for it.
-        return when (packet) {
-            is LocAdd, is LocDel, is LocPrefetch, is LocAnimSpecific, is LocMerge,
-            is ObjAdd, is ObjDel, is ObjCount, is ObjReveal,
-            is MapAnim, is SoundArea -> false
-            else -> false
-        }
-    }
+    private fun isLocAnim(@Suppress("UNUSED_PARAMETER") packet: ServerProt): Boolean = false
 }

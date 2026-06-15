@@ -1,13 +1,17 @@
 use anyhow::{anyhow, Context, Result};
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 use std::path::Path;
 use tar::Archive as TarArchive;
 use xz2::read::XzDecoder;
 
 const GAME_BINARY_PATH: &str = "./usr/share/games/runescape-launcher/runescape";
 
-/// Extract the RS3 binary from a .deb file (ar > data.tar.xz > game binary)
-pub fn extract_rs3_binary(deb_bytes: &[u8], output: &Path) -> Result<()> {
+/// Extract the RS3 binary from a .deb file (ar > data.tar.xz > game binary).
+///
+/// Accepts any `AsRef<[u8]>` (e.g. `bytes::Bytes`) so the multi-MB .deb body is
+/// not copied into a fresh `Vec` just to be read immutably.
+pub fn extract_rs3_binary(deb_bytes: impl AsRef<[u8]>, output: &Path) -> Result<()> {
+    let deb_bytes = deb_bytes.as_ref();
     let cursor = Cursor::new(deb_bytes);
     let mut archive = ar::Archive::new(cursor);
 
@@ -45,27 +49,47 @@ pub fn extract_rs3_binary(deb_bytes: &[u8], output: &Path) -> Result<()> {
             .to_string();
 
         if path == GAME_BINARY_PATH || path == &GAME_BINARY_PATH[2..] {
-            // Strip leading "./"
-            if let Some(parent) = output.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
+            let parent = output
+                .parent()
+                .context("Output path has no parent directory")?;
+            std::fs::create_dir_all(parent)?;
 
             let mut buf = Vec::new();
             entry
                 .read_to_end(&mut buf)
                 .context("Failed to read game binary from tar")?;
 
-            // Unlink first to avoid ETXTBSY if a previous instance is still running.
-            if output.exists() {
-                let _ = std::fs::remove_file(output);
-            }
-            std::fs::write(output, &buf).context("Failed to write game binary")?;
+            // Write to a temp file in the same directory, then atomically rename
+            // over the target. Renaming replaces the directory entry without
+            // touching the inode a still-running client holds open, so we avoid
+            // both ETXTBSY and the truncated-binary window of write-in-place.
+            let file_name = output
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "rs3linux".to_string());
+            let tmp = parent.join(format!(".{}.{}.tmp", file_name, std::process::id()));
 
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(output, std::fs::Permissions::from_mode(0o755))?;
+            let write_result = (|| -> Result<()> {
+                let mut f = std::fs::File::create(&tmp)
+                    .context("Failed to create temp binary file")?;
+                f.write_all(&buf).context("Failed to write game binary")?;
+                f.sync_all().context("Failed to fsync game binary")?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    f.set_permissions(std::fs::Permissions::from_mode(0o755))
+                        .context("Failed to set game binary permissions")?;
+                }
+                Ok(())
+            })();
+
+            if let Err(e) = write_result {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
             }
+
+            std::fs::rename(&tmp, output)
+                .context("Failed to rename temp binary over target")?;
 
             log::info!("Extracted RS3 binary to {}", output.display());
             return Ok(());

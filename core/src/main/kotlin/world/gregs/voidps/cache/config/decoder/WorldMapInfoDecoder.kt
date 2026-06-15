@@ -31,11 +31,11 @@ class WorldMapInfoDecoder(
             }
             8 -> aBoolean1063 = buffer.readUnsignedByte() == 1
             9 -> {
-                varbit = buffer.readShort()
+                varbit = buffer.readUnsignedShort()
                 if (varbit == 65535) {
                     varbit = -1
                 }
-                varp = buffer.readShort()
+                varp = buffer.readUnsignedShort()
                 if (varp == 65535) {
                     varp = -1
                 }
@@ -56,11 +56,11 @@ class WorldMapInfoDecoder(
             18 -> anInt1093 = buffer.readShort()
             19 -> clientScript = buffer.readShort()
             20 -> {
-                anInt1048 = buffer.readShort()
+                anInt1048 = buffer.readUnsignedShort()
                 if (anInt1048 == 65535) {
                     anInt1048 = -1
                 }
-                anInt1044 = buffer.readShort()
+                anInt1044 = buffer.readUnsignedShort()
                 if (anInt1044 == 65535) {
                     anInt1044 = -1
                 }

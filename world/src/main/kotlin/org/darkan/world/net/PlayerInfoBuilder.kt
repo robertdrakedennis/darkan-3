@@ -117,13 +117,13 @@ object PlayerInfoBuilder {
         val flaggedForExtInfo = ArrayList<Int>(8)
 
         // Pass 1: HIGH-RES ACTIVE — players where active == true.
-        encodeHighResPass(bitOut, viewport.highResIndices, activeFilter = true, flaggedForExtInfo)
+        encodeHighResPass(bitOut, player, viewport.highResIndices, activeFilter = true, flaggedForExtInfo)
         // Pass 2: HIGH-RES INACTIVE — players where active == false.
-        encodeHighResPass(bitOut, viewport.highResIndices, activeFilter = false, flaggedForExtInfo)
+        encodeHighResPass(bitOut, player, viewport.highResIndices, activeFilter = false, flaggedForExtInfo)
         // Pass 3: LOW-RES ACTIVE — players where active == true.
-        encodeLowResPass(bitOut, viewport.lowResIndices, activeFilter = true, flaggedForExtInfo)
+        encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = true, flaggedForExtInfo)
         // Pass 4: LOW-RES INACTIVE — players where active == false.
-        encodeLowResPass(bitOut, viewport.lowResIndices, activeFilter = false, flaggedForExtInfo)
+        encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = false, flaggedForExtInfo)
 
         bitOut.stopBitAccess()
 
@@ -154,6 +154,7 @@ object PlayerInfoBuilder {
      */
     private fun encodeHighResPass(
         out: BufferWriter,
+        viewer: Player,
         indices: List<Int>,
         activeFilter: Boolean,
         flaggedForExtInfo: MutableList<Int>,
@@ -165,7 +166,7 @@ object PlayerInfoBuilder {
             val matches = if (activeFilter) target.active else !target.active
             if (!matches) continue
 
-            val needsUpdate = needsAnyUpdate(target)
+            val needsUpdate = needsAnyUpdate(viewer, target)
             if (needsUpdate) {
                 out.writeBits(1, 1)
                 encodeHighResPosition(out, target, flaggedForExtInfo)
@@ -191,6 +192,7 @@ object PlayerInfoBuilder {
      */
     private fun encodeLowResPass(
         out: BufferWriter,
+        viewer: Player,
         indices: List<Int>,
         activeFilter: Boolean,
         flaggedForExtInfo: MutableList<Int>,
@@ -200,7 +202,7 @@ object PlayerInfoBuilder {
             val matches = if (activeFilter) target.active else !target.active
             if (!matches) continue
 
-            val needsUpdate = needsAnyUpdate(target)
+            val needsUpdate = needsAnyUpdate(viewer, target)
             if (needsUpdate) {
                 out.writeBits(1, 1)
                 encodeLowResPosition(out, target, flaggedForExtInfo)
@@ -363,23 +365,28 @@ object PlayerInfoBuilder {
     }
 
     /**
-     * Returns true if [target] has any update worth transmitting this tick — either a non-empty
-     * pending-updates mask OR a cached appearance the client hasn't seen yet. This drives the
-     * `hasUpdate` bit in the bit-packed passes.
+     * Returns true if [target] has any update worth transmitting to [viewer] this tick —
+     * either a non-empty pending-updates mask OR a cached appearance THIS VIEWER's client
+     * hasn't seen yet. This drives the `hasUpdate` bit in the bit-packed passes.
+     *
+     * First-appearance state is keyed on the VIEWER's viewport ([Viewport.cachedApprHashes]
+     * indexed by the target's slot): each viewer's client tracks appearances independently,
+     * so keying on the target's own viewport would mean only one viewer ever received the
+     * first APPEARANCE block.
      *
      * For MVP we treat the local player's first per-tick as "always has update" because
      * the synthesised APPEARANCE block needs to land before the client renders the avatar.
      */
-    private fun needsAnyUpdate(target: Player): Boolean {
+    private fun needsAnyUpdate(viewer: Player, target: Player): Boolean {
         if (target.pendingUpdates.hasPlayerUpdates()) return true
-        // First-tick appearance synth: if the player has a cachedBytes but the viewport's
-        // recorded appearance hash for this slot is null, the player needs an update so the
-        // client gets the APPEARANCE block.
+        // First-tick appearance synth: if the target has cachedBytes but this VIEWER's
+        // viewport has no recorded appearance for the target's slot, the target needs an
+        // update so the viewer's client gets the APPEARANCE block.
         val cached = target.appearance.cachedBytes ?: return false
-        val ownerHashes = target.viewport.cachedApprHashes
-        if (target.index !in ownerHashes.indices) return false
-        if (ownerHashes[target.index] == null) {
-            ownerHashes[target.index] = cached
+        val viewerHashes = viewer.viewport.cachedApprHashes
+        if (target.index !in viewerHashes.indices) return false
+        if (viewerHashes[target.index] == null) {
+            viewerHashes[target.index] = cached
             return true
         }
         return false

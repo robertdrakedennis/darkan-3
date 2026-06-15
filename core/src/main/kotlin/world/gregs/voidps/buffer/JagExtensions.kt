@@ -82,9 +82,9 @@ suspend fun ByteWriteChannel.writeMediumReverseEnd(value: Int) {
     writeByte(value shr 8)
 }
 
-suspend fun ByteWriteChannel.write5(value: Int) {
+suspend fun ByteWriteChannel.write5(value: Long) {
     writeByte((value shr 32).toByte())
-    writeInt((value and 0xffffffffL.toInt()).toInt())
+    writeInt((value and 0xffffffffL).toInt())
 }
 
 suspend fun ByteWriteChannel.writeSmart(value: Int) {
@@ -200,7 +200,9 @@ class BitAccessor {
     }
 
     suspend fun write(channel: ByteWriteChannel) {
-        channel.writeFully(data, 0, (bitIndex + 7) / 8)
+        // Ktor 3.x writeFully(data, offset, length) silently drops data; copy the range instead.
+        val length = (bitIndex + 7) / 8
+        channel.writeFully(if (length == data.size) data else data.copyOfRange(0, length))
     }
 }
 
@@ -221,16 +223,19 @@ suspend fun ByteWriteChannel.finish(value: Int) {
 }
 
 fun Source.readRSString(): String {
-    val bytes = ArrayList<Byte>()
-    var b: Int
+    var bytes = ByteArray(32)
+    var length = 0
     while (remaining > 0) {
-        b = readByte().toInt()
-        if (b == 0) {
+        val b = readByte()
+        if (b.toInt() == 0) {
             break
         }
-        bytes.add(b.toByte())
+        if (length == bytes.size) {
+            bytes = bytes.copyOf(bytes.size * 2)
+        }
+        bytes[length++] = b
     }
-    return Cp1252.decode(bytes.toByteArray())
+    return Cp1252.decode(bytes, 0, length)
 }
 
 fun Source.readJagString(): String {
@@ -312,16 +317,30 @@ fun Source.readSmart(): Int {
     }
 }
 
-suspend fun ByteReadChannel.readRSString(): String {
-    val bytes = ArrayList<Byte>()
-    var b: Int
+/**
+ * Reads a null-terminated CP1252 string from the channel.
+ *
+ * [maxLength] bounds heap growth on untrusted (pre-auth) input: a client streaming
+ * non-zero bytes would otherwise grow the buffer without limit. Exceeding the bound
+ * throws so the caller disconnects the client.
+ */
+suspend fun ByteReadChannel.readRSString(maxLength: Int = 256): String {
+    var bytes = ByteArray(minOf(32, maxLength))
+    var length = 0
     while (true) {
-        b = readByte().toInt()
-        if (b == 0)
+        val b = readByte()
+        if (b.toInt() == 0) {
             break
-        bytes.add(b.toByte())
+        }
+        if (length >= maxLength) {
+            throw IllegalStateException("RS string exceeded maximum length $maxLength")
+        }
+        if (length == bytes.size) {
+            bytes = bytes.copyOf(minOf(bytes.size * 2, maxLength))
+        }
+        bytes[length++] = b
     }
-    return Cp1252.decode(bytes.toByteArray())
+    return Cp1252.decode(bytes, 0, length)
 }
 
 suspend fun ByteReadChannel.readJagString(): String {

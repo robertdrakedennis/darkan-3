@@ -123,10 +123,25 @@ object WorldTick {
             }
         }
 
-        // Clear all per-tick pending state. The order doesn't matter — pending updates
-        // are owned by each entity and the global Zones queue is per-tick scratch.
+        // Deliver everything queued this tick immediately. Without an explicit flush,
+        // delivery depended on the client's ~1/s keepalive triggering the session loop's
+        // post-receive flush — adding up to a second of latency to every sync packet.
+        Players.forEach { player ->
+            try {
+                player.session.flushBlocking()
+            } catch (e: Exception) {
+                logError("Per-player tick flush failed: ${player.account.username}", e)
+            }
+        }
+
+        // Clear all per-tick pending state AFTER every viewer has been built — global
+        // flags like Npc.spawned are read by all viewers' builders during the tick, so
+        // they must only be reset here, never inside a per-viewer build.
         Players.forEach { it.pendingUpdates.clear() }
-        Npcs.forEach { it.pendingUpdates.clear() }
+        Npcs.forEach {
+            it.pendingUpdates.clear()
+            it.spawned = false
+        }
         Zones.clear()
     }
 }

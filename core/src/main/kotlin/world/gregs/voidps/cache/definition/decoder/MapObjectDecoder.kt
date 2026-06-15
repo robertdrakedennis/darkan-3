@@ -36,14 +36,15 @@ abstract class MapObjectDecoder {
                 peek >= 128 -> {
                     var lastValue = (peek shl 8 or (buffer[position++].toInt() and 0xff)) - 32768
                     var baseValue = 0
-                    if (lastValue == 32767) {
+                    // Matches Reader.readLargeSmart: accumulate while the smart saturates at 32767
+                    while (lastValue == 32767) {
+                        baseValue += 32767
                         peek = buffer[position++].toInt() and 0xff
                         lastValue = if (peek < 128) {
                             peek
                         } else {
                             (peek shl 8 or (buffer[position++].toInt() and 0xff)) - 32768
                         }
-                        baseValue += 32767
                     }
                     baseValue + lastValue
                 }

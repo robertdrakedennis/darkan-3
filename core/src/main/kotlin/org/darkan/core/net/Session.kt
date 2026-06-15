@@ -1,10 +1,11 @@
 package org.darkan.core.net
 
 import io.ktor.utils.io.*
-import io.ktor.utils.io.core.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
-import kotlinx.io.Source
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.io.Buffer
 import org.darkan.core.EnvVars
 import org.darkan.core.Logger.logError
 import org.darkan.core.Logger.logTrace
@@ -19,6 +20,7 @@ import java.io.IOException
 import java.net.SocketException
 import java.nio.channels.ClosedChannelException
 import java.util.concurrent.ConcurrentLinkedQueue
+import kotlin.reflect.KClass
 
 open class Session(
     private val write: ByteWriteChannel,
@@ -32,9 +34,20 @@ open class Session(
     val readChannel = Channel<ClientProt>(capacity = EnvVars.packetQueueCapacity)
     private val pendingPackets = ConcurrentLinkedQueue<ServerProt>()
 
+    /**
+     * Serialises all writers (session loop, world tick via [flushBlocking], gateway
+     * coroutines via [send]/[flush]) so every opcode+length+payload sequence — and the
+     * isaacOut.nextInt() calls it entails — hits the channel contiguously. Interleaved
+     * writes would permanently desync the client's ISAAC stream.
+     */
+    private val writeMutex = Mutex()
+
+    @Volatile
     var disconnected: Boolean = false
     private var disconnect: (() -> Unit)? = null
     private var disconnecting: (() -> Unit)? = null
+
+    @Volatile
     private var state: State = State.CONNECTED
 
     fun onDisconnected(block: () -> Unit) {
@@ -47,7 +60,9 @@ open class Session(
 
     suspend fun disconnect(reason: Int) {
         if (disconnected) return
-        write.writeByte(reason)
+        writeMutex.withLock {
+            write.writeByte(reason)
+        }
         disconnect()
     }
 
@@ -76,12 +91,19 @@ open class Session(
 
     open suspend fun flush() {
         if (disconnected) return
-        var packet = pendingPackets.poll()
-        while (packet != null) {
-            send(packet)
-            packet = pendingPackets.poll()
+        try {
+            writeMutex.withLock {
+                var packet = pendingPackets.poll()
+                while (packet != null) {
+                    encodePacket(packet, noIsaac = false)
+                    packet = pendingPackets.poll()
+                }
+                write.flush()
+            }
+        } catch (e: Exception) {
+            logWarn("Client error:", e)
+            disconnect()
         }
-        write.flush()
     }
 
     /**
@@ -166,63 +188,100 @@ open class Session(
     /** Write a raw ServerProt packet with pre-built payload (VarShort framing). */
     suspend fun writeRawServerProt(opcode: Int, payload: ByteArray) {
         if (disconnected) return
-        writeOpcode(opcode, isaacOut)
-        write.writeShort(payload.size.toShort())
-        write.writeFully(payload)
+        writeMutex.withLock {
+            writeOpcode(opcode, isaacOut)
+            write.writeShort(payload.size.toShort())
+            write.writeFully(payload)
+        }
+    }
+
+    /** True if the active codec has an encoder registered for [type]; logs once per type when not. */
+    fun supportsServerProt(type: KClass<out ServerProt>): Boolean = codec.supportsServerProt(type)
+
+    /**
+     * Sends [serverProt] only when the active codec has an encoder for it; returns true when sent.
+     * Use at call sites that emit packets with a known capability gap (no RE'd opcode in the
+     * active revision yet) — the gap is reported once at INFO by [Codec.supportsServerProt]
+     * instead of producing per-send warn spam.
+     */
+    suspend fun sendIfSupported(serverProt: ServerProt): Boolean {
+        if (!supportsServerProt(serverProt::class)) return false
+        send(serverProt)
+        return true
     }
 
     open suspend fun send(serverProt: ServerProt, noIsaac: Boolean = false) {
         if (disconnected) return
         try {
-            val encoder = codec.serverProts[serverProt::class]
-            if (encoder == null) {
-                logWarn("Missing ServerProt encoder: ${serverProt::class}")
-                return
-            }
-
-            when (encoder.size) {
-                is ProtSize.Fixed -> {
-                    if (EnvVars.packetValidateSizes && encoder.encoder != null) {
-                        val dataChannel = ByteChannel()
-                        encoder.encoder.invoke(serverProt, dataChannel)
-                        val packetBytes = dataChannel.toByteArray()
-                        val packetLength = packetBytes.size
-                        val expectedLength = encoder.size.length
-                        if (packetLength != expectedLength) {
-                            logWarn("Fixed packet size mismatch for ${serverProt::class.simpleName}: expected=$expectedLength actual=$packetLength opcode=${encoder.opcode}")
-                        }
-                        writeOpcode(encoder.opcode, if (noIsaac) null else isaacOut)
-                        write.writeFully(packetBytes)
-                    } else {
-                        writeOpcode(encoder.opcode, if (noIsaac) null else isaacOut)
-                        encoder.encoder?.invoke(serverProt, write)
-                    }
-                }
-                ProtSize.VarByte, ProtSize.VarShort -> {
-                    val dataChannel = ByteChannel()
-                    encoder.encoder?.invoke(serverProt, dataChannel)
-                    val packetData = dataChannel.toByteReadPacket()
-                    val packetLength = packetData.remaining
-
-                    if (encoder.size == ProtSize.VarByte && packetLength > 255)
-                        logWarn("Packet length exceeds VarByte maximum (${packetLength} > 255)")
-                    else if (encoder.size == ProtSize.VarShort && packetLength > 65535)
-                        logWarn("Packet length exceeds VarShort maximum (${packetLength} > 65535)")
-
-                    writeOpcode(encoder.opcode, if (noIsaac) null else isaacOut)
-
-                    if (encoder.size == ProtSize.VarByte)
-                        write.writeByte(packetLength.toByte())
-                    else
-                        write.writeShort(packetLength.toShort())
-
-                    write.writePacket(packetData)
-                }
+            writeMutex.withLock {
+                encodePacket(serverProt, noIsaac)
             }
         } catch (e: Exception) {
             logWarn("Client error:", e)
-            runBlocking { disconnect() }
+            disconnect()
         }
+    }
+
+    /**
+     * Encodes and writes one packet (opcode + optional length + payload).
+     * MUST be called with [writeMutex] held so the ISAAC opcode stream stays contiguous.
+     */
+    private suspend fun encodePacket(serverProt: ServerProt, noIsaac: Boolean) {
+        val encoder = codec.serverProts[serverProt::class]
+        if (encoder == null) {
+            logWarn("Missing ServerProt encoder: ${serverProt::class}")
+            return
+        }
+
+        when (encoder.size) {
+            is ProtSize.Fixed -> {
+                if (EnvVars.packetValidateSizes && encoder.encoder != null) {
+                    val payload = encodeToBuffer(serverProt, encoder)
+                    val packetLength = payload.size.toInt()
+                    val expectedLength = encoder.size.length
+                    if (packetLength != expectedLength) {
+                        logWarn("Fixed packet size mismatch for ${serverProt::class.simpleName}: expected=$expectedLength actual=$packetLength opcode=${encoder.opcode}")
+                    }
+                    writeOpcode(encoder.opcode, if (noIsaac) null else isaacOut)
+                    write.writePacket(payload)
+                } else {
+                    writeOpcode(encoder.opcode, if (noIsaac) null else isaacOut)
+                    encoder.encoder?.invoke(serverProt, write)
+                }
+            }
+            ProtSize.VarByte, ProtSize.VarShort -> {
+                val payload = encodeToBuffer(serverProt, encoder)
+                val packetLength = payload.size.toInt()
+
+                if (encoder.size == ProtSize.VarByte && packetLength > 255)
+                    logWarn("Packet length exceeds VarByte maximum ($packetLength > 255)")
+                else if (encoder.size == ProtSize.VarShort && packetLength > 65535)
+                    logWarn("Packet length exceeds VarShort maximum ($packetLength > 65535)")
+
+                writeOpcode(encoder.opcode, if (noIsaac) null else isaacOut)
+
+                if (encoder.size == ProtSize.VarByte)
+                    write.writeByte(packetLength.toByte())
+                else
+                    write.writeShort(packetLength.toShort())
+
+                write.writePacket(payload)
+            }
+        }
+    }
+
+    /**
+     * Encodes the payload into a growable in-memory [Buffer]. The [asByteWriteChannel] wrapper
+     * gives encoders their normal [ByteWriteChannel] receiver without any coroutine channel —
+     * writes land directly in the buffer and never suspend.
+     */
+    private suspend fun encodeToBuffer(serverProt: ServerProt, encoder: Codec.ServerProtCodec): Buffer {
+        val payload = Buffer()
+        val encode = encoder.encoder ?: return payload
+        val channel = payload.asByteWriteChannel()
+        encode.invoke(serverProt, channel)
+        channel.flush()
+        return payload
     }
 
     private suspend fun writeOpcode(opcode: Int, cipher: Isaac?) {
@@ -235,21 +294,6 @@ open class Session(
                 write.writeByte(opcode + cipher.nextInt())
         } else
             write.writeSmart(opcode)
-    }
-
-    private suspend fun ByteChannel.toByteArray(): ByteArray {
-        flush()
-        val bytes = ByteArray(availableForRead)
-        readFully(bytes)
-        close()
-        return bytes
-    }
-
-    private suspend fun ByteChannel.toByteReadPacket(): Source {
-        flush()
-        val packet = ByteReadPacket(ByteArray(availableForRead).also { readFully(it) })
-        close()
-        return packet
     }
 
     companion object {

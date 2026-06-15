@@ -86,8 +86,12 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
     }
 
     private suspend fun requestLoop(input: ByteReadChannel, output: ByteWriteChannel, ip: String) {
-        val urgentChannel = Channel<JS5QueueItem>(200)
-        val prefetchChannel = Channel<JS5QueueItem>(200)
+        val urgentChannel = Channel<JS5QueueItem>(URGENT_QUEUE_CAPACITY)
+        // UNLIMITED so the reader never suspends on prefetch backpressure: with a bounded
+        // prefetch channel, a full prefetch backlog blocked the reader and head-of-line
+        // blocked urgent requests sitting behind it in the TCP stream. Requests are tiny
+        // (a few dozen bytes each), so an unbounded in-memory queue is safe.
+        val prefetchChannel = Channel<JS5QueueItem>(Channel.UNLIMITED)
 
         coroutineScope {
             val readerJob = launch { reader(input, urgentChannel, prefetchChannel, ip) }
@@ -241,6 +245,9 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
     }
 
     companion object {
+        /** Urgent requests are served promptly, so a small bound is plenty. */
+        private const val URGENT_QUEUE_CAPACITY = 200
+
         /** Read 9 bytes of control message payload: medium(3) + int(4) + short(2) */
         private suspend fun readControlPayload(input: ByteReadChannel) {
             input.readMedium()

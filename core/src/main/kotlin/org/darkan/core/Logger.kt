@@ -25,42 +25,55 @@ object Logger {
         DARKAN_ROOT_LOGGER.handlers.forEach { it.level = level }
     }
 
-    private fun getCallerInfo(): Pair<String, String> {
-        val stackTrace = Thread.currentThread().stackTrace
-        val callerElement = stackTrace.firstOrNull { !it.className.contains("Logger") && !it.className.contains("Thread") }
-        return callerElement?.let {
-            val className = it.className.substringAfterLast('.')
-            Pair(className, it.methodName)
-        } ?: Pair("Unknown", "unknown")
+    private val stackWalker = StackWalker.getInstance()
+
+    /**
+     * Resolves the calling class/method by walking only as many frames as needed.
+     * Only call this after an [java.util.logging.Logger.isLoggable] check — walking
+     * frames on every suppressed log call is wasted work.
+     */
+    private fun getCallerInfo(): Pair<String, String> = stackWalker.walk { frames ->
+        frames
+            .filter { !it.className.contains("Logger") && !it.className.contains("Thread") }
+            .findFirst()
+            .map { Pair(it.className.substringAfterLast('.'), it.methodName) }
+            .orElse(Pair("Unknown", "unknown"))
     }
 
     private fun formatMessage(className: String, methodName: String, msg: Any): String = "[$className.$methodName] $msg"
 
     fun logError(message: String, throwable: Throwable? = null) {
-        val (className, methodName) = getCallerInfo()
-        DARKAN_ROOT_LOGGER.log(Level.SEVERE, formatMessage(className, methodName, message), throwable)
+        if (DARKAN_ROOT_LOGGER.isLoggable(Level.SEVERE)) {
+            val (className, methodName) = getCallerInfo()
+            DARKAN_ROOT_LOGGER.log(Level.SEVERE, formatMessage(className, methodName, message), throwable)
+        }
         if (EnvVars.debug && throwable != null)
             throwable.printStackTrace()
     }
 
     fun Any.logWarn(msg: Any, throwable: Throwable? = null) {
-        val (className, methodName) = getCallerInfo()
-        DARKAN_ROOT_LOGGER.log(Level.WARNING, formatMessage(className, methodName, msg))
+        if (DARKAN_ROOT_LOGGER.isLoggable(Level.WARNING)) {
+            val (className, methodName) = getCallerInfo()
+            DARKAN_ROOT_LOGGER.log(Level.WARNING, formatMessage(className, methodName, msg))
+        }
         if (EnvVars.debug && throwable != null)
             throwable.printStackTrace()
     }
 
     fun Any.logInfo(msg: Any) {
+        if (!DARKAN_ROOT_LOGGER.isLoggable(Level.INFO)) return
         val (className, methodName) = getCallerInfo()
-        DARKAN_ROOT_LOGGER.log(Level.CONFIG, formatMessage(className, methodName, msg))
+        DARKAN_ROOT_LOGGER.log(Level.INFO, formatMessage(className, methodName, msg))
     }
 
     fun Any.logTrace(msg: Any) {
+        if (!DARKAN_ROOT_LOGGER.isLoggable(Level.FINER)) return
         val (className, methodName) = getCallerInfo()
         DARKAN_ROOT_LOGGER.log(Level.FINER, formatMessage(className, methodName, msg))
     }
 
     fun Any.logFinest(msg: Any) {
+        if (!DARKAN_ROOT_LOGGER.isLoggable(Level.FINEST)) return
         val (className, methodName) = getCallerInfo()
         DARKAN_ROOT_LOGGER.log(Level.FINEST, formatMessage(className, methodName, msg))
     }

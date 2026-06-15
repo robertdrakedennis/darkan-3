@@ -38,6 +38,7 @@ pub async fn get_accounts(client: &reqwest::Client, session_id: &str) -> Result<
     }
 
     let body = resp.text().await.context("Failed to read accounts response body")?;
-    log::debug!("Accounts response body: {}", body);
-    serde_json::from_str(&body).context(format!("Failed to parse accounts response: {}", body))
+    // Do not log the body: it contains userHash and other account identifiers.
+    log::debug!("Accounts response received ({} bytes)", body.len());
+    serde_json::from_str(&body).context("Failed to parse accounts response")
 }

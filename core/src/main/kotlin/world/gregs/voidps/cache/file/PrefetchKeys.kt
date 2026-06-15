@@ -50,7 +50,8 @@ fun file(cache: Cache, index: Int, name: String): Int {
     if (archive == -1) {
         return 0
     }
-    return (cache.sector(index, archive)?.size ?: 2) - 2
+    val size = cache.sectorSize(index, archive)
+    return (if (size == -1) 2 else size) - 2
 }
 
 /**
@@ -58,10 +59,16 @@ fun file(cache: Cache, index: Int, name: String): Int {
  */
 fun archive(cache: Cache, index: Int): Int {
     var total = 0
-    for(archive in cache.archives(index)) {
-        total += cache.sector(index, archive)?.size ?: 0
+    for (archive in cache.archives(index)) {
+        val size = cache.sectorSize(index, archive)
+        if (size > 0) {
+            total += size
+        }
     }
-    total += cache.sector(255, index)?.size ?: 0
+    val refSize = cache.sectorSize(255, index)
+    if (refSize > 0) {
+        total += refSize
+    }
     return total
 }
 

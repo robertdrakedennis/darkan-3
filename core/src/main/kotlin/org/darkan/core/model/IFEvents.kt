@@ -23,27 +23,6 @@ class IFEvents(
     val toSlot: Int = 0,
     var settings: Int = 0,
 ) {
-    companion object {
-        /**
-         * Decode from raw 12-byte IF_SETEVENTS wire payload (rev 947 encoding).
-         * Wire: [4B LE settings][2B LE fromSlot][4B CDAB componentHash][2B +0x80 toSlot]
-         */
-        fun fromWire(data: ByteArray, offset: Int = 0): IFEvents {
-            fun u8(i: Int) = data[offset + i].toInt() and 0xFF
-            val settings = u8(0) or (u8(1) shl 8) or (u8(2) shl 16) or (u8(3) shl 24)
-            var fromSlot = u8(4) or (u8(5) shl 8)
-            if (fromSlot == 0xFFFF) fromSlot = -1
-            // writeIntInverseMiddle writes [shr16, shr24, shr0, shr8] = [CC, AA, DD, BB]
-            // bytes [6]=CC [7]=AA [8]=DD [9]=BB → reconstruct AABBCCDD
-            val hash = (u8(7) shl 24) or (u8(6) shl 16) or (u8(9) shl 8) or u8(8)
-            val interfaceId = hash ushr 16
-            val componentId = hash and 0xFFFF
-            var toSlot = ((u8(10) + 0x80) and 0xFF) or (u8(11) shl 8)
-            if (toSlot == 0xFFFF) toSlot = -1
-            return IFEvents(interfaceId, componentId, fromSlot, toSlot, settings)
-        }
-    }
-
     constructor(interfaceId: Int, componentId: Int, fromSlot: Int, toSlot: Int, init: IFEvents.() -> Unit)
         : this(interfaceId, componentId, fromSlot, toSlot, 0) { init() }
 

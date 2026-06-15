@@ -1,7 +1,11 @@
-package org.darkan.tools
+// org.darkan.tools.archive: unmaintained one-shot experiments kept for reference only.
+// These tools were written against specific captures/revisions, are not part of any
+// build task, and may rely on stale capture data or stale opcode identities.
+package org.darkan.tools.archive
 
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.prot.revision.rev948.register948
+import world.gregs.voidps.buffer.read.BufferReader
 import java.io.File
 
 fun main() {
@@ -33,25 +37,22 @@ fun main() {
     println("Found ${newsPackets.size} news RUNCLIENTSCRIPT packets\n")
 
     for ((idx, data) in newsPackets.take(3).withIndex()) {
-        var p = 0
-        fun g1() = data[p++].toInt() and 0xFF
-        fun g4(): Int { val v = ((data[p].toInt() and 0xFF) shl 24) or ((data[p+1].toInt() and 0xFF) shl 16) or ((data[p+2].toInt() and 0xFF) shl 8) or (data[p+3].toInt() and 0xFF); p += 4; return v }
-        fun rsStr(): String { val sb = StringBuilder(); while (data[p].toInt() != 0) { sb.append(data[p].toInt().toChar()); p++ }; p++; return sb.toString() }
+        val reader = BufferReader(data)
 
         // Read type descriptor
-        val typeDesc = rsStr()
+        val typeDesc = reader.readString()
         println("[$idx] size=${data.size}, type='$typeDesc'")
 
         // Read args in REVERSED order
         val args = arrayOfNulls<Any>(typeDesc.length)
         for (i in typeDesc.indices.reversed()) {
             when (typeDesc[i]) {
-                'i' -> args[i] = g4()
-                's' -> args[i] = rsStr()
-                'l' -> { p += 8; args[i] = 0L } // skip longs
+                'i' -> args[i] = reader.readInt()
+                's' -> args[i] = reader.readString()
+                'l' -> { reader.skip(8); args[i] = 0L } // skip longs
             }
         }
-        val scriptId = g4()
+        val scriptId = reader.readInt()
         println("  scriptId = $scriptId")
         for (i in args.indices) {
             val a = args[i]

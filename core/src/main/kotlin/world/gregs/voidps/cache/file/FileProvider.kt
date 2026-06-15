@@ -57,7 +57,11 @@ interface FileProvider {
 
         // Calculate payload size (data after the 5-byte container header)
         val payloadSize = compressedSize + if (compression != 0) 4 else 0
-        val actualPayloadSize = minOf(payloadSize, data.size - CONTAINER_HEADER_LEN)
+        val available = data.size - CONTAINER_HEADER_LEN
+        if (payloadSize > available) {
+            logWarn("Truncated container: index=$index archive=$archive header says $payloadSize bytes but only $available available — client CRC will fail.")
+        }
+        val actualPayloadSize = minOf(payloadSize, available)
 
         // Build 10-byte response header
         val headerBytes = ByteArray(RESPONSE_HEADER_LEN)
@@ -79,9 +83,15 @@ interface FileProvider {
         continuationHeader[3] = (hash shr 8).toByte()
         continuationHeader[4] = hash.toByte()
 
-        // Estimate max output size: header + payload + worst-case continuations
-        val maxContinuations = (RESPONSE_HEADER_LEN + actualPayloadSize) / (BLOCK_SIZE - CONTINUATION_HEADER_LEN) + 2
-        val buf = ByteArray(RESPONSE_HEADER_LEN + actualPayloadSize + maxContinuations * CONTINUATION_HEADER_LEN)
+        // Exact output size: the first block holds BLOCK_SIZE content bytes, every
+        // subsequent block holds BLOCK_SIZE - CONTINUATION_HEADER_LEN content bytes.
+        val total = RESPONSE_HEADER_LEN + actualPayloadSize
+        val continuations = if (total > BLOCK_SIZE) {
+            (total - BLOCK_SIZE + (BLOCK_SIZE - CONTINUATION_HEADER_LEN) - 1) / (BLOCK_SIZE - CONTINUATION_HEADER_LEN)
+        } else {
+            0
+        }
+        val buf = ByteArray(total + continuations * CONTINUATION_HEADER_LEN)
         var pos = 0
         // Per-response block tracking: starts at 0 for each response
         var blockOffset = 0
@@ -114,6 +124,9 @@ interface FileProvider {
         // Write payload (container data after 5-byte header, no version suffix)
         writeWithFraming(data, CONTAINER_HEADER_LEN, actualPayloadSize)
 
+        if (pos != buf.size) {
+            logWarn("JS5 framing size mismatch: index=$index archive=$archive expected ${buf.size} bytes, wrote $pos.")
+        }
         val response = if (pos == buf.size) buf else buf.copyOfRange(0, pos)
         // Apply XOR encryption if client requested it
         if (xorKey != 0) {

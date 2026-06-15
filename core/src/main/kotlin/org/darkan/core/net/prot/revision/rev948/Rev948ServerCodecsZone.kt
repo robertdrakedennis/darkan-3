@@ -1,6 +1,7 @@
 package org.darkan.core.net.prot.revision.rev948
 
 import io.ktor.utils.io.*
+import org.darkan.core.Logger.logWarn
 import org.darkan.core.net.prot.*
 import world.gregs.voidps.buffer.*
 
@@ -85,7 +86,14 @@ internal fun Codec.registerRev948ServerCodecsZone() {
         out.writeByte(zoneY)
         out.writeByteSubtract(zoneX)
         if (subPackets.isNotEmpty()) {
-            // Caller-supplied opaque batch — left empty until LOC_ANIM sub-packet is defined.
+            // The 948 enclosed sub-opcode table (g_zoneSubProtVector @ DAT_015d4580) has not
+            // been RE'd, so sub-packet payloads CANNOT be encoded yet. Dropping them silently
+            // would lose zone state — warn loudly until the table is documented.
+            logWarn(
+                "UPDATE_ZONE_PARTIAL_ENCLOSED (op 76) dropped ${subPackets.size} sub-packet(s) — " +
+                    "948 enclosed sub-opcode table not yet RE'd; only the 3-byte zone header was sent. " +
+                    "TODO: document g_zoneSubProtVector in docs/net/serverprot/ and implement sub-packet encoding."
+            )
         }
     }
 

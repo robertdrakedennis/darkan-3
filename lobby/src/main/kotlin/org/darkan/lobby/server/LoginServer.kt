@@ -15,6 +15,7 @@ import org.darkan.core.Logger.logTrace
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.RequestOpcode
 import org.darkan.core.net.ResponseOpcode
+import org.darkan.core.net.Session
 import org.darkan.core.model.Account
 import org.darkan.core.model.IFEvents
 import org.darkan.core.model.Vars
@@ -63,8 +64,18 @@ class LoginServer {
         output.flush()
         logTrace("Sent exchange data (9 bytes) to $ip")
 
-        // Step 2: Read the login packet
-        val loginOpcode = input.readByte().toInt() and 0xFF
+        // Step 2: Read the login packet. These are pre-auth bytes from an unauthenticated
+        // peer — bound the reads so a silent connection can't hold the coroutine forever.
+        val loginRequest = withTimeoutOrNull(PRE_AUTH_READ_TIMEOUT_MS) {
+            val loginOpcode = input.readByte().toInt() and 0xFF
+            val size = input.readShort().toInt() and 0xFFFF
+            loginOpcode to size
+        }
+        if (loginRequest == null) {
+            logInfo("Pre-auth login read timed out from $ip — disconnecting")
+            return
+        }
+        val (loginOpcode, size) = loginRequest
         logInfo("Login opcode from $ip: $loginOpcode (0x${"%02x".format(loginOpcode)})")
 
         if (loginOpcode != RequestOpcode.LOBBY && loginOpcode != RequestOpcode.LOGIN) {
@@ -73,7 +84,6 @@ class LoginServer {
             return
         }
 
-        val size = input.readShort().toInt() and 0xFFFF
         logTrace("Login packet size: $size from $ip")
 
         if (size <= 0 || size > 5000) {
@@ -83,7 +93,13 @@ class LoginServer {
         }
 
         val packetData = ByteArray(size)
-        input.readFully(packetData, 0, size)
+        val bodyRead = withTimeoutOrNull(PRE_AUTH_READ_TIMEOUT_MS) {
+            input.readFully(packetData, 0, size)
+        }
+        if (bodyRead == null) {
+            logInfo("Pre-auth login body read timed out from $ip — disconnecting")
+            return
+        }
 
         logTrace("Read $size bytes of login data from $ip")
         logTrace("First 32 bytes: ${packetData.take(32).joinToString(" ") { "%02x".format(it) }}")
@@ -173,7 +189,7 @@ class LoginServer {
         // Step 5: Look up or create account in MongoDB
         val existing = Accounts.findByUsername(username)
         val account = if (existing != null) {
-            if (password.isNotEmpty() && !PasswordHash.verify(password, existing.passwordHash)) {
+            if (password.isNotEmpty() && !PasswordHash.verifySuspend(password, existing.passwordHash)) {
                 logInfo("Invalid password for ${existing.username} from $ip (password ${password.length} chars, hash=${existing.passwordHash.take(20)}...)")
                 output.finish(ResponseOpcode.INVALID_CREDENTIALS)
                 return
@@ -381,8 +397,13 @@ class LoginServer {
         session.send(UpdateRunenergy(1))
         session.send(ChangeLobby())
 
-        // 10. Social init is handled by SocialGateway.registerLobbyPlayer() above
-        // (sends friend list, ignore list, chat filters, mutual friend notifications)
+        // 10. Social init — friend list (UPDATE_FRIENDLIST op26, sent EMPTY even with no friends
+        // so the client marks the tab loaded), ignore list, chat filters, mutual-friend notify.
+        // MUST be here: after the interface setup (the friends-tab components must exist before the
+        // client can populate them) and before WorldList/SetReadyFlag — matches the live capture,
+        // where op26 fires in this slot, not at login time. Presence was registered in
+        // registerLobbyPlayer() before sendLobbyInitPackets().
+        SocialGateway.initializeSocial(account)
 
         // 11. World list — sent near the end (matching Jagex sequence)
         session.send(WorldListPacket(LobbyState.worldList, fullRefresh = true))
@@ -402,8 +423,10 @@ class LoginServer {
      * Sends periodic keepalives.
      */
     private suspend fun lobbySessionLoop(session: GameSession) {
-        var packetCount = 0
+        var packetCount = 0L
         var lastKeepaliveSent = System.currentTimeMillis()
+        var rateWindowStart = lastKeepaliveSent
+        var rateWindowCount = 0
 
         try {
             // Send initial keepalive
@@ -418,32 +441,58 @@ class LoginServer {
 
                 if (packet != null) {
                     packetCount++
-                    PacketHandlers.handleBlocking<GameSession>(session, packet)
+                    rateWindowCount++
+                    PacketHandlers.handle<GameSession>(session, packet)
                 }
 
                 // Flush any queued responses after processing packets
                 session.flush()
 
-                // Send periodic keepalives
+                // Send periodic keepalives — flushed immediately so they aren't delayed
+                // until the next loop iteration.
                 val now = System.currentTimeMillis()
                 if (now - lastKeepaliveSent > KEEPALIVE_INTERVAL_MS) {
                     session.send(NoTimeout())
+                    session.flush()
                     lastKeepaliveSent = now
                 }
 
-                if (packetCount > 100000) {
-                    logError("Too many packets from ${session.ip}, disconnecting")
+                // Windowed rate check (NOT a lifetime cap — a healthy client would trip
+                // a lifetime cap eventually). Disconnect so the socket actually closes.
+                if (now - rateWindowStart >= PACKET_RATE_WINDOW_MS) {
+                    rateWindowStart = now
+                    rateWindowCount = 0
+                } else if (rateWindowCount > MAX_PACKETS_PER_RATE_WINDOW) {
+                    logError("Packet flood from ${session.ip}: >$MAX_PACKETS_PER_RATE_WINDOW packets in ${PACKET_RATE_WINDOW_MS}ms, disconnecting")
+                    session.disconnect()
                     break
                 }
             }
         } catch (e: Exception) {
-            logTrace("Lobby session ended for ${session.ip}: ${e::class.simpleName}: ${e.message}")
+            if (Session.isExpectedDisconnect(e)) {
+                logTrace("Lobby session ended for ${session.ip}: ${e::class.simpleName}: ${e.message}")
+            } else {
+                logError("Lobby session error for ${session.ip}", e)
+            }
         }
         logInfo("Lobby session closed for ${session.ip} after $packetCount packets")
     }
 
     companion object {
         private const val KEEPALIVE_INTERVAL_MS = 15_000L
+
+        /** Max time an unauthenticated peer may take to deliver each pre-auth handshake read. */
+        private const val PRE_AUTH_READ_TIMEOUT_MS = 10_000L
+
+        /** Rolling window for the inbound packet-rate check. */
+        private const val PACKET_RATE_WINDOW_MS = 10_000L
+
+        /**
+         * Max client packets per [PACKET_RATE_WINDOW_MS] window. A healthy lobby client
+         * sends ~1 keepalive/s plus sparse UI events — 2000/10s (200/s sustained) is far
+         * above legitimate traffic while still catching floods quickly.
+         */
+        private const val MAX_PACKETS_PER_RATE_WINDOW = 2_000
 
         private const val LOBBY_INTERFACE_ID = 906
 

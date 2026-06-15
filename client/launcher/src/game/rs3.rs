@@ -57,8 +57,9 @@ pub fn is_up_to_date(hash_path: &Path, expected_hash: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Download the .deb file
-pub async fn download_deb(client: &reqwest::Client, filename: &str) -> Result<Vec<u8>> {
+/// Download the .deb file. Returns `Bytes` to avoid copying the multi-MB body —
+/// `Bytes` is cheaply cloneable and derefs to `&[u8]` for hashing/extraction.
+pub async fn download_deb(client: &reqwest::Client, filename: &str) -> Result<bytes::Bytes> {
     let url = format!("{}{}", CONTENT_URL, filename);
 
     log::info!("Downloading RS3 client from {}", url);
@@ -73,10 +74,7 @@ pub async fn download_deb(client: &reqwest::Client, filename: &str) -> Result<Ve
         return Err(anyhow!("Download failed: {}", resp.status()));
     }
 
-    resp.bytes()
-        .await
-        .map(|b| b.to_vec())
-        .context("Failed to read .deb bytes")
+    resp.bytes().await.context("Failed to read .deb bytes")
 }
 
 /// Verify SHA256 hash of downloaded data

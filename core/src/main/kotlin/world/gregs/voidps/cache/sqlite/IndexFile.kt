@@ -1,92 +1,131 @@
 package world.gregs.voidps.cache.sqlite
 
+import org.darkan.core.Logger.logError
 import java.io.Closeable
 import java.nio.file.Path
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.PreparedStatement
 import java.sql.SQLException
 
+/**
+ * SQLite-backed storage for a single cache index (`js5-N.jcache`).
+ *
+ * The single JDBC [Connection] is shared by all callers (JS5 serve coroutines run on
+ * multiple threads), so every connection access is serialised with [lock]. SQLite would
+ * serialise statements internally anyway; the lock also protects the cached
+ * [PreparedStatement]s and the ref-table cache.
+ *
+ * The constructor throws on any failure to open or initialise the database so the caller
+ * can distinguish a broken index from an absent archive.
+ */
 class IndexFile(path: Path) : Closeable {
 
-    private var connection: Connection? = null
+    private val lock = Any()
+    private val connection: Connection = DriverManager.getConnection("jdbc:sqlite:$path")
+    private val getRawStatement: PreparedStatement
+    private val getLengthStatement: PreparedStatement
+
+    /** Ref table bytes cached after first load - read once at startup, served many times. */
+    private var refTable: ByteArray? = null
 
     init {
         try {
-            connection = DriverManager.getConnection("jdbc:sqlite:$path")
-            connection?.prepareStatement("PRAGMA journal_mode=WAL;")?.use { it.executeQuery().close() }
-            connection?.prepareStatement("PRAGMA busy_timeout=30000;")?.use { it.executeQuery().close() }
-            connection?.prepareStatement(
+            connection.prepareStatement("PRAGMA journal_mode=WAL;").use { it.executeQuery().close() }
+            connection.prepareStatement("PRAGMA busy_timeout=30000;").use { it.executeQuery().close() }
+            connection.prepareStatement(
                 "CREATE TABLE IF NOT EXISTS `cache`(`KEY` INTEGER PRIMARY KEY, `DATA` BLOB, `VERSION` INTEGER, `CRC` INTEGER);"
-            )?.executeUpdate()
-            connection?.prepareStatement(
+            ).use { it.executeUpdate() }
+            connection.prepareStatement(
                 "CREATE TABLE IF NOT EXISTS `cache_index`(`KEY` INTEGER PRIMARY KEY, `DATA` BLOB, `VERSION` INTEGER, `CRC` INTEGER);"
-            )?.executeUpdate()
+            ).use { it.executeUpdate() }
+            getRawStatement = connection.prepareStatement("SELECT DATA FROM cache WHERE KEY = ?")
+            getLengthStatement = connection.prepareStatement("SELECT LENGTH(DATA) FROM cache WHERE KEY = ?")
         } catch (e: SQLException) {
-            e.printStackTrace()
+            try {
+                connection.close()
+            } catch (_: SQLException) {
+            }
+            throw e
         }
     }
 
     fun hasReferenceTable(): Boolean {
-        return try {
-            connection?.prepareStatement("SELECT DATA FROM cache_index WHERE KEY = 1")?.use { stmt ->
-                stmt.executeQuery().use { it.next() }
-            } ?: false
-        } catch (e: SQLException) {
-            false
-        }
+        return getRawTable() != null
     }
 
-    fun getRaw(id: Int): ByteArray? {
-        return try {
-            connection?.prepareStatement("SELECT DATA FROM cache WHERE KEY = ?")?.use { stmt ->
-                stmt.setInt(1, id)
-                stmt.executeQuery().use { result ->
-                    if (result.next()) result.getBytes("DATA") else null
-                }
+    fun getRaw(id: Int): ByteArray? = synchronized(lock) {
+        try {
+            getRawStatement.setInt(1, id)
+            getRawStatement.executeQuery().use { result ->
+                if (result.next()) result.getBytes(1) else null
             }
         } catch (e: SQLException) {
             null
         }
     }
 
-    fun getRawTable(): ByteArray? {
-        return try {
-            connection?.prepareStatement("SELECT DATA FROM cache_index WHERE KEY = 1")?.use { stmt ->
+    /** Size in bytes of the stored blob for [id], or -1 if absent. */
+    fun getLength(id: Int): Int = synchronized(lock) {
+        try {
+            getLengthStatement.setInt(1, id)
+            getLengthStatement.executeQuery().use { result ->
+                if (result.next()) {
+                    val length = result.getInt(1)
+                    if (result.wasNull()) -1 else length
+                } else {
+                    -1
+                }
+            }
+        } catch (e: SQLException) {
+            -1
+        }
+    }
+
+    fun getRawTable(): ByteArray? = synchronized(lock) {
+        val cached = refTable
+        if (cached != null) {
+            return cached
+        }
+        val data = try {
+            connection.prepareStatement("SELECT DATA FROM cache_index WHERE KEY = 1").use { stmt ->
                 stmt.executeQuery().use { result ->
-                    if (result.next()) result.getBytes("DATA") else null
+                    if (result.next()) result.getBytes(1) else null
                 }
             }
         } catch (e: SQLException) {
             null
         }
+        refTable = data
+        data
     }
 
-    fun getMaxArchive(): Int {
-        return try {
-            connection?.prepareStatement("SELECT MAX(`KEY`) FROM cache")?.use { stmt ->
+    fun getMaxArchive(): Int = synchronized(lock) {
+        try {
+            connection.prepareStatement("SELECT MAX(`KEY`) FROM cache").use { stmt ->
                 stmt.executeQuery().use { result ->
                     if (result.next()) result.getInt(1) else 0
                 }
-            } ?: 0
+            }
         } catch (e: SQLException) {
             0
         }
     }
 
-    fun exists(id: Int): Boolean {
-        return try {
-            connection?.prepareStatement("SELECT 1 FROM cache WHERE KEY = ?")?.use { stmt ->
+    fun exists(id: Int): Boolean = synchronized(lock) {
+        try {
+            connection.prepareStatement("SELECT 1 FROM cache WHERE KEY = ?").use { stmt ->
                 stmt.setInt(1, id)
                 stmt.executeQuery().use { it.next() }
-            } ?: false
+            }
         } catch (e: SQLException) {
             false
         }
     }
 
-    fun allKeys(): Set<Int> {
-        return try {
-            connection?.prepareStatement("SELECT KEY FROM cache")?.use { stmt ->
+    fun allKeys(): Set<Int> = synchronized(lock) {
+        try {
+            connection.prepareStatement("SELECT KEY FROM cache").use { stmt ->
                 stmt.executeQuery().use { result ->
                     val keys = mutableSetOf<Int>()
                     while (result.next()) {
@@ -94,16 +133,16 @@ class IndexFile(path: Path) : Closeable {
                     }
                     keys
                 }
-            } ?: emptySet()
+            }
         } catch (e: SQLException) {
             emptySet()
         }
     }
 
     /** Returns map of archiveId -> (version, crc) for all stored archives. */
-    fun allVersions(): Map<Int, Pair<Int, Int>> {
-        return try {
-            connection?.prepareStatement("SELECT KEY, VERSION, CRC FROM cache")?.use { stmt ->
+    fun allVersions(): Map<Int, Pair<Int, Int>> = synchronized(lock) {
+        try {
+            connection.prepareStatement("SELECT KEY, VERSION, CRC FROM cache").use { stmt ->
                 stmt.executeQuery().use { result ->
                     val map = mutableMapOf<Int, Pair<Int, Int>>()
                     while (result.next()) {
@@ -111,51 +150,59 @@ class IndexFile(path: Path) : Closeable {
                     }
                     map
                 }
-            } ?: emptyMap()
+            }
         } catch (e: SQLException) {
             emptyMap()
         }
     }
 
-    fun updateVersion(archiveId: Int, version: Int) {
+    fun updateVersion(archiveId: Int, version: Int): Unit = synchronized(lock) {
         try {
-            connection?.prepareStatement(
-                "UPDATE cache SET VERSION = ? WHERE KEY = ?"
-            )?.use { stmt ->
+            connection.prepareStatement("UPDATE cache SET VERSION = ? WHERE KEY = ?").use { stmt ->
                 stmt.setInt(1, version)
                 stmt.setInt(2, archiveId)
                 stmt.executeUpdate()
             }
         } catch (e: SQLException) {
-            e.printStackTrace()
+            logError("Failed to update version for archive $archiveId", e)
         }
     }
 
     fun batchUpdateVersions(updates: Map<Int, Int>) {
         if (updates.isEmpty()) return
-        try {
-            val conn = connection ?: return
-            conn.autoCommit = false
-            conn.prepareStatement("UPDATE cache SET VERSION = ? WHERE KEY = ?").use { stmt ->
-                for ((archiveId, version) in updates) {
-                    stmt.setInt(1, version)
-                    stmt.setInt(2, archiveId)
-                    stmt.addBatch()
+        synchronized(lock) {
+            try {
+                connection.autoCommit = false
+                try {
+                    connection.prepareStatement("UPDATE cache SET VERSION = ? WHERE KEY = ?").use { stmt ->
+                        for ((archiveId, version) in updates) {
+                            stmt.setInt(1, version)
+                            stmt.setInt(2, archiveId)
+                            stmt.addBatch()
+                        }
+                        stmt.executeBatch()
+                    }
+                    connection.commit()
+                } catch (e: SQLException) {
+                    try {
+                        connection.rollback()
+                    } catch (_: SQLException) {
+                    }
+                    throw e
+                } finally {
+                    connection.autoCommit = true
                 }
-                stmt.executeBatch()
+            } catch (e: SQLException) {
+                logError("Failed to batch update ${updates.size} versions", e)
             }
-            conn.commit()
-            conn.autoCommit = true
-        } catch (e: SQLException) {
-            e.printStackTrace()
         }
     }
 
-    fun putRaw(archiveId: Int, data: ByteArray, version: Int, crc: Int) {
+    fun putRaw(archiveId: Int, data: ByteArray, version: Int, crc: Int): Unit = synchronized(lock) {
         try {
-            connection?.prepareStatement(
+            connection.prepareStatement(
                 "INSERT OR REPLACE INTO cache (KEY, DATA, VERSION, CRC) VALUES (?, ?, ?, ?)"
-            )?.use { stmt ->
+            ).use { stmt ->
                 stmt.setInt(1, archiveId)
                 stmt.setBytes(2, data)
                 stmt.setInt(3, version)
@@ -163,30 +210,33 @@ class IndexFile(path: Path) : Closeable {
                 stmt.executeUpdate()
             }
         } catch (e: SQLException) {
-            e.printStackTrace()
+            logError("Failed to store archive $archiveId (${data.size} bytes)", e)
         }
     }
 
-    fun putRefTable(data: ByteArray, version: Int, crc: Int) {
+    fun putRefTable(data: ByteArray, version: Int, crc: Int): Unit = synchronized(lock) {
         try {
-            connection?.prepareStatement(
+            connection.prepareStatement(
                 "INSERT OR REPLACE INTO cache_index (KEY, DATA, VERSION, CRC) VALUES (1, ?, ?, ?)"
-            )?.use { stmt ->
+            ).use { stmt ->
                 stmt.setBytes(1, data)
                 stmt.setInt(2, version)
                 stmt.setInt(3, crc)
                 stmt.executeUpdate()
             }
+            refTable = data
         } catch (e: SQLException) {
-            e.printStackTrace()
+            logError("Failed to store ref table (${data.size} bytes)", e)
         }
     }
 
-    override fun close() {
+    override fun close(): Unit = synchronized(lock) {
         try {
-            connection?.close()
+            getRawStatement.close()
+            getLengthStatement.close()
+            connection.close()
         } catch (e: SQLException) {
-            e.printStackTrace()
+            logError("Failed to close index file", e)
         }
     }
 }

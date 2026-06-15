@@ -26,6 +26,12 @@ import kotlin.time.Duration.Companion.seconds
  */
 class SocialClient(
     private val scope: CoroutineScope,
+    /**
+     * Invoked after each successful (re)connection + WorldHelloAck. Callers use this to
+     * resend a full presence snapshot — messages sent while disconnected are dropped, so a
+     * lobby restart would otherwise leave presence permanently desynced.
+     */
+    private val onConnected: suspend () -> Unit = {},
     private val onMessage: suspend (SocialGatewayWireMessage) -> Unit,
 ) {
     private val client = HttpClient(CIO) {
@@ -50,7 +56,12 @@ class SocialClient(
 
     suspend fun send(msg: SocialGatewayWireMessage) {
         val st = state.get()
-        val session = (st as? State.Connected)?.session ?: return
+        val session = (st as? State.Connected)?.session
+        if (session == null) {
+            // Dropped while disconnected — recovered by the onConnected snapshot resend.
+            logWarn("SocialClient dropped message while not connected type=${msg::class.simpleName} (state=${st::class.simpleName})")
+            return
+        }
         val text = SocialGatewayWireJson.json.encodeToString(SocialGatewayWireMessage.serializer(), msg)
         try {
             session.send(Frame.Text(text))
@@ -84,64 +95,79 @@ class SocialClient(
     }
 
     private suspend fun connectLoop() {
-        var attempt = 0
-        while (scope.isActive) {
-            try {
-                state.set(State.Connecting(attempt))
-                val url = EnvVars.socialGatewayUrl
-                logInfo("SocialClient connecting url=$url attempt=$attempt")
+        try {
+            var attempt = 0
+            while (scope.isActive) {
+                try {
+                    state.set(State.Connecting(attempt))
+                    val url = EnvVars.socialGatewayUrl
+                    logInfo("SocialClient connecting url=$url attempt=$attempt")
 
-                client.webSocket(urlString = url) {
-                    val hello = WorldHello(
-                        world = GatewayWorldInfo.fromEnv(),
-                        token = EnvVars.socialGatewayToken,
-                    )
-                    send(Frame.Text(SocialGatewayWireJson.json.encodeToString(SocialGatewayWireMessage.serializer(), hello)))
+                    client.webSocket(urlString = url) {
+                        val hello = WorldHello(
+                            world = GatewayWorldInfo.fromEnv(),
+                            token = EnvVars.socialGatewayToken,
+                        )
+                        send(Frame.Text(SocialGatewayWireJson.json.encodeToString(SocialGatewayWireMessage.serializer(), hello)))
 
-                    // Wait for ack
-                    val first = incoming.receiveCatching().getOrNull()
-                    val ack = (first as? Frame.Text)?.readText()?.let { txt ->
+                        // Wait for ack
+                        val first = incoming.receiveCatching().getOrNull()
+                        val ack = (first as? Frame.Text)?.readText()?.let { txt ->
+                            try {
+                                SocialGatewayWireJson.json.decodeFromString(SocialGatewayWireMessage.serializer(), txt) as? WorldHelloAck
+                            } catch (_: Exception) {
+                                null
+                            }
+                        }
+                        if (ack != null && !ack.ok) {
+                            logWarn("SocialClient unauthorized: ${ack.message ?: "no message"}")
+                            close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Unauthorized"))
+                            return@webSocket
+                        }
+
+                        state.set(State.Connected(this))
+                        logInfo("SocialClient connected to lobby gateway")
+
+                        // The gateway lost all of this world's presence state while we were
+                        // disconnected — let the owner replay a full snapshot.
                         try {
-                            SocialGatewayWireJson.json.decodeFromString(SocialGatewayWireMessage.serializer(), txt) as? WorldHelloAck
-                        } catch (_: Exception) {
-                            null
-                        }
-                    }
-                    if (ack != null && !ack.ok) {
-                        logWarn("SocialClient unauthorized: ${ack.message ?: "no message"}")
-                        close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Unauthorized"))
-                        return@webSocket
-                    }
-
-                    state.set(State.Connected(this))
-                    logInfo("SocialClient connected to lobby gateway")
-
-                    for (frame in incoming) {
-                        val txt = (frame as? Frame.Text)?.readText() ?: continue
-                        val msg = try {
-                            SocialGatewayWireJson.json.decodeFromString(SocialGatewayWireMessage.serializer(), txt)
+                            onConnected()
                         } catch (e: Exception) {
-                            logWarn("SocialClient received invalid JSON: $txt", e)
-                            continue
+                            logWarn("SocialClient onConnected callback failed", e)
                         }
-                        onMessage(msg)
-                    }
-                }
-            } catch (_: CancellationException) {
-                return
-            } catch (e: Exception) {
-                if (e is ConnectException) {
-                    logInfo("SocialClient connection refused (attempt $attempt, retrying...)")
-                } else {
-                    logWarn("SocialClient connection error: ${e::class.simpleName}: ${e.message}")
-                }
-            } finally {
-                state.set(State.Stopped)
-            }
 
-            attempt++
-            val backoff = (250L * attempt).coerceAtMost(5_000L).milliseconds
-            delay(backoff)
+                        for (frame in incoming) {
+                            val txt = (frame as? Frame.Text)?.readText() ?: continue
+                            val msg = try {
+                                SocialGatewayWireJson.json.decodeFromString(SocialGatewayWireMessage.serializer(), txt)
+                            } catch (e: Exception) {
+                                logWarn("SocialClient received invalid JSON: $txt", e)
+                                continue
+                            }
+                            onMessage(msg)
+                        }
+                    }
+                } catch (_: CancellationException) {
+                    return
+                } catch (e: Exception) {
+                    if (e is ConnectException) {
+                        logInfo("SocialClient connection refused (attempt $attempt, retrying...)")
+                    } else {
+                        logWarn("SocialClient connection error: ${e::class.simpleName}: ${e.message}")
+                    }
+                } finally {
+                    // Connection ended — drop back to Connecting for the retry. Stopped is
+                    // reserved for terminal exit: setting it per-iteration would re-arm
+                    // start()'s compareAndSet and allow a second concurrent loop to spawn.
+                    state.set(State.Connecting(attempt))
+                }
+
+                attempt++
+                val backoff = (250L * attempt).coerceAtMost(5_000L).milliseconds
+                delay(backoff)
+            }
+        } finally {
+            state.set(State.Stopped)
         }
     }
 }

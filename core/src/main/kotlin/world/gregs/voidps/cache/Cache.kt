@@ -18,6 +18,12 @@ interface Cache {
 
     fun sector(index: Int, archive: Int): ByteArray?
 
+    /**
+     * Size in bytes of the raw container for [archive] in [index], or -1 if absent.
+     * Implementations should answer this without loading the blob where possible.
+     */
+    fun sectorSize(index: Int, archive: Int): Int = sector(index, archive)?.size ?: -1
+
     fun archives(index: Int): IntArray
 
     fun archiveCount(index: Int): Int
@@ -100,14 +106,6 @@ interface Cache {
         }
 
         @JvmStatic fun get() = singleton
-
-        /** Legacy init method. Triggers lazy initialization of the cache. */
-        @JvmStatic
-        fun init(cachePath: String) {
-            // The cachePath is already set via EnvVars.cachePath
-            // Just trigger lazy initialization
-            singleton
-        }
 
         @JvmStatic val huffman: Huffman get() = _huffman
     }

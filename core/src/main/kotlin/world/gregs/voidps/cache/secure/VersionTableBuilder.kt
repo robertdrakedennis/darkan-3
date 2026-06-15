@@ -1,5 +1,6 @@
 package world.gregs.voidps.cache.secure
 
+import org.darkan.core.Logger.logInfo
 import java.math.BigInteger
 
 /**
@@ -98,7 +99,7 @@ class VersionTableBuilder(
         val data = ByteArray(end)
         System.arraycopy(versionTable, 0, data, 0, data.size)
 
-        System.err.println("[VersionTable] Built: ${data.size}B, $indexCount indices, RSA ${rsa.size}B")
+        logInfo("Version table built: ${data.size}B, $indexCount indices, RSA ${rsa.size}B")
 
         return data
     }

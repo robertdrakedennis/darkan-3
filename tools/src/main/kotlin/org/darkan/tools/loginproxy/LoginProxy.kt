@@ -1,19 +1,35 @@
 package org.darkan.tools.loginproxy
 
-import org.darkan.core.model.IFEvents
+import kotlinx.io.Buffer
+import kotlinx.io.Source
+import kotlinx.io.readByteArray
 import org.darkan.core.EnvVars
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.prot.Codec
+import org.darkan.core.net.prot.revision.rev948.IfEventsWire
 import org.darkan.core.net.prot.revision.rev948.register948
+import org.darkan.tools.util.JavConfig
+import world.gregs.voidps.buffer.read.BufferReader
+import world.gregs.voidps.buffer.readByteAdd
+import world.gregs.voidps.buffer.readByteInverse
+import world.gregs.voidps.buffer.readByteSubtract
+import world.gregs.voidps.buffer.readRSString
+import world.gregs.voidps.buffer.readSmart
+import world.gregs.voidps.buffer.readUByte
+import world.gregs.voidps.buffer.readUIntInverseMiddle
+import world.gregs.voidps.buffer.readUIntLittle
+import world.gregs.voidps.buffer.readUIntMiddle
+import world.gregs.voidps.buffer.readUMedium
+import world.gregs.voidps.buffer.readUShort
+import world.gregs.voidps.buffer.readUShortAdd
+import world.gregs.voidps.buffer.readUShortLittle
 import world.gregs.voidps.cache.secure.RSA
 import com.sun.net.httpserver.HttpServer
 import java.io.*
 import java.math.BigInteger
-import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.net.URI
 import java.nio.ByteBuffer
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -48,7 +64,6 @@ import java.util.concurrent.atomic.AtomicInteger
 
 // ---- Configuration ----
 
-private const val JAV_CONFIG_URL = "https://www.runescape.com/k=5/l=0/jav_config.ws?binaryType=4"
 private const val DEFAULT_LISTEN_PORT = 43594
 private const val DEFAULT_HTTP_PORT = 55829
 private const val DEFAULT_CAPTURE_DIR = "capture"
@@ -216,7 +231,13 @@ private class ProxySession(
     private val jagexRsaMod: BigInteger,
     private val jagexRsaExp: BigInteger,
 ) {
+    // The decoded.log writer is buffered; flush on every phase transition (and close) so a
+    // crash loses at most the lines of the current phase while normal runs avoid a flush per line.
     @Volatile private var phase = Phase.CONNECTION_TYPE
+        set(value) {
+            field = value
+            flushLog()
+        }
     @Volatile private var connectionType = -1
     @Volatile private var xteaChallengeLen = 0
     @Volatile private var loginDataLen = 0
@@ -258,12 +279,6 @@ private class ProxySession(
     // here. -1 means no partial opcode pending.
     @Volatile private var s2cPartialOpcodeFirstByte = -1
 
-    // Track the raw byte position of the varShort size field for the WORLDLIST_FETCH_REPLY packet.
-    // Set by parseServerPostLogin when it encounters opcode 150, used by processAndForwardPostLogin.
-    // Worldlist reassembly: buffer segments until frame=1, then rewrite and forward
-    private val worldlistReassembly = ByteArrayOutputStream()
-    private val worldlistRawSegments = mutableListOf<ByteArray>() // raw segment bytes (opcode+size+payload)
-
     // S2C pending packet state: when we've ISAAC-decoded an opcode (and possibly
     // read the size) but the payload hasn't fully arrived, we save the decoded
     // state here to avoid consuming another ISAAC value on the next TCP read.
@@ -282,7 +297,8 @@ private class ProxySession(
         sessionDir.mkdirs()
         c2sRaw = FileOutputStream(File(sessionDir, "raw-c2s.bin"))
         s2cRaw = FileOutputStream(File(sessionDir, "raw-s2c.bin"))
-        logWriter = PrintWriter(File(sessionDir, "decoded.log").bufferedWriter(), true)
+        // No auto-flush: per-line flushing dominated capture overhead. See flushLog()/phase setter.
+        logWriter = PrintWriter(File(sessionDir, "decoded.log").bufferedWriter())
         logWriter.println("# Login Proxy Capture (MITM) -- Session $sessionId")
         logWriter.println("# Started: ${LocalDateTime.now()}")
         logWriter.println("# Target: $targetHost:$targetPort")
@@ -788,22 +804,17 @@ private class ProxySession(
     private fun performAccountCreationMitm(packet: ByteArray, varShortSize: Int): ByteArray? {
         try {
             val payload = packet.copyOfRange(2, 2 + varShortSize) // skip varShort length prefix
-            var pos = 0
-
-            fun g2(): Int {
-                val v = ((payload[pos].toInt() and 0xFF) shl 8) or (payload[pos + 1].toInt() and 0xFF)
-                pos += 2
-                return v
-            }
+            val reader = BufferReader(payload)
 
             // Account creation format: [2B pad=0] [2B major] [2B minor=1]
-            val pad = g2()
-            val major = g2()
-            val minor = g2()
+            val pad = reader.readUnsignedShort()
+            val major = reader.readUnsignedShort()
+            val minor = reader.readUnsignedShort()
             log("MITM", "Account creation version: $major.$minor (pad=$pad)")
 
             // RSA block: [2B rsaSize] [rsaSize bytes]
-            val rsaSize = g2()
+            val rsaSize = reader.readUnsignedShort()
+            var pos = reader.position()
             log("MITM", "RSA block size: $rsaSize bytes (at payload offset ${pos - 2})")
 
             if (rsaSize <= 0 || rsaSize > 512 || pos + rsaSize > payload.size) {
@@ -901,34 +912,24 @@ private class ProxySession(
         try {
             // Payload starts after [1B opcode][2B varShort]
             val payload = packet.copyOfRange(3, 3 + originalVarShortSize)
-            var pos = 0
-
-            fun g4(): Int {
-                val v = ((payload[pos].toInt() and 0xFF) shl 24) or
-                        ((payload[pos + 1].toInt() and 0xFF) shl 16) or
-                        ((payload[pos + 2].toInt() and 0xFF) shl 8) or
-                        (payload[pos + 3].toInt() and 0xFF)
-                pos += 4
-                return v
-            }
+            val reader = BufferReader(payload)
 
             // Read version info
-            val majorVersion = g4()
-            val minorVersion = g4()
+            val majorVersion = reader.readInt()
+            val minorVersion = reader.readInt()
             log("MITM", "Version: $majorVersion.$minorVersion")
 
             // Game login (opcode 16) has an extra disconnect_flag byte before RSA
             if (loginOpcode == 16) {
-                val disconnectFlag = payload[pos].toInt() and 0xFF
-                pos++
+                val disconnectFlag = reader.readUnsignedByte()
                 log("MITM", "Disconnect flag: $disconnectFlag")
             }
 
             // RSA block: [2B rsaSize] [rsaSize bytes]
             // The client writes: pT_ushort(length+1), byte(0), bytes[...]
             // So the server reads: rsaSize = readUShort(), which includes the leading 0 byte
-            val rsaSize = ((payload[pos].toInt() and 0xFF) shl 8) or (payload[pos + 1].toInt() and 0xFF)
-            pos += 2
+            val rsaSize = reader.readUnsignedShort()
+            var pos = reader.position()
             log("MITM", "RSA block size: $rsaSize bytes (at payload offset ${pos - 2})")
 
             if (rsaSize <= 0 || rsaSize > 512 || pos + rsaSize > payload.size) {
@@ -1478,191 +1479,6 @@ private class ProxySession(
 
     // ---- Post-login server packet decoding ----
 
-    /**
-     * Decode ISAAC-encrypted server->client packets.
-     *
-     * Server opcodes use 1 or 2 bytes. BOTH bytes are ISAAC-decoded:
-     *   decoded1 = (raw_byte1 - isaac_next()) & 0xFF
-     *   if decoded1 < 128:
-     *       opcode = decoded1                          (1 ISAAC value consumed)
-     *   else:
-     *       decoded2 = (raw_byte2 - isaac_next()) & 0xFF
-     *       opcode = (decoded1 - 128) * 256 + decoded2 (2 ISAAC values consumed)
-     *
-     * Then look up size from codec.
-     */
-    /**
-     * Process POST_LOGIN S2C data: rewrite worldlist hostnames to "localhost", then forward.
-     *
-     * ISAAC only encrypts opcode bytes. Size prefixes and payloads are cleartext.
-     * We replace ".runescape.com" hostnames with "localhost" and adjust the containing
-     * packet's varShort size field.
-     */
-    private fun processAndForwardPostLogin(buf: ByteArray, len: Int): ByteArray {
-        parseServerPostLogin(buf, len)
-
-        val data = buf.copyOfRange(0, len)
-        val marker = ".runescape.com".toByteArray(Charsets.ISO_8859_1)
-
-        // Quick check: does this chunk contain any worldlist hostnames?
-        var hasMarker = false
-        for (i in 0..data.size - marker.size) {
-            var m = true
-            for (j in marker.indices) { if (data[i + j] != marker[j]) { m = false; break } }
-            if (m) { hasMarker = true; break }
-        }
-        if (!hasMarker) return data
-
-        // Replace hostnames and track total byte delta
-        val localhost = "localhost".toByteArray(Charsets.ISO_8859_1)
-        val result = ByteArrayOutputStream(data.size)
-        var readPos = 0
-        var totalDelta = 0
-        // Track which output positions correspond to which input positions for size field fixup
-        // sizeFieldInputPos = position of the varShort size field in the ORIGINAL data
-        var sizeFieldInputPos = -1
-
-        // First: find the varShort size field position.
-        // The worldlist packet (opcode 150, >127 so 2-byte opcode) is:
-        //   [2B encrypted opcode][2B BE size][payload...]
-        // The first hostname is somewhere inside the payload. Walk backwards from the first
-        // hostname occurrence to find the size field: it's the 2-byte BE value immediately
-        // before the payload starts. The payload starts right after the size field.
-        // We identify the size field by reading the 2-byte value and checking if
-        // sizeFieldPos + 2 + size == end_of_data_or_next_packet.
-        // Simpler heuristic: search backwards from the first hostname for the size field.
-        for (i in 0..data.size - marker.size) {
-            var m = true
-            for (j in marker.indices) { if (data[i + j] != marker[j]) { m = false; break } }
-            if (m) {
-                // Found first hostname at position i. Walk backwards to find the packet start.
-                // The worldlist payload starts with a frame byte (0x00 or 0x01), preceded by
-                // the 2-byte size field, preceded by the 2-byte encrypted opcode.
-                // The frame byte is the first byte of the payload.
-                // Let's scan backwards for a position where [pos] and [pos+1] form a valid
-                // varShort size that spans to the end of known data.
-                var searchPos = i - 1
-                while (searchPos >= 4) { // need at least 4 bytes before (2 opcode + 2 size)
-                    val candidateSize = ((data[searchPos - 1].toInt() and 0xFF) shl 8) or
-                            (data[searchPos].toInt() and 0xFF)
-                    val payloadStart = searchPos + 1
-                    // Check if this size is reasonable (positive and within buffer range)
-                    if (candidateSize in 100..60000 && payloadStart + candidateSize <= data.size + 1000) {
-                        sizeFieldInputPos = searchPos - 1
-                        break
-                    }
-                    searchPos--
-                }
-                break
-            }
-        }
-
-        // Build the output with hostnames replaced
-        while (readPos < data.size) {
-            var isMarker = false
-            if (readPos + marker.size <= data.size) {
-                isMarker = true
-                for (j in marker.indices) { if (data[readPos + j] != marker[j]) { isMarker = false; break } }
-            }
-
-            if (isMarker) {
-                var hostStart = readPos
-                while (hostStart > 0 && data[hostStart - 1] != 0.toByte()) hostStart--
-                var nullPos = readPos + marker.size
-                while (nullPos < data.size && data[nullPos] != 0.toByte()) nullPos++
-
-                val oldHostLen = nullPos - hostStart
-                totalDelta += oldHostLen - localhost.size
-
-                // Rewind: we already wrote bytes up to readPos. We need to erase from hostStart.
-                // This is tricky with a stream. Let me just rebuild more carefully.
-                // Actually since we're writing byte-by-byte, hostStart < readPos means we already
-                // wrote the hostname prefix bytes. We need a different approach.
-                break // bail out and use the two-pass approach below
-            } else {
-                readPos++
-            }
-        }
-
-        // TWO-PASS approach: first compute delta, then rebuild
-        result.reset()
-        readPos = 0
-        totalDelta = 0
-
-        // Pass 1: compute total delta
-        var tmpPos = 0
-        while (tmpPos < data.size) {
-            var isMarker = false
-            if (tmpPos + marker.size <= data.size) {
-                isMarker = true
-                for (j in marker.indices) { if (data[tmpPos + j] != marker[j]) { isMarker = false; break } }
-            }
-            if (isMarker) {
-                var hostStart = tmpPos
-                while (hostStart > 0 && data[hostStart - 1] != 0.toByte()) hostStart--
-                var nullPos = tmpPos + marker.size
-                while (nullPos < data.size && data[nullPos] != 0.toByte()) nullPos++
-                totalDelta += (nullPos - hostStart) - localhost.size
-                tmpPos = nullPos + 1
-            } else {
-                tmpPos++
-            }
-        }
-
-        if (totalDelta == 0) return data // hostnames are already "localhost" length? Just return
-
-        // Pass 2: rebuild with replacements
-        readPos = 0
-        var bytesBeforeFirstHost = 0
-        var foundFirst = false
-        while (readPos < data.size) {
-            var isMarker = false
-            if (readPos + marker.size <= data.size) {
-                isMarker = true
-                for (j in marker.indices) { if (data[readPos + j] != marker[j]) { isMarker = false; break } }
-            }
-
-            if (isMarker) {
-                // Erase back to hostname start
-                var hostStart = readPos
-                while (hostStart > 0 && data[hostStart - 1] != 0.toByte()) hostStart--
-                var nullPos = readPos + marker.size
-                while (nullPos < data.size && data[nullPos] != 0.toByte()) nullPos++
-
-                if (!foundFirst) {
-                    bytesBeforeFirstHost = hostStart
-                    foundFirst = true
-                    // Rewind the result to hostStart
-                    val current = result.toByteArray()
-                    result.reset()
-                    result.write(current, 0, hostStart)
-                }
-
-                result.write(localhost)
-                result.write(0)
-                readPos = nullPos + 1
-            } else {
-                result.write(data[readPos].toInt())
-                readPos++
-            }
-        }
-
-        val output = result.toByteArray()
-
-        // Fix the varShort size field
-        if (sizeFieldInputPos >= 0 && sizeFieldInputPos + 1 < output.size) {
-            val oldSize = ((output[sizeFieldInputPos].toInt() and 0xFF) shl 8) or
-                    (output[sizeFieldInputPos + 1].toInt() and 0xFF)
-            val newSize = oldSize - totalDelta
-            output[sizeFieldInputPos] = ((newSize shr 8) and 0xFF).toByte()
-            output[sizeFieldInputPos + 1] = (newSize and 0xFF).toByte()
-            log("CTRL", "Worldlist rewrite: ${data.size}→${output.size}B, varShort size $oldSize→$newSize (delta=$totalDelta)")
-        } else {
-            log("CTRL", "WARNING: Could not find worldlist size field (delta=$totalDelta)")
-        }
-
-        return output
-    }
 
     /**
      * Decode POST_LOGIN S2C packets, rewrite WORLDLIST_FETCH_REPLY hostnames, return bytes to forward.
@@ -2054,79 +1870,6 @@ private class ProxySession(
         return output.toByteArray()
     }
 
-    /**
-     * Structurally decode a WORLDLIST_FETCH_REPLY payload, replace all hostnames
-     * with "localhost", and re-encode. Returns null if decoding fails.
-     */
-    private fun rewriteWorldlistStructural(payload: ByteArray): ByteArray? {
-        try {
-            val out = ByteArrayOutputStream(payload.size)
-            var pos = 0
-
-            fun g1(): Int { val v = payload[pos].toInt() and 0xFF; pos++; return v }
-            fun g2(): Int { val v = ((payload[pos].toInt() and 0xFF) shl 8) or (payload[pos+1].toInt() and 0xFF); pos += 2; return v }
-            fun g4(): Int { val v = ((payload[pos].toInt() and 0xFF) shl 24) or ((payload[pos+1].toInt() and 0xFF) shl 16) or ((payload[pos+2].toInt() and 0xFF) shl 8) or (payload[pos+3].toInt() and 0xFF); pos += 4; return v }
-            fun smart(): Int = if ((payload[pos].toInt() and 0xFF) < 0x80) g1() else g2() - 0x8000
-            fun gjstr2(): String { g1(); val sb = StringBuilder(); while (pos < payload.size && payload[pos].toInt() != 0) { sb.append(payload[pos].toInt().toChar()); pos++ }; if (pos < payload.size) pos++; return sb.toString() }
-
-            fun w1(v: Int) { out.write(v) }
-            fun w2(v: Int) { out.write((v shr 8) and 0xFF); out.write(v and 0xFF) }
-            fun w4(v: Int) { out.write((v shr 24) and 0xFF); out.write((v shr 16) and 0xFF); out.write((v shr 8) and 0xFF); out.write(v and 0xFF) }
-            fun wSmart(v: Int) { if (v < 128) w1(v) else w2(v + 0x8000) }
-            fun wJagStr(s: String) { out.write(0); out.write(s.toByteArray(Charsets.ISO_8859_1)); out.write(0) }
-
-            // NOTE: the reassembled payload has NO frame byte — it was stripped during reassembly
-            val refresh = g1(); w1(refresh)
-
-            if (refresh == 2) {
-                val sep = g1(); w1(sep)
-
-                if (sep == 1) {
-                    val countryCount = smart(); wSmart(countryCount)
-                    log("CTRL", "Worldlist decode: $countryCount countries")
-                    repeat(countryCount) {
-                        val cid = smart(); wSmart(cid)
-                        val cname = gjstr2(); wJagStr(cname)
-                    }
-
-                    val minWorld = smart(); wSmart(minWorld)
-                    val maxWorld = smart(); wSmart(maxWorld)
-                    val worldCount = smart(); wSmart(worldCount)
-                    log("CTRL", "Worldlist decode: $worldCount worlds, range $minWorld-$maxWorld")
-
-                    var rewriteCount = 0
-                    repeat(worldCount) {
-                        val offset = smart(); wSmart(offset)
-                        val idx = g1(); w1(idx)
-                        val flags = g4(); w4(flags)
-                        val actPres = smart(); wSmart(actPres)
-                        if (actPres != 0) {
-                            val act = gjstr2(); wJagStr(act)
-                        }
-                        val hostname = gjstr2(); wJagStr("localhost"); rewriteCount++
-                        val addr = gjstr2(); wJagStr("localhost"); rewriteCount++
-                    }
-                    log("CTRL", "Worldlist decode: rewrote $rewriteCount hostnames")
-
-                    val rev = g4(); w4(rev)
-                }
-            }
-
-            // Player count section — copy remaining bytes verbatim
-            val remaining = payload.size - pos
-            if (remaining > 0) {
-                out.write(payload, pos, remaining)
-            }
-            log("CTRL", "Worldlist decode: parsed $pos/${payload.size} bytes, $remaining remaining (player counts)")
-
-            return out.toByteArray()
-        } catch (e: Exception) {
-            log("CTRL", "Worldlist structural decode FAILED at pos: ${e.message}")
-            e.printStackTrace()
-            return null
-        }
-    }
-
     private fun parseServerPostLogin(buf: ByteArray, len: Int) {
         val cipher = s2cIsaac
         if (cipher == null) {
@@ -2284,38 +2027,39 @@ private class ProxySession(
     /** Pretty-print a known server packet. Returns true if handled, false for generic hex dump. */
     private fun prettyPrintServerPkt(opcode: Int, d: ByteArray, size: Int): Boolean {
         try {
+            val s = source(d)
             when (opcode) {
                 // ---- Variable setters (RE-verified from rs2client rev 947) ----
                 14 -> { // SET_VARP_SMALL: g2(lo-128) varpId, g1(-128) value
-                    val id = r2sub128(d, 0); val v = (r1(d, 2) - 128).toByte().toInt()
+                    val id = s.readUShortAdd() and 0xFFFF; val v = s.readByteAdd()
                     log("S->C", "         varp[$id] = $v")
                 }
                 124 -> { // SET_VARP_INT: g2LE varpId, g4_alt1 value
-                    val id = r2le(d, 0); val v = r4alt1(d, 2)
+                    val id = s.readUShortLittle(); val v = s.readUIntMiddle()
                     log("S->C", "         varp[$id] = $v (0x${"%08X".format(v)})")
                 }
                 138 -> { // SET_VARP_LONG: g8BE value FIRST, g2(lo-128) varpId
-                    val v = r8(d, 0); val id = r2sub128(d, 8)
+                    val v = s.readLong(); val id = s.readUShortAdd() and 0xFFFF
                     log("S->C", "         varp[$id] = $v (0x${"%016X".format(v)})")
                 }
                 12 -> { // SET_VARC_INT: g2BE varcId, g4_alt2(LE) value
-                    val k = r2(d, 0); val v = r4alt2(d, 2)
+                    val k = s.readUShort(); val v = s.readUIntLittle()
                     log("S->C", "         varc[$k] = $v (0x${"%08X".format(v)})")
                 }
                 19 -> { // SET_VARC_SMALL: g1(0x80-raw) value FIRST, g2BE varcId
-                    val v = (0x80 - r1(d, 0)).toByte().toInt(); val k = r2(d, 1)
+                    val v = s.readByteSubtract(); val k = s.readUShort()
                     log("S->C", "         varc[$k] = $v")
                 }
                 114 -> { // UPDATE_STAT: g4_alt1 xp, g1(-128) boostedLevel, g1(negate) statId
-                    val xp = r4alt1(d, 0); val boosted = r1(d, 4) - 128; val statId = (-(d[5].toInt())) and 0xFF
+                    val xp = s.readUIntMiddle(); val boosted = s.readUByte() - 128; val statId = s.readByteInverse() and 0xFF
                     log("S->C", "         stat[$statId] xp=$xp boosted=$boosted")
                 }
                 115 -> { // RESET_VARC_INT: g2BE varcId, g4_alt3 value
-                    val k = r2(d, 0); val v = r4alt3(d, 2)
+                    val k = s.readUShort(); val v = s.readUIntInverseMiddle()
                     log("S->C", "         reset_varc[$k] = $v (0x${"%08X".format(v)})")
                 }
                 60 -> { // RESET_VARC_SMALL: g1(negate) value, g2BE varcId
-                    val v = (-(d[0].toInt())).toByte().toInt(); val k = r2(d, 1)
+                    val v = s.readByteInverse().toByte().toInt(); val k = s.readUShort()
                     log("S->C", "         reset_varc[$k] = $v")
                 }
                 112 -> { // RESET_ALL_VARPS: no payload
@@ -2326,9 +2070,11 @@ private class ProxySession(
                 // [4B unk] [4B g4_alt2 parentHash] [8B unk] [1B flag(0x7F)] [2B g2LE subInterfaceId] [1B unk] [3B suffix]
                 38 -> {
                     if (size >= 20) {
-                        val parentHash = r4alt2(d, 4)
+                        s.skip(4)
+                        val parentHash = s.readUIntLittle()
                         val parentIf = (parentHash ushr 16) and 0xFFFF; val parentComp = parentHash and 0xFFFF
-                        val subIfId = r2le(d, 17)
+                        s.skip(9)
+                        val subIfId = s.readUShortLittle()
                         log("S->C", "         parent=$parentIf:$parentComp sub=$subIfId")
                     }
                 }
@@ -2336,7 +2082,8 @@ private class ProxySession(
                 // Empirically: interface ID 906 at offset 12 as LE u16
                 126 -> {
                     if (size >= 14) {
-                        val ifId = d[12].toInt() and 0xFF or ((d[13].toInt() and 0xFF) shl 8)
+                        s.skip(12)
+                        val ifId = s.readUShortLittle()
                         log("S->C", "         topInterface=$ifId")
                     } else {
                         logHex("S->C", d, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN)
@@ -2345,7 +2092,7 @@ private class ProxySession(
                 // IF_SETEVENTS (59, 12B): decode and print copy-pasteable builder
                 59 -> {
                     if (size >= 12) {
-                        log("S->C", "         ${IFEvents.fromWire(d)}")
+                        log("S->C", "         ${IfEventsWire.decode(d)}")
                     }
                 }
                 // Remaining interface packets — show raw hex
@@ -2364,13 +2111,13 @@ private class ProxySession(
                 }
                 0 -> { // SET_UID: 24B identity + 4B CRC32
                     if (size >= 28) {
-                        val uid = d.copyOfRange(0, 24).joinToString("") { "%02X".format(it) }
-                        val crc = r4(d, 24)
+                        val uid = s.readByteArray(24).joinToString("") { "%02X".format(it) }
+                        val crc = s.readInt()
                         log("S->C", "         uid=$uid crc=0x${"%08X".format(crc)}")
                     }
                 }
                 27 -> { // SET_RUN_ENERGY: g1 unsigned byte
-                    val energy = r1(d, 0)
+                    val energy = s.readUByte()
                     log("S->C", "         energy=$energy")
                 }
                 35 -> { // SET_READY_FLAG: no payload
@@ -2416,27 +2163,21 @@ private class ProxySession(
      */
     private fun prettyPrintChangeLobby(d: ByteArray, size: Int) {
         if (size < 2) { logHex("S->C", d, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN); return }
-        var p = 0
-        fun gStr(): String {
-            val start = p; while (p < size && d[p] != 0.toByte()) p++
-            val s = String(d, start, p - start, Charsets.ISO_8859_1); if (p < size) p++; return s
-        }
-        fun g4(): Int { val v = r4(d, p); p += 4; return v }
-        fun g8(): Long { val v = r8(d, p); p += 8; return v }
+        val s = source(d)
 
         try {
-            val fmt = gStr()
+            val fmt = s.readRSString()
             if (fmt.isEmpty() || !fmt.all { it == 'i' || it == 's' || it == 'l' }) {
                 logHex("S->C", d, 0, size, MAX_HEX_DUMP_BYTES_POSTLOGIN); return
             }
             // Read fields in REVERSE order of format string
             val fields = arrayOfNulls<Any>(fmt.length)
             for (i in fmt.lastIndex downTo 0) {
-                if (p >= size) break
+                if (s.exhausted()) break
                 fields[i] = when (fmt[i]) {
-                    'i' -> if (p + 4 <= size) g4() else break
-                    's' -> gStr()
-                    'l' -> if (p + 8 <= size) g8() else break
+                    'i' -> if (s.size >= 4) s.readInt() else break
+                    's' -> s.readRSString()
+                    'l' -> if (s.size >= 8) s.readLong() else break
                     else -> break
                 }
             }
@@ -2490,8 +2231,10 @@ private class ProxySession(
                 } else {
                     // Standalone delta: [1B subType] [4B CRC] [smart+g2 player count pairs]
                     if (size >= 6) {
-                        val subType = r1(d, 1)
-                        val crc = r4(d, 2)
+                        val s = source(d)
+                        s.skip(1) // frame byte
+                        val subType = s.readUByte()
+                        val crc = s.readInt()
                         log("S->C", "         [worldlist] player count delta subType=$subType crc=0x${"%08X".format(crc)}")
                         parseWorldListPlayerCounts(d, 6, size)
                     }
@@ -2516,43 +2259,39 @@ private class ProxySession(
     private fun parseWorldListBuffer(d: ByteArray) {
         val size = d.size
         if (size < 4) return
-        var p = 0
-        fun g1() = d[p++].toInt() and 0xFF
-        fun g2(): Int { val v = ((d[p].toInt() and 0xFF) shl 8) or (d[p+1].toInt() and 0xFF); p += 2; return v }
-        fun g4(): Int { val v = ((d[p].toInt() and 0xFF) shl 24) or ((d[p+1].toInt() and 0xFF) shl 16) or ((d[p+2].toInt() and 0xFF) shl 8) or (d[p+3].toInt() and 0xFF); p += 4; return v }
-        fun gSmart(): Int { val b = d[p].toInt() and 0xFF; return if (b < 128) { p++; b } else { g2() - 0x8000 } }
-        fun gStr(): String { val s = p; while (p < size && d[p] != 0.toByte()) p++; val r = String(d, s, p - s, Charsets.ISO_8859_1); if (p < size) p++; return r }
-        fun gjStr2(): String { val ver = g1(); if (ver != 0) return ""; return gStr() }
+        val s = source(d)
+        fun consumed(): Int = size - s.size.toInt()
+        fun gjStr2(): String { val ver = s.readUByte(); if (ver != 0) return ""; return s.readRSString() }
 
         try {
-            val updateType = g1()
+            val updateType = s.readUByte()
             val hasWorldList = (updateType and 2) != 0
             val hasPlayerCounts = (updateType and 1) != 0
             log("S->C", "         [worldlist] updateType=$updateType (worlds=$hasWorldList, counts=$hasPlayerCounts)")
 
             if (hasWorldList) {
-                val hasCountries = g1()
+                val hasCountries = s.readUByte()
                 if (hasCountries != 0) {
-                    val countryCount = gSmart()
+                    val countryCount = s.readSmart()
                     log("S->C", "         [worldlist] $countryCount countries:")
                     for (i in 0 until countryCount) {
-                        val flag = gSmart()
+                        val flag = s.readSmart()
                         val name = gjStr2()
                         log("S->C", "           country[$i] flag=$flag name=\"$name\"")
                     }
                 }
 
-                val worldMin = gSmart()
-                val worldMax = gSmart()
-                val worldCount = gSmart()
+                val worldMin = s.readSmart()
+                val worldMax = s.readSmart()
+                val worldCount = s.readSmart()
                 log("S->C", "         [worldlist] $worldCount worlds (range $worldMin-$worldMax):")
                 for (i in 0 until worldCount) {
-                    if (p + 6 > size) break
-                    val worldIdDelta = gSmart()
+                    if (s.size < 6) break
+                    val worldIdDelta = s.readSmart()
                     val absWorldId = worldMin + worldIdDelta
-                    val countryIdx = g1()
-                    val flags = g4()
-                    val countryOverride = gSmart()
+                    val countryIdx = s.readUByte()
+                    val flags = s.readInt()
+                    val countryOverride = s.readSmart()
                     val countryName = if (countryOverride != 0) gjStr2() else ""
                     val activity = gjStr2()
                     val hostname = gjStr2()
@@ -2563,26 +2302,24 @@ private class ProxySession(
             }
 
             if (hasPlayerCounts) {
-                if (p + 4 <= size) {
-                    val crc = g4()
+                if (s.size >= 4) {
+                    val crc = s.readInt()
                     log("S->C", "         [worldlist] crc=0x${"%08X".format(crc)}")
                 }
-                parseWorldListPlayerCounts(d, p, size)
+                parseWorldListPlayerCounts(d, consumed(), size)
             }
         } catch (e: Exception) {
-            log("S->C", "         [worldlist parse error at byte $p/${size}: ${e.message}]")
+            log("S->C", "         [worldlist parse error at byte ${consumed()}/${size}: ${e.message}]")
         }
     }
 
     private fun parseWorldListPlayerCounts(d: ByteArray, startPos: Int, size: Int) {
-        var p = startPos
-        fun g2(): Int { val v = ((d[p].toInt() and 0xFF) shl 8) or (d[p+1].toInt() and 0xFF); p += 2; return v }
-        fun gSmart(): Int { val b = d[p].toInt() and 0xFF; return if (b < 128) { p++; b } else { g2() - 0x8000 } }
+        val s = source(d, startPos, size - startPos)
         try {
             var count = 0
-            while (p + 3 <= size) {
-                val wId = gSmart()
-                val players = g2()
+            while (s.size >= 3) {
+                val wId = s.readSmart()
+                val players = s.readUShort()
                 if (count < 10) log("S->C", "           world[$wId] players=$players")
                 count++
             }
@@ -2593,18 +2330,19 @@ private class ProxySession(
     /** Pretty-print a known client packet. Returns true if handled. */
     private fun prettyPrintClientPkt(opcode: Int, d: ByteArray, size: Int): Boolean {
         try {
+            val s = source(d)
             when (opcode) {
                 110 -> { // WORLDLIST_FETCH: 4B crc
                     if (size >= 4) {
-                        val crc = r4(d, 0)
+                        val crc = s.readInt()
                         log("C->S", "         crc=0x${"%08X".format(crc)}${if (crc == -1) " (full request)" else " (delta)"}")
                     }
                 }
                 97 -> { // IF_BUTTON1: 8B — [2B slot][2B itemId][4B hash_alt1]
                     if (size >= 8) {
-                        val slot = r2(d, 0)
-                        val itemId = r2(d, 2)
-                        val hash = r4alt1(d, 4)
+                        val slot = s.readUShort()
+                        val itemId = s.readUShort()
+                        val hash = s.readUIntMiddle()
                         val ifId = (hash ushr 16) and 0xFFFF
                         val comp = hash and 0xFFFF
                         log("C->S", "         if=$ifId comp=$comp slot=${if (slot == 0xFFFF) -1 else slot} itemId=${if (itemId == 0xFFFF) -1 else itemId}")
@@ -2612,8 +2350,8 @@ private class ProxySession(
                 }
                 106 -> { // DISPLAY_INFO: 6B
                     if (size >= 6) {
-                        val type = r1(d, 0); val platform = r1(d, 1)
-                        val width = r2(d, 2); val height = r2(d, 4)
+                        val type = s.readUByte(); val platform = s.readUByte()
+                        val width = s.readUShort(); val height = s.readUShort()
                         log("C->S", "         type=$type platform=$platform size=${width}x${height}")
                     }
                 }
@@ -2622,7 +2360,7 @@ private class ProxySession(
                 }
                 50 -> { // SCENE_GRAPH_REPORT: 4B
                     if (size >= 4) {
-                        val value = r4(d, 0)
+                        val value = s.readInt()
                         log("C->S", "         value=0x${"%08X".format(value)}")
                     }
                 }
@@ -2635,24 +2373,14 @@ private class ProxySession(
         }
     }
 
-    // ---- Packet read helpers (RE-verified byte transforms from rs2client) ----
-    private fun r1(d: ByteArray, off: Int) = d[off].toInt() and 0xFF
-    // Standard big-endian u16
-    private fun r2(d: ByteArray, off: Int) = ((d[off].toInt() and 0xFF) shl 8) or (d[off+1].toInt() and 0xFF)
-    // Little-endian u16
-    private fun r2le(d: ByteArray, off: Int) = ((d[off+1].toInt() and 0xFF) shl 8) or (d[off].toInt() and 0xFF)
-    // Big-endian u16 with low byte subtract-128 transform
-    private fun r2sub128(d: ByteArray, off: Int) = ((d[off].toInt() and 0xFF) shl 8) or ((d[off+1].toInt() - 128) and 0xFF)
-    // Standard big-endian i32
-    private fun r4(d: ByteArray, off: Int) = ((d[off].toInt() and 0xFF) shl 24) or ((d[off+1].toInt() and 0xFF) shl 16) or ((d[off+2].toInt() and 0xFF) shl 8) or (d[off+3].toInt() and 0xFF)
-    // Alt1: b[0]<<8 + b[1] + b[2]<<24 + b[3]<<16 (swap 16-bit halves)
-    private fun r4alt1(d: ByteArray, off: Int) = ((d[off].toInt() and 0xFF) shl 8) or (d[off+1].toInt() and 0xFF) or ((d[off+2].toInt() and 0xFF) shl 24) or ((d[off+3].toInt() and 0xFF) shl 16)
-    // Alt2: little-endian i32
-    private fun r4alt2(d: ByteArray, off: Int) = (d[off].toInt() and 0xFF) or ((d[off+1].toInt() and 0xFF) shl 8) or ((d[off+2].toInt() and 0xFF) shl 16) or ((d[off+3].toInt() and 0xFF) shl 24)
-    // Alt3: b[1]<<24 + b[0]<<16 + b[3]<<8 + b[2]
-    private fun r4alt3(d: ByteArray, off: Int) = ((d[off+1].toInt() and 0xFF) shl 24) or ((d[off].toInt() and 0xFF) shl 16) or ((d[off+3].toInt() and 0xFF) shl 8) or (d[off+2].toInt() and 0xFF)
-    // Standard big-endian i64
-    private fun r8(d: ByteArray, off: Int): Long { val hi = r4(d, off).toLong() and 0xFFFFFFFFL; val lo = r4(d, off+4).toLong() and 0xFFFFFFFFL; return (hi shl 32) or lo }
+    // ---- Packet read helpers ----
+
+    /**
+     * Wrap a payload slice in a kotlinx.io [Buffer] so field decoding goes through the
+     * core buffer library's readers (JagExtensions) instead of hand-rolled byte math.
+     */
+    private fun source(d: ByteArray, offset: Int = 0, length: Int = d.size - offset): Buffer =
+        Buffer().apply { write(d, offset, offset + length) }
 
     // ---- Lobby login data field-level parsing (best-effort, no crypto) ----
 
@@ -2666,20 +2394,15 @@ private class ProxySession(
             return
         }
         try {
-            var pos = 0
-            fun g1(): Int { val v = data[pos].toInt() and 0xFF; pos++; return v }
-            fun g1s(): Int { val v = data[pos].toInt(); pos++; return v }
-            fun g2(): Int { val v = ((data[pos].toInt() and 0xFF) shl 8) or (data[pos+1].toInt() and 0xFF); pos += 2; return v }
-            fun g3s(): Int { val v = ((data[pos].toInt() and 0xFF) shl 16) or ((data[pos+1].toInt() and 0xFF) shl 8) or (data[pos+2].toInt() and 0xFF); pos += 3; return if (v > 0x7FFFFF) v - 0x1000000 else v }
-            fun g4(): Int { val v = ((data[pos].toInt() and 0xFF) shl 24) or ((data[pos+1].toInt() and 0xFF) shl 16) or ((data[pos+2].toInt() and 0xFF) shl 8) or (data[pos+3].toInt() and 0xFF); pos += 4; return v }
-            fun g8(): Long { val hi = g4().toLong() and 0xFFFFFFFFL; val lo = g4().toLong() and 0xFFFFFFFFL; return (hi shl 32) or lo }
-            fun gStr(): String {
-                val start = pos
-                while (pos < len && data[pos] != 0.toByte()) pos++
-                val s = String(data, start, pos - start, Charsets.ISO_8859_1)
-                if (pos < len) pos++
-                return s
-            }
+            val s = source(data, 0, len)
+            fun consumed(): Int = len - s.size.toInt()
+            fun g1(): Int = s.readUByte()
+            fun g1s(): Int = s.readByte().toInt()
+            fun g2(): Int = s.readUShort()
+            fun g3s(): Int { val v = s.readUMedium(); return if (v > 0x7FFFFF) v - 0x1000000 else v }
+            fun g4(): Int = s.readInt()
+            fun g8(): Long = s.readLong()
+            fun gStr(): String = s.readRSString()
             fun gjStr(): String { val ver = g1(); if (ver != 0) return ""; return gStr() }
 
             val hasTotpUpdate = g1()
@@ -2748,7 +2471,8 @@ private class ProxySession(
             log("S->C", "  [login-data] sessionToken1=0x${"%016X".format(sessionToken1)}")
             log("S->C", "  [login-data] sessionToken2=0x${"%016X".format(sessionToken2)}")
 
-            if (pos < len) {
+            if (!s.exhausted()) {
+                val pos = consumed()
                 log("S->C", "  [login-data] ${len - pos} unparsed bytes at offset $pos")
                 logHex("S->C", data, pos, len - pos)
             }
@@ -2758,6 +2482,12 @@ private class ProxySession(
     }
 
     // ---- Logging ----
+
+    private fun flushLog() {
+        synchronized(logWriter) {
+            logWriter.flush()
+        }
+    }
 
     private fun log(direction: String, message: String) {
         val elapsed = (System.nanoTime() - startNanos) / 1_000_000_000.0
@@ -2843,9 +2573,11 @@ private class ProxySession(
     }
 
     private fun closeLog() {
-        logWriter.println()
-        logWriter.println("# Session ended: ${LocalDateTime.now()}")
-        logWriter.close()
+        synchronized(logWriter) {
+            logWriter.println()
+            logWriter.println("# Session ended: ${LocalDateTime.now()}")
+            logWriter.close()
+        }
         c2sRaw.close()
         s2cRaw.close()
     }
@@ -2914,42 +2646,19 @@ private data class JagexServerInfo(val host: String, val port: Int, val rawConfi
 
 private fun resolveJagexServer(): JagexServerInfo {
     try {
-        val url = URI(JAV_CONFIG_URL).toURL()
-        val conn = url.openConnection() as HttpURLConnection
-        conn.connectTimeout = 10_000
-        conn.readTimeout = 10_000
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+        val config = JavConfig.fetch()
 
-        val rawConfig = conn.inputStream.bufferedReader(Charsets.ISO_8859_1).readText()
-        conn.disconnect()
-
-        val lines = rawConfig.lines()
-        var lobbyHost: String? = null
-        var port: Int? = null
-
-        for (line in lines) {
-            when {
-                line.startsWith("param=3=") -> lobbyHost = line.removePrefix("param=3=").trim()
-                line.startsWith("param=41=") -> port = line.removePrefix("param=41=").trim().toIntOrNull()
-            }
-        }
-
-        val host = lobbyHost ?: FALLBACK_LOBBY_HOST
-        val p = port ?: FALLBACK_PORT
+        val host = config.params[3]?.trim() ?: FALLBACK_LOBBY_HOST
+        val p = config.params[41]?.trim()?.toIntOrNull() ?: FALLBACK_PORT
 
         println("[proxy] Parsed jav_config: lobby=$host, port=$p")
         println("[proxy] Relevant jav_config params:")
-        for (l in lines) {
-            if (l.startsWith("param=3=") || l.startsWith("param=41=") || l.startsWith("param=42=")
-                || l.startsWith("param=43=") || l.startsWith("param=44=") || l.startsWith("param=45=")
-                || l.startsWith("param=46=") || l.startsWith("param=47=") || l.startsWith("param=48=")
-                || l.startsWith("server_version=") || l.startsWith("param=29=") || l.startsWith("param=10=")
-            ) {
-                println("[proxy]   $l")
-            }
+        config.settings["server_version"]?.let { println("[proxy]   server_version=$it") }
+        for (key in intArrayOf(3, 10, 29, 41, 42, 43, 44, 45, 46, 47, 48)) {
+            config.params[key]?.let { println("[proxy]   param=$key=$it") }
         }
 
-        return JagexServerInfo(host, p, rawConfig)
+        return JagexServerInfo(host, p, config.raw)
     } catch (e: Exception) {
         println("[proxy] WARNING: Failed to fetch jav_config: ${e.message}")
         println("[proxy] Using fallback: $FALLBACK_LOBBY_HOST:$FALLBACK_PORT")

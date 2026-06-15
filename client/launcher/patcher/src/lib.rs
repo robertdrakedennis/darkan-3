@@ -35,6 +35,7 @@
 //! If `DARKAN_RSA_MODULUS` is not set, the patcher does nothing — this
 //! allows the same LD_PRELOAD to be harmlessly present in live mode.
 
+use memchr::memmem::Finder;
 use std::env;
 use std::fs;
 use std::ptr;
@@ -189,13 +190,14 @@ fn patch_rsa() {
         }
     }
 
-    // If binary-specific scan fails for any pattern, we'll retry with all file-backed regions
-    let all_regions = parse_all_file_backed_regions(&maps);
-    eprintln!("[darkan-patcher] All file-backed regions: {} (fallback pool)", all_regions.len());
     for (i, r) in regions.iter().enumerate() {
         eprintln!("[darkan-patcher]   binary region[{}]: 0x{:x}-0x{:x} ({} bytes, prot={})",
             i, r.start, r.end, r.end - r.start, r.prot);
     }
+
+    // The all-file-backed fallback pool is expensive to build/scan and is only
+    // needed if a binary-specific scan misses. Build it lazily on first miss.
+    let mut all_regions: Option<Vec<Region>> = None;
 
     // --- Patch 1: rs2client binary RSA modulus (256-char hex ASCII string) ---
     //
@@ -204,52 +206,32 @@ fn patch_rsa() {
     // parses it into a jag::math::BigInteger. We replace the hex string in-place
     // so the BigInteger parser loads our custom modulus instead.
     if let Some(ref modulus_hex_clean) = modulus_hex_clean {
-        let padded_hex = {
-            let hex_lower = modulus_hex_clean.to_ascii_lowercase();
-            if hex_lower.len() > RS2CLIENT_MODULUS_HEX_LEN {
-                eprintln!(
-                    "[darkan-patcher] WARNING: DARKAN_RSA_MODULUS hex is {} chars, exceeds rs2client max of {}",
-                    hex_lower.len(),
-                    RS2CLIENT_MODULUS_HEX_LEN,
-                );
-                None
-            } else {
-                let padding = RS2CLIENT_MODULUS_HEX_LEN - hex_lower.len();
-                let mut s = "0".repeat(padding);
-                s.push_str(&hex_lower);
-                Some(s)
-            }
-        };
+        match pad_modulus_hex(modulus_hex_clean, RS2CLIENT_MODULUS_HEX_LEN) {
+            Some(replacement_str) => {
+                let replacement_bytes = replacement_str.as_bytes();
+                debug_assert_eq!(replacement_bytes.len(), RS2CLIENT_MODULUS_HEX_LEN);
 
-        if let Some(replacement_str) = padded_hex {
-            let replacement_bytes = replacement_str.as_bytes();
-            debug_assert_eq!(replacement_bytes.len(), RS2CLIENT_MODULUS_HEX_LEN);
-
-            let mut patched = false;
-            // Try binary-specific regions first, then all file-backed regions
-            for scan_regions in [&regions, &all_regions] {
-                for region in scan_regions.iter() {
-                    if let Some(offset) = scan_for_pattern(region.start, region.end, RS2CLIENT_MODULUS_PREFIX) {
+                let finder = Finder::new(RS2CLIENT_MODULUS_PREFIX);
+                match find_first_with_fallback(&regions, &mut all_regions, &maps, &finder) {
+                    Some((offset, prot)) => {
                         eprintln!(
                             "[darkan-patcher] Found rs2client RSA modulus hex string at address 0x{:x}",
                             offset,
                         );
-
-                        if patch_memory(offset, replacement_bytes, region.prot) {
+                        if patch_memory(offset, replacement_bytes, prot) {
                             eprintln!("[darkan-patcher] Successfully patched rs2client RSA modulus ({} hex chars)", RS2CLIENT_MODULUS_HEX_LEN);
-                            patched = true;
-                            break;
                         } else {
                             eprintln!("[darkan-patcher] ERROR: Failed to patch rs2client RSA modulus at 0x{:x}", offset);
                         }
                     }
+                    None => eprintln!("[darkan-patcher] rs2client RSA modulus pattern not found (not rs2client process?)"),
                 }
-                if patched { break; }
             }
-
-            if !patched {
-                eprintln!("[darkan-patcher] rs2client RSA modulus pattern not found (not rs2client process?)");
-            }
+            None => eprintln!(
+                "[darkan-patcher] WARNING: DARKAN_RSA_MODULUS hex is {} chars, exceeds rs2client max of {}",
+                modulus_hex_clean.len(),
+                RS2CLIENT_MODULUS_HEX_LEN,
+            ),
         }
     } else {
         eprintln!("[darkan-patcher] No RSA modulus provided, skipping rs2client RSA patch");
@@ -263,46 +245,26 @@ fn patch_rsa() {
     if proxy_mode {
         eprintln!("[darkan-patcher] Proxy mode: skipping JS5 RSA modulus patch");
     } else if let Some(ref js5_hex) = js5_modulus_hex {
-        let js5_hex_clean = {
-            let s = js5_hex.trim();
-            s.strip_prefix("0x")
-                .or_else(|| s.strip_prefix("0X"))
-                .unwrap_or(s)
-                .to_ascii_lowercase()
-        };
-
-        if js5_hex_clean.len() <= RS2CLIENT_JS5_MODULUS_HEX_LEN && hex_to_bytes(&js5_hex_clean).is_some() {
-            let padding = RS2CLIENT_JS5_MODULUS_HEX_LEN - js5_hex_clean.len();
-            let mut padded = "0".repeat(padding);
-            padded.push_str(&js5_hex_clean);
-            let replacement_bytes = padded.as_bytes();
-
-            let mut patched = false;
-            for scan_regions in [&regions, &all_regions] {
-                for region in scan_regions.iter() {
-                    if let Some(offset) = scan_for_pattern(region.start, region.end, RS2CLIENT_JS5_MODULUS_PREFIX) {
+        match pad_modulus_hex(js5_hex, RS2CLIENT_JS5_MODULUS_HEX_LEN) {
+            Some(padded) if hex_to_bytes(&padded).is_some() => {
+                let replacement_bytes = padded.as_bytes();
+                let finder = Finder::new(RS2CLIENT_JS5_MODULUS_PREFIX);
+                match find_first_with_fallback(&regions, &mut all_regions, &maps, &finder) {
+                    Some((offset, prot)) => {
                         eprintln!(
                             "[darkan-patcher] Found rs2client JS5 RSA modulus hex string at address 0x{:x}",
                             offset,
                         );
-
-                        if patch_memory(offset, replacement_bytes, region.prot) {
+                        if patch_memory(offset, replacement_bytes, prot) {
                             eprintln!("[darkan-patcher] Successfully patched rs2client JS5 RSA modulus ({} hex chars)", RS2CLIENT_JS5_MODULUS_HEX_LEN);
-                            patched = true;
-                            break;
                         } else {
                             eprintln!("[darkan-patcher] ERROR: Failed to patch rs2client JS5 RSA modulus at 0x{:x}", offset);
                         }
                     }
+                    None => eprintln!("[darkan-patcher] rs2client JS5 RSA modulus pattern not found (not rs2client process?)"),
                 }
-                if patched { break; }
             }
-
-            if !patched {
-                eprintln!("[darkan-patcher] rs2client JS5 RSA modulus pattern not found (not rs2client process?)");
-            }
-        } else {
-            eprintln!("[darkan-patcher] WARNING: DARKAN_JS5_RSA_MODULUS is invalid or too long");
+            _ => eprintln!("[darkan-patcher] WARNING: DARKAN_JS5_RSA_MODULUS is invalid or too long"),
         }
     }
 
@@ -322,27 +284,44 @@ fn patch_rsa() {
                 let port_le = port.to_le_bytes();
                 let replacement = [port_le[0], port_le[1], 0x00, 0x00]; // 4-byte LE dword
 
-                // 948: single site only — GetHTTPURL was de-inlined into a standalone function.
-                let mut patched = false;
-                for region in &regions {
-                    if let Some(offset) = scan_for_pattern(region.start, region.end, HTTP_PORT_PATTERN_1) {
+                // The 7-byte signature (MOV R8D,0x50 + JZ rel8) uniquely identifies
+                // GetHTTPURL's port literal and rejects the documented false-positive
+                // MOV R8D,0x50 sites in graphics/matrix code (those have a different
+                // follow byte). 948 has a single site, but 947-3 had TWO legitimate
+                // inlined sites — so we patch EVERY match instead of breaking on the
+                // first, to stay correct across revisions.
+                let finder = Finder::new(HTTP_PORT_PATTERN_1);
+                let matches = find_all(&regions, &finder);
+                if matches.is_empty() {
+                    eprintln!(
+                        "[darkan-patcher] WARNING: HTTP port pattern matched 0 sites — \
+                         client HTTP JS5 requests will still hit port 80!"
+                    );
+                } else {
+                    eprintln!(
+                        "[darkan-patcher] HTTP port pattern matched {} site(s)",
+                        matches.len()
+                    );
+                    let mut patched_count = 0usize;
+                    for (offset, prot) in &matches {
                         let patch_addr = offset + HTTP_PORT_PATCH_OFFSET;
-                        eprintln!(
-                            "[darkan-patcher] Found HTTP port pattern at 0x{:x}",
-                            offset
-                        );
-                        if patch_memory(patch_addr, &replacement, region.prot) {
+                        if patch_memory(patch_addr, &replacement, *prot) {
                             eprintln!(
-                                "[darkan-patcher] Successfully patched HTTP content port {} -> {}",
-                                80, port
+                                "[darkan-patcher] Patched HTTP content port at 0x{:x} ({} -> {})",
+                                offset, 80, port
                             );
-                            patched = true;
-                            break;
+                            patched_count += 1;
+                        } else {
+                            eprintln!(
+                                "[darkan-patcher] ERROR: Failed to patch HTTP port at 0x{:x}",
+                                offset
+                            );
                         }
                     }
-                }
-                if !patched {
-                    eprintln!("[darkan-patcher] HTTP port pattern not found");
+                    eprintln!(
+                        "[darkan-patcher] HTTP port: patched {}/{} site(s)",
+                        patched_count, matches.len()
+                    );
                 }
             }
         }
@@ -362,49 +341,32 @@ fn patch_rsa() {
     if proxy_mode {
         eprintln!("[darkan-patcher] Proxy mode: skipping rs3linux RSA modulus patch (Jagex key needed for download verification)");
     } else if let Some(ref modulus_hex_clean) = modulus_hex_clean {
-        // Build the replacement: left-pad the hex modulus with '0' to 1024 chars, lowercase
-        let padded_hex = {
-            let hex_lower = modulus_hex_clean.to_ascii_lowercase();
-            if hex_lower.len() > RS3LINUX_MODULUS_HEX_LEN {
-                eprintln!(
-                    "[darkan-patcher] WARNING: DARKAN_RSA_MODULUS hex string is {} chars, exceeds rs3linux max of {}",
-                    hex_lower.len(),
-                    RS3LINUX_MODULUS_HEX_LEN
-                );
-                None
-            } else {
-                let padding = RS3LINUX_MODULUS_HEX_LEN - hex_lower.len();
-                let mut s = "0".repeat(padding);
-                s.push_str(&hex_lower);
-                Some(s)
-            }
-        };
+        match pad_modulus_hex(modulus_hex_clean, RS3LINUX_MODULUS_HEX_LEN) {
+            Some(replacement_str) => {
+                let replacement_bytes = replacement_str.as_bytes();
+                debug_assert_eq!(replacement_bytes.len(), RS3LINUX_MODULUS_HEX_LEN);
 
-        if let Some(replacement_str) = padded_hex {
-            let replacement_bytes = replacement_str.as_bytes();
-            debug_assert_eq!(replacement_bytes.len(), RS3LINUX_MODULUS_HEX_LEN);
-
-            let mut patched = false;
-            for region in &regions {
-                if let Some(offset) = scan_for_pattern(region.start, region.end, RS3LINUX_MODULUS_PREFIX) {
-                    eprintln!(
-                        "[darkan-patcher] Found rs3linux RSA modulus hex string at address 0x{:x}",
-                        offset
-                    );
-
-                    if patch_memory(offset, replacement_bytes, region.prot) {
-                        eprintln!("[darkan-patcher] Successfully patched rs3linux RSA modulus ({} hex chars)", RS3LINUX_MODULUS_HEX_LEN);
-                        patched = true;
-                        break;
-                    } else {
-                        eprintln!("[darkan-patcher] ERROR: Failed to patch rs3linux RSA modulus at 0x{:x}", offset);
+                let finder = Finder::new(RS3LINUX_MODULUS_PREFIX);
+                match find_first(&regions, &finder) {
+                    Some((offset, prot)) => {
+                        eprintln!(
+                            "[darkan-patcher] Found rs3linux RSA modulus hex string at address 0x{:x}",
+                            offset
+                        );
+                        if patch_memory(offset, replacement_bytes, prot) {
+                            eprintln!("[darkan-patcher] Successfully patched rs3linux RSA modulus ({} hex chars)", RS3LINUX_MODULUS_HEX_LEN);
+                        } else {
+                            eprintln!("[darkan-patcher] ERROR: Failed to patch rs3linux RSA modulus at 0x{:x}", offset);
+                        }
                     }
+                    None => eprintln!("[darkan-patcher] rs3linux RSA modulus pattern not found (not rs3linux process?)"),
                 }
             }
-
-            if !patched {
-                eprintln!("[darkan-patcher] rs3linux RSA modulus pattern not found (not rs3linux process?)");
-            }
+            None => eprintln!(
+                "[darkan-patcher] WARNING: DARKAN_RSA_MODULUS hex string is {} chars, exceeds rs3linux max of {}",
+                modulus_hex_clean.len(),
+                RS3LINUX_MODULUS_HEX_LEN,
+            ),
         }
     } else {
         eprintln!("[darkan-patcher] No RSA modulus provided, skipping rs3linux RSA patch");
@@ -416,9 +378,9 @@ fn patch_rsa() {
     if proxy_mode {
         eprintln!("[darkan-patcher] Proxy mode: skipping codebase regex patch (Jagex URL matches original regex)");
     } else {
-        let mut patched = false;
-        for region in &regions {
-            if let Some(offset) = scan_for_pattern(region.start, region.end, CODEBASE_REGEX) {
+        let finder = Finder::new(CODEBASE_REGEX);
+        match find_first(&regions, &finder) {
+            Some((offset, prot)) => {
                 eprintln!(
                     "[darkan-patcher] Found codebase URL regex at address 0x{:x}",
                     offset
@@ -431,18 +393,13 @@ fn patch_rsa() {
                 // Null-pad the remainder so we don't leave stale bytes
                 replacement.resize(original_len, 0u8);
 
-                if patch_memory(offset, &replacement, region.prot) {
+                if patch_memory(offset, &replacement, prot) {
                     eprintln!("[darkan-patcher] Successfully patched codebase URL regex");
-                    patched = true;
-                    break;
                 } else {
                     eprintln!("[darkan-patcher] ERROR: Failed to patch codebase URL regex at 0x{:x}", offset);
                 }
             }
-        }
-
-        if !patched {
-            eprintln!("[darkan-patcher] Codebase URL regex pattern not found (not rs3linux process?)");
+            None => eprintln!("[darkan-patcher] Codebase URL regex pattern not found (not rs3linux process?)"),
         }
     }
 
@@ -453,9 +410,9 @@ fn patch_rsa() {
         return;
     }
     {
-        let mut patched = false;
-        for region in &regions {
-            if let Some(offset) = scan_for_pattern(region.start, region.end, &LZMA_FLAG_PATTERN) {
+        let finder = Finder::new(&LZMA_FLAG_PATTERN);
+        match find_first(&regions, &finder) {
+            Some((offset, prot)) => {
                 let patch_addr = offset + LZMA_FLAG_PATCH_OFFSET;
                 eprintln!(
                     "[darkan-patcher] Found LZMA flag init at address 0x{:x} (patching byte at 0x{:x})",
@@ -464,18 +421,13 @@ fn patch_rsa() {
                 );
 
                 // Change the immediate byte from 0x01 to 0x00
-                if patch_memory(patch_addr, &[0x00], region.prot) {
+                if patch_memory(patch_addr, &[0x00], prot) {
                     eprintln!("[darkan-patcher] Successfully patched LZMA decompression flag (disabled)");
-                    patched = true;
-                    break;
                 } else {
                     eprintln!("[darkan-patcher] ERROR: Failed to patch LZMA flag at 0x{:x}", patch_addr);
                 }
             }
-        }
-
-        if !patched {
-            eprintln!("[darkan-patcher] LZMA flag pattern not found (not rs3linux process?)");
+            None => eprintln!("[darkan-patcher] LZMA flag pattern not found (not rs3linux process?)"),
         }
     }
 }
@@ -546,22 +498,81 @@ fn parse_map_line(line: &str) -> Option<Region> {
     Some(Region { start, end, prot })
 }
 
-/// Scan a memory region for a byte pattern. Returns the address of the first match.
-fn scan_for_pattern(start: usize, end: usize, pattern: &[u8]) -> Option<usize> {
-    if end - start < pattern.len() {
+/// Scan a single region with a prebuilt `Finder`, returning `(addr, prot)` of
+/// the first match. Uses memchr's SIMD-accelerated substring search.
+fn find_first_in_region(region: &Region, finder: &Finder) -> Option<(usize, i32)> {
+    let len = region.end - region.start;
+    if len < finder.needle().len() {
         return None;
     }
+    let slice = unsafe { std::slice::from_raw_parts(region.start as *const u8, len) };
+    finder.find(slice).map(|i| (region.start + i, region.prot))
+}
 
-    let region_len = end - start;
-    let slice = unsafe { std::slice::from_raw_parts(start as *const u8, region_len) };
+/// Find the first match of `finder` across `regions`, returning `(addr, prot)`.
+fn find_first(regions: &[Region], finder: &Finder) -> Option<(usize, i32)> {
+    regions
+        .iter()
+        .find_map(|region| find_first_in_region(region, finder))
+}
 
-    for i in 0..=(region_len - pattern.len()) {
-        if &slice[i..i + pattern.len()] == pattern {
-            return Some(start + i);
+/// Find ALL matches of `finder` across `regions` as `(addr, prot)` pairs.
+/// Used where a pattern may legitimately appear at multiple sites (e.g. the
+/// HTTP port literal, which had two inlined copies in some revisions).
+fn find_all(regions: &[Region], finder: &Finder) -> Vec<(usize, i32)> {
+    let needle_len = finder.needle().len();
+    let mut out = Vec::new();
+    for region in regions {
+        let len = region.end - region.start;
+        if len < needle_len {
+            continue;
+        }
+        let slice = unsafe { std::slice::from_raw_parts(region.start as *const u8, len) };
+        for i in finder.find_iter(slice) {
+            out.push((region.start + i, region.prot));
         }
     }
+    out
+}
 
-    None
+/// Find the first match in the binary-specific regions; if none, lazily build
+/// (and cache) the all-file-backed fallback pool and scan that.
+fn find_first_with_fallback(
+    regions: &[Region],
+    all_regions: &mut Option<Vec<Region>>,
+    maps: &str,
+    finder: &Finder,
+) -> Option<(usize, i32)> {
+    if let Some(hit) = find_first(regions, finder) {
+        return Some(hit);
+    }
+    if all_regions.is_none() {
+        let pool = parse_all_file_backed_regions(maps);
+        eprintln!(
+            "[darkan-patcher] Binary-specific scan missed; built fallback pool of {} file-backed regions",
+            pool.len()
+        );
+        *all_regions = Some(pool);
+    }
+    find_first(all_regions.as_deref().unwrap_or(&[]), finder)
+}
+
+/// Clean a hex modulus string (strip `0x`/`0X`, trim, lowercase) and left-pad
+/// with `'0'` to exactly `len` chars. Returns `None` if the cleaned hex is
+/// longer than `len` (caller logs the size warning).
+fn pad_modulus_hex(hex: &str, len: usize) -> Option<String> {
+    let s = hex.trim();
+    let s = s
+        .strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .unwrap_or(s);
+    let hex_lower = s.to_ascii_lowercase();
+    if hex_lower.len() > len {
+        return None;
+    }
+    let mut padded = "0".repeat(len - hex_lower.len());
+    padded.push_str(&hex_lower);
+    Some(padded)
 }
 
 /// Patch memory at the given address with new bytes.
@@ -653,6 +664,18 @@ mod tests {
         assert_eq!(RS3LINUX_MODULUS_HEX_LEN, 1024);
         // The codebase regex replacement must be shorter than the original
         assert!(CODEBASE_REGEX_REPLACEMENT.len() < CODEBASE_REGEX.len());
+    }
+
+    #[test]
+    fn test_pad_modulus_hex() {
+        // Strips 0x prefix, lowercases, left-pads to length.
+        let p = pad_modulus_hex("0xDEADBEEF", 16).unwrap();
+        assert_eq!(p, "00000000deadbeef");
+        assert_eq!(p.len(), 16);
+        // Exact-length input is returned unchanged (lowercased).
+        assert_eq!(pad_modulus_hex("ABCD", 4).unwrap(), "abcd");
+        // Over-length input returns None.
+        assert!(pad_modulus_hex("deadbeef", 4).is_none());
     }
 
     #[test]

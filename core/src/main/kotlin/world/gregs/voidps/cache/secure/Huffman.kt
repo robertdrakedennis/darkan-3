@@ -1,6 +1,7 @@
 package world.gregs.voidps.cache.secure
 
 import org.darkan.core.Logger.logInfo
+import org.darkan.core.Logger.logWarn
 import world.gregs.voidps.buffer.read.Reader
 import world.gregs.voidps.buffer.write.BufferWriter
 
@@ -126,8 +127,9 @@ class Huffman {
                 }
             }
             sb.toString()
-        } catch (e: Throwable) {
-            e.printStackTrace()
+        } catch (e: IndexOutOfBoundsException) {
+            // Malformed client input: the bitstream walked outside the huffman tree
+            logWarn("Malformed huffman message: ${message.size} bytes, expected $length characters.", e)
             null
         }
     }
@@ -138,16 +140,12 @@ class Huffman {
      */
     fun compress(message: String): ByteArray {
         val writer = BufferWriter(message.length * 2 + 2)
-        try {
-            // Format the message
-            val messageData = formatMessage(message)
-            // Write message length
-            writer.writeSmart(messageData.size)
-            // Write the compressed message
-            compress(messageData, writer)
-        } catch (exception: Throwable) {
-            exception.printStackTrace()
-        }
+        // Format the message
+        val messageData = formatMessage(message)
+        // Write message length
+        writer.writeSmart(messageData.size)
+        // Write the compressed message
+        compress(messageData, writer)
         return writer.toArray()
     }
 
@@ -157,39 +155,35 @@ class Huffman {
      * @param builder The packet to write the compressed data too
      */
     private fun compress(message: ByteArray, builder: BufferWriter) {
-        try {
-            if (masks == null) {
-                return
-            }
-            var key = 0
-            val startPosition = builder.position()
-            var position = startPosition shl 3
-            for (char in message) {
-                val character = char.toInt() and 0xff
-                val min = masks!![character]
-                val size = frequencies[character]
-
-                var offset = position shr 3
-                var bitOffset = position and 0x7
-                key = key and (-bitOffset shr 31)
-                position += size
-                val byteSize = (bitOffset + size - 1 shr 3) + offset
-                bitOffset += 24
-                key += min.ushr(bitOffset)
-                builder.setByte(offset, key)
-
-                while (offset < byteSize) {
-                    bitOffset -= 8
-                    key = min.ushr(bitOffset)
-                    builder.setByte(++offset, key)
-                }
-            }
-
-            // Set the packet position to the correct place
-            builder.position(7 + position shr 3)
-        } catch (e: Exception) {
-            e.printStackTrace()
+        if (masks == null) {
+            return
         }
+        var key = 0
+        val startPosition = builder.position()
+        var position = startPosition shl 3
+        for (char in message) {
+            val character = char.toInt() and 0xff
+            val min = masks!![character]
+            val size = frequencies[character]
+
+            var offset = position shr 3
+            var bitOffset = position and 0x7
+            key = key and (-bitOffset shr 31)
+            position += size
+            val byteSize = (bitOffset + size - 1 shr 3) + offset
+            bitOffset += 24
+            key += min.ushr(bitOffset)
+            builder.setByte(offset, key)
+
+            while (offset < byteSize) {
+                bitOffset -= 8
+                key = min.ushr(bitOffset)
+                builder.setByte(++offset, key)
+            }
+        }
+
+        // Set the packet position to the correct place
+        builder.position(7 + position shr 3)
     }
 
     /**

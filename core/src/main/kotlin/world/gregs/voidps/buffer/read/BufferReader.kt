@@ -126,16 +126,27 @@ class BufferReader(
     }
 
     override fun readString(): String {
-        val bytes = ArrayList<Byte>()
-        var b: Int
-        while (buffer.hasRemaining()) {
-            b = readUnsignedByte()
-            if (b == 0) {
-                break
-            }
-            bytes.add(b.toByte())
+        val start = buffer.position()
+        val limit = buffer.limit()
+        var end = start
+        while (end < limit && buffer.get(end).toInt() != 0) {
+            end++
         }
-        return Cp1252.decode(bytes.toByteArray())
+        val length = end - start
+        val result = when {
+            length == 0 -> ""
+            buffer.hasArray() -> Cp1252.decode(buffer.array(), buffer.arrayOffset() + start, length)
+            else -> {
+                val bytes = ByteArray(length)
+                for (i in 0 until length) {
+                    bytes[i] = buffer.get(start + i)
+                }
+                Cp1252.decode(bytes)
+            }
+        }
+        // Consume the string and its null terminator (if one was found before the limit)
+        buffer.position(if (end < limit) end + 1 else limit)
+        return result
     }
 
     override fun readBytes(value: ByteArray) {

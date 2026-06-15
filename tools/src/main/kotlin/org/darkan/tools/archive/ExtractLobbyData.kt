@@ -1,8 +1,11 @@
-package org.darkan.tools
+// org.darkan.tools.archive: unmaintained one-shot experiments kept for reference only.
+// These tools were written against specific captures/revisions, are not part of any
+// build task, and may rely on stale capture data or stale opcode identities.
+package org.darkan.tools.archive
 
 import org.darkan.core.net.Isaac
-import org.darkan.core.net.prot.Codec
 import org.darkan.core.net.prot.revision.rev948.register948
+import world.gregs.voidps.buffer.read.BufferReader
 import java.io.File
 import java.io.PrintWriter
 
@@ -60,52 +63,45 @@ fun main(args: Array<String>) {
         val data = raw.copyOfRange(pos, pos + pktSize)
         pos += pktSize
 
+        val r = BufferReader(data)
         when (opcode) {
             // VarpSmall (10, 3B): LE short id + raw byte value
             10 -> {
-                val id = (data[0].toInt() and 0xFF) or ((data[1].toInt() and 0xFF) shl 8)
-                val value = data[2].toInt() // signed byte
+                val id = r.readUnsignedShortLittle()
+                val value = r.readByte() // signed byte
                 varps.add(VarpEntry(id, value.toLong()))
             }
             // VarpLarge (111, 6B): middle-endian int value + LE short id
             111 -> {
-                val v = ((data[2].toInt() and 0xFF) shl 24) or ((data[3].toInt() and 0xFF) shl 16) or
-                        ((data[0].toInt() and 0xFF) shl 8) or (data[1].toInt() and 0xFF)
-                val id = (data[4].toInt() and 0xFF) or ((data[5].toInt() and 0xFF) shl 8)
+                val v = r.readUnsignedIntMiddle()
+                val id = r.readUnsignedShortLittle()
                 varps.add(VarpEntry(id, v.toLong()))
             }
             // VarpLong (170, 10B): 8B long + LE short id
             170 -> {
-                var v = 0L
-                for (i in 0..7) v = (v shl 8) or (data[i].toLong() and 0xFF)
-                val id = (data[8].toInt() and 0xFF) or ((data[9].toInt() and 0xFF) shl 8)
+                val v = r.readLong()
+                val id = r.readUnsignedShortLittle()
                 varps.add(VarpEntry(id, v, isLong = true))
             }
             // ClientSetVarcSmall (1, 3B): byteSubtract(value) + LE short id
             1 -> {
-                val rawVal = data[0].toInt() and 0xFF
-                val value = (0x80 - rawVal) and 0xFF
-                val signedVal = if (value > 127) value - 256 else value
-                val id = (data[1].toInt() and 0xFF) or ((data[2].toInt() and 0xFF) shl 8)
+                val signedVal = r.readByteSubtract()
+                val id = r.readUnsignedShortLittle()
                 val target = if (seenSetEvents) postIfVarcs else if (seenInterface) postIfVarcs else preIfVarcs
                 target.add(VarcEntry(id, signedVal))
             }
             // ClientSetVarcLarge (112, 6B): intBE(value) + LE short id
             112 -> {
-                val v = ((data[0].toInt() and 0xFF) shl 24) or ((data[1].toInt() and 0xFF) shl 16) or
-                        ((data[2].toInt() and 0xFF) shl 8) or (data[3].toInt() and 0xFF)
-                val id = (data[4].toInt() and 0xFF) or ((data[5].toInt() and 0xFF) shl 8)
+                val v = r.readInt()
+                val id = r.readUnsignedShortLittle()
                 val target = if (seenSetEvents) postIfVarcs else if (seenInterface) postIfVarcs else preIfVarcs
                 target.add(VarcEntry(id, v))
             }
             // ClientSetVarcStr (67, varByte): string + LE short id
             67 -> {
-                val sb = StringBuilder()
-                var i = 0
-                while (i < data.size && data[i].toInt() != 0) { sb.append(data[i].toInt().toChar()); i++ }
-                i++ // skip null
-                val id = if (i + 1 < data.size) (data[i].toInt() and 0xFF) or ((data[i+1].toInt() and 0xFF) shl 8) else 0
-                varcStrs.add(id to sb.toString())
+                val s = r.readString()
+                val id = if (r.remaining >= 2) r.readUnsignedShortLittle() else 0
+                varcStrs.add(id to s)
             }
             // Track interface open for pre/post varc split
             94 -> seenInterface = true

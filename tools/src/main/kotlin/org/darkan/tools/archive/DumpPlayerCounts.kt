@@ -1,7 +1,11 @@
-package org.darkan.tools
+// org.darkan.tools.archive: unmaintained one-shot experiments kept for reference only.
+// These tools were written against specific captures/revisions, are not part of any
+// build task, and may rely on stale capture data or stale opcode identities.
+package org.darkan.tools.archive
 
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.prot.revision.rev948.register948
+import world.gregs.voidps.buffer.read.BufferReader
 import java.io.File
 
 fun main() {
@@ -34,31 +38,24 @@ fun main() {
     var off = 0; for (seg in segments) { System.arraycopy(seg, 0, buf, off, seg.size); off += seg.size }
 
     // Skip to player count section: parse header, countries, worlds, revision
-    var p = 0
-    fun g1() = buf[p++].toInt() and 0xFF
-    fun g2(): Int { val v = ((buf[p].toInt() and 0xFF) shl 8) or (buf[p+1].toInt() and 0xFF); p += 2; return v }
-    fun g4(): Int { val v = ((buf[p].toInt() and 0xFF) shl 24) or ((buf[p+1].toInt() and 0xFF) shl 16) or ((buf[p+2].toInt() and 0xFF) shl 8) or (buf[p+3].toInt() and 0xFF); p += 4; return v }
-    fun smart(): Int = if ((buf[p].toInt() and 0xFF) < 0x80) g1() else g2() - 0x8000
-    fun gjstr2(): String { g1(); val sb = StringBuilder(); while (buf[p].toInt() != 0) { sb.append(buf[p].toInt().toChar()); p++ }; p++; return sb.toString() }
+    val reader = BufferReader(buf)
+    fun gjstr2(): String { reader.readUnsignedByte(); return reader.readString() }
 
-    val refresh = g1(); val sep = g1()
-    val countryCount = smart(); repeat(countryCount) { smart(); gjstr2() }
-    val minWorld = smart(); val maxWorld = smart(); val worldCount = smart()
+    val refresh = reader.readUnsignedByte(); val sep = reader.readUnsignedByte()
+    val countryCount = reader.readSmart(); repeat(countryCount) { reader.readSmart(); gjstr2() }
+    val minWorld = reader.readSmart(); val maxWorld = reader.readSmart(); val worldCount = reader.readSmart()
     println("minWorldId=$minWorld, maxWorldId=$maxWorld, worldCount=$worldCount")
 
-    repeat(worldCount) { smart(); g1(); g4(); val ap = smart(); if (ap != 0) gjstr2(); gjstr2(); gjstr2() }
-    val rev = g4()
+    repeat(worldCount) { reader.readSmart(); reader.readUnsignedByte(); reader.readInt(); val ap = reader.readSmart(); if (ap != 0) gjstr2(); gjstr2(); gjstr2() }
+    val rev = reader.readInt()
     println("revision=$rev")
-    println("Player count section starts at byte $p/${buf.size}")
+    println("Player count section starts at byte ${reader.position()}/${buf.size}")
 
     // Now decode player counts
     println("\nFirst 10 player count entries:")
     for (i in 0 until minOf(10, worldCount)) {
-        val rawByte = buf[p].toInt() and 0xFF
-        val wn: Int
-        if (rawByte < 0x80) { wn = g1() } else { wn = g2() - 0x8000 }
-        val pc = g2()
-        val actualWorld = minWorld + wn  // if offset-based
+        val wn = reader.readSmart()
+        val pc = reader.readUnsignedShort()
         println("  raw_smart=$wn (actualIfOffset=${minWorld+wn}) players=${if (pc == 0xFFFF) "unchanged" else pc.toString()}")
     }
 }

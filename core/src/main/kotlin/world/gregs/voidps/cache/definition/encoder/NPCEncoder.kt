@@ -6,6 +6,10 @@ import world.gregs.voidps.cache.definition.data.NPCDefinition
 
 class NPCEncoder : DefinitionEncoder<NPCDefinition> {
 
+    override fun Writer.encode(definition: NPCDefinition) {
+        encode(definition, definition)
+    }
+
     override fun Writer.encode(definition: NPCDefinition, members: NPCDefinition) {
         if (definition.id == -1) {
             return

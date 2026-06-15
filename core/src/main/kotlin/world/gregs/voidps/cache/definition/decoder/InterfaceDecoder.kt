@@ -60,7 +60,7 @@ class InterfaceDecoder : DefinitionDecoder<InterfaceDefinition>(INTERFACES) {
         verticalSizeMode = buffer.readByte().toByte()
         horizontalPositionMode = buffer.readByte().toByte()
         verticalPositionMode = buffer.readByte().toByte()
-        parent = buffer.readShort()
+        parent = buffer.readUnsignedShort()
         if (parent == 65535) {
             parent = -1
         }
@@ -75,7 +75,7 @@ class InterfaceDecoder : DefinitionDecoder<InterfaceDefinition>(INTERFACES) {
             filled = buffer.readUnsignedByte() == 1
             alpha = buffer.readUnsignedByte()
         } else if (type == 4) {
-            fontId = buffer.readShort()
+            fontId = buffer.readUnsignedShort()
             if (fontId == 65535) {
                 fontId = -1
             }
@@ -100,7 +100,7 @@ class InterfaceDecoder : DefinitionDecoder<InterfaceDefinition>(INTERFACES) {
             colour = buffer.readInt()
         } else if (type == 6) {
             defaultMediaType = 1
-            defaultMediaId = buffer.readShort()
+            defaultMediaId = buffer.readUnsignedShort()
             if (defaultMediaId == 65535) {
                 defaultMediaId = -1
             }
@@ -125,7 +125,7 @@ class InterfaceDecoder : DefinitionDecoder<InterfaceDefinition>(INTERFACES) {
                 spriteYaw = buffer.readShort()
                 spriteScale = buffer.readUnsignedShort()
             }
-            animation = buffer.readShort()
+            animation = buffer.readUnsignedShort()
             if (animation == 65535) {
                 animation = -1
             }
@@ -186,15 +186,15 @@ class InterfaceDecoder : DefinitionDecoder<InterfaceDefinition>(INTERFACES) {
         useOption = buffer.readString()
         var settingData = -1
         if (setting and 0x3fda8 shr 11 != 0) {
-            settingData = buffer.readShort()
+            settingData = buffer.readUnsignedShort()
             if (settingData == 65535) {
                 settingData = -1
             }
-            anInt4698 = buffer.readShort()
+            anInt4698 = buffer.readUnsignedShort()
             if (anInt4698 == 65535) {
                 anInt4698 = -1
             }
-            anInt4839 = buffer.readShort()
+            anInt4839 = buffer.readUnsignedShort()
             if (anInt4839 == 65535) {
                 anInt4839 = -1
             }

@@ -12,8 +12,8 @@ class RenderAnimationDecoder : ConfigDecoder<RenderAnimationDefinition>(RENDER_A
     override fun RenderAnimationDefinition.read(opcode: Int, buffer: Reader) {
         when (opcode) {
             1 -> {
-                primaryIdle = buffer.readShort()
-                primaryWalk = buffer.readShort()
+                primaryIdle = buffer.readUnsignedShort()
+                primaryWalk = buffer.readUnsignedShort()
                 if (primaryIdle == 65535) {
                     primaryIdle = -1
                 }

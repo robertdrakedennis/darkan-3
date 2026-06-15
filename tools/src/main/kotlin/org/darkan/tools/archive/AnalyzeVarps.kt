@@ -1,4 +1,7 @@
-package org.darkan.tools
+// org.darkan.tools.archive: unmaintained one-shot experiments kept for reference only.
+// These tools were written against specific captures/revisions, are not part of any
+// build task, and may rely on stale capture data or stale opcode identities.
+package org.darkan.tools.archive
 
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.definition.decoder.VarBitDecoder

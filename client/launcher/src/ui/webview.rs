@@ -193,7 +193,7 @@ async fn handle_code_exchange(
     consent_tokens: Arc<Mutex<Option<crate::auth::types::AuthTokens>>>,
 ) {
     log::info!("Exchanging auth code for tokens...");
-    let client = reqwest::Client::new();
+    let client = crate::http_client();
     let tokens = match crate::auth::oauth::exchange_code(&client, &code, &verifier).await {
         Ok(t) => t,
         Err(e) => {
@@ -274,11 +274,11 @@ async fn handle_consent_complete(
     proxy: EventLoopProxy<UserEvent>,
 ) {
     log::info!("Creating game session...");
-    let client = reqwest::Client::new();
+    let client = crate::http_client();
 
     let session_id = match crate::auth::session::create_session(&client, &consent_id_token).await {
         Ok(id) => {
-            log::info!("Game session created: {}", &id[..id.len().min(20)]);
+            log::info!("Game session created");
             id
         }
         Err(e) => {
