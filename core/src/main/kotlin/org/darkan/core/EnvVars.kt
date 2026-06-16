@@ -42,6 +42,10 @@ object EnvVars {
     val packetValidateSizes: Boolean = dotenv.get("PACKET_VALIDATE_SIZES", "true").toBooleanStrict()
     val mongoUri: String = dotenv.get("MONGO_URI", "mongodb://localhost:27017")
     val mongoDatabase: String = dotenv.get("MONGO_DATABASE", "darkan3")
+    /** When true, MongoManager boots an in-process mongod via Flapdoodle and
+     *  ignores `mongoUri`. Dev convenience so `:lobby:run` works without a
+     *  separately installed MongoDB. Off by default to keep prod paths clean. */
+    val embeddedMongo: Boolean = dotenv.get("EMBEDDED_MONGO", "false").toBooleanStrict()
 
     /**
      * Resolve a shared secret from the environment. The well-known dev default is only
