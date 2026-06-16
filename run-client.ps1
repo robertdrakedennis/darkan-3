@@ -11,7 +11,7 @@
 
     Pre-reqs to actually log in:
       - JDK 17+ on PATH (project compiles to JDK 25; IntelliJ-managed JDKs at
-        ~\.jdks\openjdk-25.0.1 work — set JAVA_HOME before running gradle)
+        ~\.jdks\openjdk-25.0.1 work -- set JAVA_HOME before running gradle)
       - MongoDB reachable at mongodb://localhost:27017 (lobby uses it for
         account persistence; override via MONGO_URI in .env)
       - Lobby running: ./gradlew :lobby:run     (serves jav_config.ws at http://127.0.0.1:8829)
@@ -19,7 +19,10 @@
       - patcher-win artifacts built: client/launcher/patcher-win/build.ps1
 
 .PARAMETER ConfigUri
-    The --configURI handed to rs2client.exe. Defaults to the local lobby's HTTP config endpoint.
+    The rs-launch:// URL handed to rs2client.exe as argv[1]. rs2client substitutes
+    the `rs-launch:` scheme for `http:` before fetching jav_config (`rs-launchs:` ->
+    `https:`). NOTE: `--configURI` is a LAUNCHER flag (rs3windows.exe); rs2client.exe
+    only understands the positional `rs-launch://` URL, hence we do not pass `--configURI`.
 
 .PARAMETER ClientBinary
     Path to rs2client.exe. Defaults to <repo>/client/rs2client.exe.
@@ -30,7 +33,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$ConfigUri = "http://127.0.0.1:8829/jav_config.ws",
+    [string]$ConfigUri = "rs-launch://127.0.0.1:8829/jav_config.ws",
     [string]$ClientBinary,
     [string]$Injector
 )
@@ -47,7 +50,7 @@ if (-not (Test-Path $ClientBinary)) {
     throw "Client binary not found at $ClientBinary"
 }
 if (-not (Test-Path $Injector)) {
-    throw "Injector not found at $Injector — build via client/launcher/patcher-win/build.ps1"
+    throw "Injector not found at $Injector -- build via client/launcher/patcher-win/build.ps1"
 }
 
 # --- .env loading (parser mirrors run-client.sh's `export "$line"` pattern) ---
@@ -63,7 +66,7 @@ if (Test-Path $EnvFile) {
         $envMap[$t.Substring(0, $eq).Trim()] = $t.Substring($eq + 1).Trim()
     }
 } else {
-    Write-Host "[run-client] no .env at $EnvFile — using EnvVars.kt defaults"
+    Write-Host "[run-client] no .env at $EnvFile -- using EnvVars.kt defaults"
 }
 
 # --- Defaults mirror core/src/main/kotlin/org/darkan/core/EnvVars.kt ----------
@@ -110,7 +113,11 @@ Write-Host "[run-client]   port      : $HttpPort"
 # --- Launch -------------------------------------------------------------------
 Push-Location $DarkanDir
 try {
-    & $Injector $ClientBinary "--configURI" $ConfigUri
+    # rs2client.exe expects the launch URL as a single positional argv (argv[1]),
+    # NOT as `--configURI <url>`. The `rs-launch:` scheme is substituted to `http:`
+    # by the client before it fetches jav_config (verified via strings at .rdata
+    # 0x{12149672,12149688,12149700,12149708} -- see docs/binary/patch-targets-948-5.md).
+    & $Injector $ClientBinary $ConfigUri
     $exit = $LASTEXITCODE
 } finally {
     Pop-Location
