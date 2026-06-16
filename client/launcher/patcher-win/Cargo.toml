@@ -1,0 +1,48 @@
+[package]
+name = "darkan-patcher-win"
+version = "0.1.0"
+edition = "2021"
+
+# This crate is Windows-only. Building on any other platform is unsupported —
+# the Linux equivalent lives at `client/launcher/patcher/` and uses LD_PRELOAD +
+# mprotect + /proc/self/maps. This crate uses LoadLibrary injection +
+# VirtualProtect + GetModuleInformation.
+#
+# Two artifacts:
+#   * `darkan_patcher.dll`     — cdylib injected into the rs2client.exe process.
+#                                Scans the main module image for known patterns
+#                                and overwrites them on DLL_PROCESS_ATTACH.
+#   * `darkan_injector.exe`    — CreateProcess(rs2client.exe, CREATE_SUSPENDED)
+#                                then forces LoadLibraryW(darkan_patcher.dll)
+#                                via CreateRemoteThread before resuming.
+
+[lib]
+name = "darkan_patcher"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "darkan_injector"
+path = "src/bin/injector.rs"
+
+[dependencies]
+memchr = "2"
+anyhow = "1"
+
+[dependencies.windows-sys]
+version = "0.59"
+features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_System_SystemServices",
+    "Win32_Security",
+]
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "z"
