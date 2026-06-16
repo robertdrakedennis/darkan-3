@@ -398,20 +398,52 @@ fn pad_modulus_hex(hex: &str, len: usize) -> Option<String> {
     Some(padded)
 }
 
-// -- Logging via OutputDebugStringW -------------------------------------------
+// -- Logging via OutputDebugStringW + %TEMP%\darkan-patcher.log ---------------
 //
 // rs2client.exe is a Windows GUI subsystem binary — it has no inherited
-// console, so stdout/stderr writes go nowhere visible. OutputDebugStringW
-// pushes log lines to any attached debugger or to DebugView, which is the
-// standard way to observe DLL-injected code. Each line is prefixed with the
-// patcher tag for easy filtering.
+// console, so stdout/stderr writes go nowhere visible. We tee every log line
+// to two sinks:
+//   1. OutputDebugStringW — visible to any attached debugger or DebugView
+//      (the standard way to observe DLL-injected code).
+//   2. `%TEMP%\darkan-patcher.log` — a file sink so the host can inspect
+//      patcher behavior after the fact without DebugView running. Truncated
+//      once per process at the first debug_log() call.
+//
+// Each line is prefixed with the patcher tag and the host PID so multiple
+// injected processes don't get confused if they ever share the log file.
+
+static LOG_INIT: std::sync::Once = std::sync::Once::new();
+
+fn log_file_path() -> std::path::PathBuf {
+    std::env::temp_dir().join("darkan-patcher.log")
+}
+
+fn write_log_file(line: &str) {
+    LOG_INIT.call_once(|| {
+        let _ = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(log_file_path());
+    });
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(log_file_path())
+    {
+        let _ = f.write_all(line.as_bytes());
+    }
+}
 
 fn debug_log(msg: &str) {
-    let line = format!("[darkan-patcher] {}\n", msg);
+    let pid = std::process::id();
+    let line = format!("[darkan-patcher pid={}] {}\n", pid, msg);
     let wide: Vec<u16> = line.encode_utf16().chain(std::iter::once(0u16)).collect();
     unsafe {
         OutputDebugStringW(wide.as_ptr());
     }
+    write_log_file(&line);
 }
 
 // -- Tests --------------------------------------------------------------------
