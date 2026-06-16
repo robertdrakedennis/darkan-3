@@ -43,6 +43,8 @@ import world.gregs.voidps.buffer.readUShortAddLittle
 internal fun Codec.registerRev948ClientProts() {
     // NO_TIMEOUT keepalive — 948 dedicated emitter is op 51 (ProcessConnections/MainLogic timer).
     // op 14 (ABORT_P_DIALOG) is a different size-0 packet; do NOT register Ping there.
+    // 948-5 cross-confirm: jag::ConnectionManager::MainLogic recorded as the descriptor's owning
+    // sender (×2 emitters) — see docs/net/948-5-delta-from-948-2.md §3 op 51.
     clientProt<Ping>(opcode = 51, size = 0)
 
     // WORLDLIST_FETCH
