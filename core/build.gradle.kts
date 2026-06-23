@@ -19,6 +19,11 @@ dependencies {
     implementation(libs.classgraph)
     implementation(libs.sqlite.jdbc)
 
+    // Embedded MongoDB for dev runs (EMBEDDED_MONGO=true). Downloads + manages a
+    // real mongod binary inside the JVM so :lobby:run is self-contained on dev
+    // hosts that don't have mongod installed. Stays out of the prod path.
+    implementation(libs.flapdoodle.embed.mongo)
+
     testImplementation(kotlin("test"))
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

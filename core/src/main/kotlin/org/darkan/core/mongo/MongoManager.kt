@@ -14,12 +14,14 @@ object MongoManager {
         private set
 
     fun init() {
-        client = MongoClient.create(EnvVars.mongoUri)
+        val uri = if (EnvVars.embeddedMongo) EmbeddedMongo.start() else EnvVars.mongoUri
+        client = MongoClient.create(uri)
         database = client.getDatabase(EnvVars.mongoDatabase)
-        Logger.log("MongoManager", "Connected to ${EnvVars.mongoUri}/${EnvVars.mongoDatabase}")
+        Logger.log("MongoManager", "Connected to $uri/${EnvVars.mongoDatabase}")
     }
 
     fun close() {
         if (::client.isInitialized) client.close()
+        if (EnvVars.embeddedMongo) EmbeddedMongo.stop()
     }
 }

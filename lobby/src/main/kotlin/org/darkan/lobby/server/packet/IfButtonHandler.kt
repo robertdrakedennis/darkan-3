@@ -2,6 +2,7 @@ package org.darkan.lobby.server.packet
 
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.net.prot.IfButton
+import org.darkan.core.net.prot.SetWorldTarget
 import org.darkan.core.net.prot.SwitchWorld
 import org.darkan.core.net.prot.handler.PacketHandler
 import org.darkan.core.net.session.GameSession
@@ -48,6 +49,17 @@ class IfButtonHandler : PacketHandler<GameSession, IfButton> {
         }
 
         logInfo("World-select click → switching ${player.ip} to world ${target.number} at ${target.hostname}:${target.port}")
+        // In 948 the world-data subsystem reads its connection target from WorldLobbyData,
+        // which SET_WORLD_TARGET (op 212) populates. SWITCH_WORLD (op 213) only triggers the
+        // transfer; without a prior SET_WORLD_TARGET the WorldLobbyData ptr is null/stale and
+        // the client does not open the world TCP connection. See docs/net/world-data.md
+        // (handler 0x0021aae0 -> jag::WorldSwitcher::SetWorldTarget @ 0x00248f50).
+        player.send(SetWorldTarget(
+            hostname = target.hostname,
+            worldId = target.number,
+            port1 = target.port,
+            port2 = target.port,
+        ))
         player.send(SwitchWorld(
             hostname = target.hostname,
             worldId = target.number,
