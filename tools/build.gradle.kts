@@ -12,6 +12,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.io.core)
     implementation(libs.ktor.io)
+    // client-updater tool: decode the LZMA-alone stream Jagex serves the NXT binary in
+    // (same lzma.sdk decoder the cache library uses for container type 3).
+    implementation(libs.lzma.java)
 }
 
 tasks.register<JavaExec>("rsaKeyGen") {
