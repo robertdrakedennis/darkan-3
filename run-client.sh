@@ -39,6 +39,20 @@ fi
 mkdir -p "$DARKAN_DIR"
 cp -f "$PROJECT_DIR/client/preferences.cfg" "$DARKAN_DIR/preferences.cfg"
 
+# Pre-seed the NXT game client into the launcher's cache.
+#
+# rs3linux's own download+save path fails on this setup — it sets up a
+# user-namespace/pivot_root sandbox and exits 13 ("Error saving file") before
+# ever writing the binary. We already have the exact binary the ConfigServer
+# serves, and ConfigServer advertises its matching CRC, so seeding it here makes
+# rs3linux accept the cache and skip the download entirely. Re-copied every run
+# so a server-side binary bump stays in sync.
+LAUNCHER_CACHE="$DARKAN_DIR/Jagex/launcher"
+mkdir -p "$LAUNCHER_CACHE"
+cp -f "$PROJECT_DIR/data/client/linux/rs2client" "$LAUNCHER_CACHE/rs2client"
+chmod 700 "$LAUNCHER_CACHE/rs2client"
+rm -f "$LAUNCHER_CACHE/instance.lock"
+
 # Clear stale cache data (NXT client creates Jagex/RuneScape/ under cache_folder)
 # Disabled to allow cache accumulation across runs — re-enable if cache corruption suspected
 #if [[ -d "$DARKAN_DIR/Jagex/RuneScape" ]]; then
