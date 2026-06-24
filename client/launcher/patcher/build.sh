@@ -6,8 +6,8 @@
 #   The launcher loads the patcher .so from the first of several candidate
 #   locations that exists (next to the launcher exe, next to the client binary,
 #   ~/darkan-3/, the dev build dir). If ANY of those holds a stale copy, it
-#   shadows a fresh build. A stale March-23 build (still searching for the old
-#   947 login-key prefix 8f389edb) once sat in ~/.local/share/bolt-rs3/ and was
+#   shadows a fresh build. A stale build (still searching for an old
+#   login-key prefix) once sat in ~/.local/share/bolt-rs3/ and was
 #   loaded over a current build, so the client was never patched. This script
 #   makes "build the patcher" atomically refresh every deploy slot so stale
 #   copies can never win again.
@@ -36,9 +36,9 @@ BUILT_SO="$CRATE_DIR/target/release/$LIB_NAME"
 #   - CURRENT (948) build must contain CURRENT_MARK and must NOT contain OLD_MARK
 #   - the full 32-char literal is checked against the SOURCE instead, which is
 #     the authoritative statement of what we are building.
-CURRENT_PREFIX_FULL="aad4a7804c34bb788d52dbd5f70e5721"  # rev 948-2 login modulus prefix (32 chars, in lib.rs)
+CURRENT_PREFIX_FULL="aad4a7804c34bb788d52dbd5f70e5721"  # rev 948 login modulus prefix (32 chars, in lib.rs)
 CURRENT_MARK="aad4a780"                                  # first 8 chars — contiguous in the built .so
-OLD_MARK="8f389edb"                                      # rev 947 login prefix start — would be contiguous in a stale 947 .so
+OLD_MARK="8f389edb"                                      # older 947 login prefix start — contiguous in stale builds
 SRC_LIB="$CRATE_DIR/src/lib.rs"
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }

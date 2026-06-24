@@ -235,6 +235,103 @@ value class ChangeLobby(val dummy: Int = 0) : ServerProt
 @JvmInline
 value class NoTimeout(val dummy: Int = 0) : ServerProt
 
+@JvmInline
+value class ResetEntityLists(val dummy: Int = 0) : ServerProt
+
+@JvmInline
+value class DestroyZoneData(val dummy: Int = 0) : ServerProt
+
+@JvmInline
+value class NoopVarA(val dummy: Int = 0) : ServerProt
+
+@JvmInline
+value class ClearPendingUpdates(val dummy: Int = 0) : ServerProt
+
+data class AntiCheatChallenge(val challengeA: Int, val challengeB: Int) : ServerProt
+
+data class MinimapState(val first: Int, val second: Int) : ServerProt
+
+data class EntityAnimAtTile(val value: Int, val target: Int, val cycleOffset: Int) : ServerProt
+
+data class SceneFlag(val value: Int) : ServerProt
+
+data class SetMultiwayState(val state: Int) : ServerProt
+
+data class MinimapFlagA(val value: Int) : ServerProt
+
+data class MinimapFlagB(val value: Int) : ServerProt
+
+data class MidiSong(val payload: ByteArray) : ServerProt {
+    init {
+        require(payload.size == 5) { "MidiSong payload must be 5 bytes" }
+    }
+
+    override fun equals(other: Any?): Boolean = this === other ||
+        (other is MidiSong && payload.contentEquals(other.payload))
+    override fun hashCode(): Int = payload.contentHashCode()
+}
+
+data class SetNpcOp(val text: String? = null, val cursor: Int = -1) : ServerProt
+
+data class SetPlayerOp2(val value: Int) : ServerProt
+
+data class SetPlayerOp3(val value: Int) : ServerProt
+
+data class PlayerInfoDecode(val slot: Int, val mode: Int, val payload: ByteArray = ByteArray(13)) : ServerProt {
+    override fun equals(other: Any?): Boolean = this === other ||
+        (other is PlayerInfoDecode && slot == other.slot && mode == other.mode && payload.contentEquals(other.payload))
+    override fun hashCode(): Int = 31 * (31 * slot + mode) + payload.contentHashCode()
+}
+
+data class CutsceneData(
+    val group: Int,
+    val slot: Int,
+    val mode: Int,
+    val extendedMode: Int,
+    val shape: Int,
+    val flags: Int,
+    val id: Int,
+    val primaryLong: Long,
+    val primaryInt: Int,
+    val secondaryInt: Int,
+    val secondaryLong: Long,
+    val skipLength: Int,
+) : ServerProt
+
+data class UpdateIgnoreListRaw(
+    val mask: Long = 0,
+    val encodedFields: ByteArray = byteArrayOf(),
+    val entryId: Int = 0,
+) : ServerProt {
+    override fun equals(other: Any?): Boolean = this === other ||
+        (other is UpdateIgnoreListRaw &&
+            mask == other.mask &&
+            encodedFields.contentEquals(other.encodedFields) &&
+            entryId == other.entryId)
+
+    override fun hashCode(): Int = 31 * (31 * mask.hashCode() + encodedFields.contentHashCode()) + entryId
+}
+
+data class NpcInfoThunk(
+    val payloadKind: PayloadKind = PayloadKind.ResetWorldEntityNpcs,
+    val payload: ByteArray = byteArrayOf(),
+) : ServerProt {
+    init {
+        require(payloadKind != PayloadKind.ResetWorldEntityNpcs || payload.isEmpty()) {
+            "ResetWorldEntityNpcs must not carry payload bytes"
+        }
+    }
+
+    override fun equals(other: Any?): Boolean = this === other ||
+        (other is NpcInfoThunk && payloadKind == other.payloadKind && payload.contentEquals(other.payload))
+    override fun hashCode(): Int = 31 * payloadKind.hashCode() + payload.contentHashCode()
+
+    enum class PayloadKind {
+        ResetWorldEntityNpcs,
+        RawWorldEntityPayload,
+    }
+}
+
 data class UpdateRunenergy(val energy: Int) : ServerProt
 
 data class SetPlayerOp(val slot: Int, val text: String?, val priority: Boolean = false) : ServerProt
@@ -660,7 +757,7 @@ data class WorldLoginDetails(
 
 // --- World init ---
 
-/** HASHED_WORLD_TOKEN (opcode 6, varByte) — session nonce for the world connection. */
+/** HASHED_WORLD_TOKEN — revision-dependent world session nonce packet. */
 data class HashedWorldToken(val token: String) : ServerProt
 
 /**
@@ -679,14 +776,16 @@ data class SetWorldTarget(
 ) : ServerProt
 
 /**
- * SWITCH_WORLD (opcode 179, varByte) — triggers the lobby→world transfer on the client.
+ * SWITCH_WORLD — triggers the lobby→world transfer on the client. (947-3 op 179 → 948 op 213.)
  *
- * The client handler (verified in 947-3 at 0x001c1bd5 — previously mislabeled `FRIENDCHAT_JOIN`)
- * stores the world target in `WorldSwitcher`, sets MainState to 0x25, which fires the login state
- * machine — the client then opens a TCP connection to hostname:port1 for world login.
+ * The client handler stores the world target in `WorldSwitcher`, sets MainState to 0x25, which fires
+ * the login state machine — the client then opens a TCP connection to hostname:port1 for world login.
  *
- * Wire format:
- *   string hostname (CP1252 + null) + ushort worldId + ushort port1 + ushort port2 + ubyte pendingFlag (all BE).
+ * Wire format is REVISION-DEPENDENT (the per-revision encoder owns the byte order):
+ *  - 948-5 (WorldData::SWITCH_WORLD @ 0x001aeba0, boot/05 §4.2): worldId BE u16, hostname (jstr,
+ *    CP1252 + null), portA BE u16, portB BE u16, reconnectFlag u8. **worldId is FIRST** — note this
+ *    differs from [SetWorldTarget] (op 212), which is host-first.
+ *  - 947-3: hostname-first (legacy). See the active codec for the emitted order.
  */
 data class SwitchWorld(
     val hostname: String,
@@ -702,22 +801,107 @@ data class JcoinsUpdate(val balance: Int) : ServerProt
 // === Rebuild packets (per A2) ===
 
 /**
- * REBUILD_NORMAL — opcode 90, varShort — the simple-form rebuild handler at 0x002140c0
- * (`ClientState::REBUILD_NORMAL_SIMPLE`). Used for normal world login per A2 §3.
+ * REBUILD_NORMAL_SIMPLE — the simple-form (non-instanced) world-login scene build
+ * (`ClientState::REBUILD_NORMAL_SIMPLE`). Allocates + installs the BuildArea; without it the
+ * client has no scene and stays on the loading screen. Opcode/format are REVISION-DEPENDENT:
+ *  - 947-3: op 90, magic 0x7B, 16-byte body. Encoder reads chunkX/chunkZ/forceRefresh/regionLow.
+ *  - 948-5: op 81, magic 0x85, 5119-byte production prefix plus 18-byte tail. The handler parses
+ *    this tail after packet position has advanced through the prefix:
+ *      +0  u8   ignored filler (send 0)
+ *      +1  u8   centreZoneZ low
+ *      +2  u8   centreZoneZ high            (Z is LE u16: lo then hi; may exceed 255)
+ *      +3  u8   magic = 0x85
+ *      +4  u16  centreZoneX (BE)
+ *      +6  u8   cameraRotation, writeByteAdd (wire = (value + 0x80) & 0xFF)
+ *      +7  u8   ignored filler (send 0)
+ *      +8  u16  targetWorldId (BE)          (0 for a normal non-instanced login)
+ *      +10 u32  packedCoordA (BE)           build-area corner ORIGIN
+ *      +14 u32  packedCoordB (BE)           build-area SIZE
  *
- * Wire format (16 bytes): chunkX BE u16 + forceRefresh byte + regionLow LE u16 + magic 0x7B
- * byte + chunkZ BE u16 + packedCoordA BE u32 + packedCoordB BE u32.
+ * Field naming here is the 948 semantics; the 947 encoder maps zoneX→chunkX, zoneZ→chunkZ.
  *
- * `packedCoordA/B` use the BuildArea decomposition `(plane << 28) | (y << 14) | x`.
+ * `packedCoordA/B` use the BuildArea `DecodePackedCoord` packing (`BuildArea::DecodePackedCoord`
+ * @ 0x006d4320): `word = (plane << 28) | (hi14 << 14) | lo14`, two 14-bit fields + 2-bit plane.
+ * Per `docs/protocol/packed-coord-buildarea-948.md` (948-5-verified), the handler discards plane
+ * and passes both 14-bit fields `>> 6` to the scene builder as **map-square (region) corners**:
+ *   - `packedCoordA` = the **SW / origin corner** {minRegionX = hi14>>6, minRegionZ = lo14>>6}
+ *   - `packedCoordB` = the **NE / far corner**  {maxRegionX = hi14>>6, maxRegionZ = lo14>>6}
+ * `hi14` is the X-**tile**, `lo14` the Z-**tile**; the client divides each by 64 (`>>6`) to get
+ * the region. The two words are two corners, NOT origin+span, and NOT `zone<<6` (the prior broken
+ * model overflowed 14 bits and produced inverted bounds → empty grid → black screen). Build each
+ * word from a region corner with [packRegionCoord], or use the world `BuildArea` service.
  */
 data class RebuildNormalSimple(
-    val chunkX: Int,
-    val chunkZ: Int,
-    val forceRefresh: Boolean,
-    val regionLow: Int,
+    /** Centre zone X (8-tile units). 948: +4 BE u16. 947: chunkX BE u16. */
+    val zoneX: Int,
+    /** Centre zone Z (8-tile units). 948: +1/+2 LE u16. 947: chunkZ BE u16. */
+    val zoneZ: Int,
     val packedCoordA: Int,
     val packedCoordB: Int,
-) : ServerProt
+    /** 948 camera rotation byte (written +0x80). Default 0. */
+    val cameraRotation: Int = 0,
+    /** 948 instanced-source world id (+8 BE u16). 0 = normal non-instanced login. */
+    val targetWorldId: Int = 0,
+    /** 947-only: forceRefresh byte. Ignored by the 948 encoder. */
+    val forceRefresh: Boolean = true,
+    /** 947-only: regionLow LE u16. Ignored by the 948 encoder. */
+    val regionLow: Int = 0,
+    /** 948-only prefix before the 18-byte parser tail. Empty preserves the old minimal encoder. */
+    val rebuildPrefix: ByteArray = ByteArray(0),
+) : ServerProt {
+    init {
+        require(rebuildPrefix.size <= 65517) { "Rebuild prefix is too large for VarShort framing" }
+    }
+
+    override fun equals(other: Any?): Boolean = this === other ||
+        (other is RebuildNormalSimple &&
+            zoneX == other.zoneX &&
+            zoneZ == other.zoneZ &&
+            packedCoordA == other.packedCoordA &&
+            packedCoordB == other.packedCoordB &&
+            cameraRotation == other.cameraRotation &&
+            targetWorldId == other.targetWorldId &&
+            forceRefresh == other.forceRefresh &&
+            regionLow == other.regionLow &&
+            rebuildPrefix.contentEquals(other.rebuildPrefix))
+
+    override fun hashCode(): Int {
+        var result = zoneX
+        result = 31 * result + zoneZ
+        result = 31 * result + packedCoordA
+        result = 31 * result + packedCoordB
+        result = 31 * result + cameraRotation
+        result = 31 * result + targetWorldId
+        result = 31 * result + forceRefresh.hashCode()
+        result = 31 * result + regionLow
+        result = 31 * result + rebuildPrefix.contentHashCode()
+        return result
+    }
+
+    companion object {
+        /**
+         * Builds a `DecodePackedCoord` word from a **map-square (region) corner**, the inverse of
+         * `BuildArea::DecodePackedCoord @0x006d4320`.
+         *
+         * The client recovers a region by `field >> 6`, so each 14-bit field must hold the
+         * **tile-aligned** value `region << 6` (`hi14` = X-tile, `lo14` = Z-tile). The low 6 bits
+         * are ignored by the build path, so we emit the clean `region << 6` form. plane occupies
+         * bits 28-29. Verified against production (`docs/protocol/packed-coord-buildarea-948.md`
+         * §5.3): `packRegionCoord(26, 37) = 0x01a00940`.
+         *
+         * Callers should prefer the world `BuildArea` service (`BuildArea.packedCoordA/B`), which
+         * also enforces non-inverted bounds; this helper is the low-level encode used by the
+         * service and by tests.
+         *
+         * @param regionX map-square X — recovered as `((word >> 14) & 0x3FFF) >> 6`.
+         * @param regionZ map-square Z — recovered as `(word & 0x3FFF) >> 6`.
+         */
+        fun packRegionCoord(regionX: Int, regionZ: Int, plane: Int = 0): Int =
+            ((plane and 0x3) shl 28) or
+                (((regionX shl 6) and 0x3FFF) shl 14) or
+                ((regionZ shl 6) and 0x3FFF)
+    }
+}
 
 /**
  * REBUILD_REGION — opcode 172, varShort — multi-scene grid form for INSTANCED regions per

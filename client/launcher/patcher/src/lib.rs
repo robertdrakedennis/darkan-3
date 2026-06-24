@@ -46,7 +46,7 @@ use std::ptr;
 /// by `jag::GlobalRSAKeys_Init` @ 0x000e8f90 into the global BigInteger
 /// `jag::LoginManager::g_LoginRSAModulus` @ 0x015c84e0, then consumed by
 /// `jag::LoginManager::CreateLoginRSAPacket` @ 0x001ac905 via ModPow.
-/// Updated for rev 948-2 (Jagex rotated login RSA key).
+/// Updated for rev 948 (Jagex rotated login RSA key).
 const RS2CLIENT_MODULUS_PREFIX: &[u8] = b"aad4a7804c34bb788d52dbd5f70e5721";
 
 /// Full length of the rs2client login RSA modulus hex string (1024-bit = 128 bytes = 256 hex chars).
@@ -58,7 +58,7 @@ const RS2CLIENT_MODULUS_HEX_LEN: usize = 256;
 /// `jag::GlobalRSAKeys_Init` @ 0x000e8f90 into `jag::Js5MasterIndex::g_JS5RSAModulus`
 /// @ 0x015c84d0, consumed by `jag::Js5MasterIndex::Construct` @ 0x00496a10
 /// for master-index signature verification.
-/// Updated for rev 948-2 (Jagex rotated JS5 RSA key).
+/// Updated for rev 948 (Jagex rotated JS5 RSA key).
 const RS2CLIENT_JS5_MODULUS_PREFIX: &[u8] = b"a6400fbcbd9dd09f48045caf3f543dd6";
 
 /// Full length of the rs2client JS5 RSA modulus hex string (4096-bit = 512 bytes = 1024 hex chars).

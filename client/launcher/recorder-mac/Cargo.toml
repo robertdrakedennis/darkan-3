@@ -1,0 +1,45 @@
+[package]
+name = "darkan-recorder-mac"
+version = "0.1.0"
+edition = "2021"
+
+# In-process boot-transcript recorder for the macOS NXT client (rs2client,
+# Mach-O x86_64, runs under Rosetta 2 on Apple Silicon).
+#
+# SIBLING of `client/launcher/patcher-mac/`. It reuses the same injection,
+# build, and signing approach (DYLD_INSERT_LIBRARIES + #[ctor] + dyld image
+# enumeration + mach_vm_protect(VM_PROT_COPY) + adhoc-sign + x86_64 target) but
+# instead of *patching* the client it *taps* it:
+#
+#   * Interposes recv/read/recvfrom/send/write/sendto/connect/close (a
+#     __DATA,__interpose section dyld wires up at load — NO code patching, so
+#     Rosetta-safe by construction) to capture the full game TCP stream.
+#   * Inline-hooks the ISAAC seed source (located by pattern-scan, like the
+#     patcher scans for RSA prefixes) to capture the 4 C2S seeds. This is the
+#     one Rosetta-risk surface; it degrades gracefully if it can't install.
+#
+# Everything is gated on DARKAN_RECORD=1 so the dylib is inert otherwise and can
+# ride alongside the patcher harmlessly in DYLD_INSERT_LIBRARIES.
+#
+# One artifact:
+#   * `libdarkan_recorder.dylib` — cdylib injected via DYLD_INSERT_LIBRARIES.
+#
+# Must be built `--target x86_64-apple-darwin` (a Rosetta-translated process can
+# only load x86_64 dylibs) and adhoc-signed (`codesign -s -`). See build-mac.sh.
+
+[lib]
+name = "darkan_recorder"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+ctor = "0.4"
+libc = "0.2"
+memchr = "2"
+mach2 = "0.4"
+
+[profile.release]
+# NOTE: unlike the patcher, we do NOT `strip` — keeping symbols aids crash
+# triage of the (Rosetta-risky) seed hook. lto/opt-level match the patcher.
+lto = true
+opt-level = "z"

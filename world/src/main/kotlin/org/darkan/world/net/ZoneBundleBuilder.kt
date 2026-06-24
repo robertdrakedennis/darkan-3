@@ -22,7 +22,7 @@ import world.gregs.voidps.type.Zone
  *    its OWN standalone main-table ServerProt.
  *
  * The build-area filtering ensures each player only receives updates for zones inside its
- * 13×13-chunk viewport (per [org.darkan.world.world.Viewport.buildAreaSize]).
+ * build-area map-square grid (per [org.darkan.world.world.Viewport.buildArea]).
  */
 object ZoneBundleBuilder {
 
@@ -38,12 +38,18 @@ object ZoneBundleBuilder {
         if (pendingMap.isEmpty()) return emptyList()
 
         val viewport = player.viewport
-        val halfArea = viewport.buildAreaSize / 2
-        // Build area is defined in CHUNK coords; clamp the per-player visible window.
-        val minChunkX = viewport.buildAreaChunkX - halfArea
-        val maxChunkX = viewport.buildAreaChunkX + halfArea
-        val minChunkY = viewport.buildAreaChunkY - halfArea
-        val maxChunkY = viewport.buildAreaChunkY + halfArea
+        // The build area is the authoritative spatial gate (spec §4 / alerion §6): a zone update is
+        // visible only if its zone falls inside the build-area map-square grid. The grid bounds are
+        // in REGIONS (64-tile / 8-zone map-squares); convert to inclusive chunk (zone) bounds by
+        // `region*8 .. region*8+7`. The origin chunk (SW corner) is `minRegion*8` — relative zone
+        // offsets below are measured from it.
+        val buildArea = viewport.buildArea
+        val originChunkX = buildArea.minRegion.x shl 3
+        val originChunkY = buildArea.minRegion.y shl 3
+        val minChunkX = originChunkX
+        val maxChunkX = (buildArea.maxRegion.x shl 3) + 7
+        val minChunkY = originChunkY
+        val maxChunkY = (buildArea.maxRegion.y shl 3) + 7
 
         val out = ArrayList<ServerProt>()
         for ((zoneId, packets) in pendingMap) {
@@ -59,9 +65,9 @@ object ZoneBundleBuilder {
 
             // Zone-relative offsets within the build area (per A3 §2.2 PARTIAL_FOLLOWS
             // header decoding: the wire bytes are deltas from the client's build area
-            // origin in chunk units).
-            val relX = zone.x - (viewport.buildAreaChunkX - halfArea)
-            val relY = zone.y - (viewport.buildAreaChunkY - halfArea)
+            // origin in chunk units). Origin = SW corner of the map-square grid = minRegion*8.
+            val relX = zone.x - originChunkX
+            val relY = zone.y - originChunkY
 
             if (allLocAnim) {
                 out.add(

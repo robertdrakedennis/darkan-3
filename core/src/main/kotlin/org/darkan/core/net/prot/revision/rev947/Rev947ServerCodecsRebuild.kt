@@ -25,11 +25,11 @@ internal fun Codec.registerRev947ServerCodecsRebuild() {
     //   g2 (BE) chunkZ; g4 (BE) packedCoordA; g4 (BE) packedCoordB.
     // Magic byte MUST be exactly 0x7B or the handler returns PacketError::MESSAGE.
     serverProt<RebuildNormalSimple>(opcode = 90, size = ProtSize.VarShort) { out ->
-        out.writeShort(chunkX)
+        out.writeShort(zoneX)
         out.writeByte(if (forceRefresh) 1 else 0)
         out.writeShortLittle(regionLow)
         out.writeByte(0x7B)
-        out.writeShort(chunkZ)
+        out.writeShort(zoneZ)
         out.writeInt(packedCoordA)
         out.writeInt(packedCoordB)
     }

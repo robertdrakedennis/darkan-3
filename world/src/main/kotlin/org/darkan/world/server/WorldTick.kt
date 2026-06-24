@@ -105,19 +105,13 @@ object WorldTick {
                 // login (when the viewport's `firstTick` flag is still set) and the
                 // per-tick incremental form thereafter. The init form is responsible
                 // for clearing `firstTick`.
-                val playerInfo = if (viewport.firstTick) {
-                    PlayerInfoBuilder.buildInit(player)
-                } else {
-                    PlayerInfoBuilder.build(player)
+                val playerInfo = PlayerInfoBuilder.buildIfNeeded(player)
+                if (playerInfo != null) {
+                    player.session.queuePacket(playerInfo)
                 }
-                val npcInfo = if (playerInfo.firstTick) {
-                    NpcInfoBuilder.buildInit(player)
-                } else {
-                    NpcInfoBuilder.build(player)
+                if (viewport.visibleNpcs.isNotEmpty()) {
+                    player.session.queuePacket(NpcInfoBuilder.build(player))
                 }
-
-                player.session.queuePacket(playerInfo)
-                player.session.queuePacket(npcInfo)
             } catch (e: Exception) {
                 logError("Per-player tick failed: ${player.account.username}", e)
             }

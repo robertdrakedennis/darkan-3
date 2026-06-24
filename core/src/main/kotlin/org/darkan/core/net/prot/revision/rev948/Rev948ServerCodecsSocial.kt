@@ -18,9 +18,6 @@ import world.gregs.voidps.buffer.*
  *  - MessageClanChannel (MESSAGE_CLANCHANNEL_SYSTEM in 947-3): no direct 948 destination
  *    identified, but the new 948 op 105 MESSAGE_CLANCHANNEL is the likely successor.
  *
- * REMOVED (no 948 destination):
- *  - HashedWorldToken (was op 6) — TODO: identify 948 opcode for world-token nonce.
- *
  * ENCODERS DISABLED (wire WRONG/UNCONFIRMED — better no encoder than malformed bytes):
  *  - UpdateIgnoreList @ op 130 — handler 0x001d29c0 is a 64-bit-flag-mask friend/relationship
  *    DELTA (likely the true 948 UPDATE_FRIENDLIST), NOT ignore-pairs (SVR-B research doc B).
@@ -151,8 +148,6 @@ internal fun Codec.registerRev948ServerCodecsSocial() {
         out.writeByte(if (priority) 0 else 1)    // client visible = (byte == 0)
     }
 
-    // HASHED_WORLD_TOKEN (was op 6 in 947-3) — REMOVED in 948 / no clear destination.
-    // The 948 op 6 is LOC_PREFETCH (a zone packet), so the world-token nonce moved or was
-    // eliminated entirely. The login/session token-rotation path appears to be handled
-    // out-of-band in the lobby reconnect flow in 948. TODO: confirm via lobby login trace.
+    // HASHED_WORLD_TOKEN is registered in Rev948ServerCodecsMisc at op 54; production login
+    // replay shows it in the world bootstrap packet group, not the social packet group.
 }

@@ -1,33 +1,45 @@
 package org.darkan.core.mongo
 
+import de.flapdoodle.embed.mongo.config.Net
 import de.flapdoodle.embed.mongo.distribution.Version
+import de.flapdoodle.embed.mongo.types.DatabaseDir
 import de.flapdoodle.embed.mongo.transitions.Mongod
 import de.flapdoodle.embed.mongo.transitions.RunningMongodProcess
 import de.flapdoodle.reverse.TransitionWalker
+import de.flapdoodle.reverse.transitions.Start
+import org.darkan.core.EnvVars
 import org.darkan.core.Logger
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.nio.file.Files
+import java.nio.file.Path
+import kotlin.io.path.Path
 
 /**
- * Optional in-process MongoDB used for dev (`EMBEDDED_MONGO=true`).
- *
- * On first start Flapdoodle downloads a mongod binary for the host platform
- * into `~/.embedmongo/` and runs it on an ephemeral loopback port. Once the
- * process is up [uri] returns the connection string the rest of the app should
- * use instead of `EnvVars.mongoUri`.
- *
- * The data lives in a temp directory that mongod cleans up on stop, so each
- * run starts empty — fine for dev / smoke tests, NOT for prod.
+ * Shared dev mongod for `EMBEDDED_MONGO=true`.
  */
 object EmbeddedMongo {
     private var running: TransitionWalker.ReachedState<RunningMongodProcess>? = null
 
-    /** Connection URI of the running embedded mongod, or null if not started. */
     var uri: String? = null
         private set
 
     fun start(): String {
         running?.let { return uri!! }
-        Logger.log("EmbeddedMongo", "Starting in-process mongod (first run will download the binary)...")
-        val state = Mongod.instance().start(Version.Main.V7_0)
+
+        val host = EnvVars.embeddedMongoHost
+        val port = EnvVars.embeddedMongoPort
+        val sharedUri = "mongodb://$host:$port"
+        if (canConnect(host, port)) {
+            uri = sharedUri
+            Logger.log("EmbeddedMongo", "Using existing embedded mongod at $sharedUri")
+            return sharedUri
+        }
+
+        val databaseDir = Path(EnvVars.embeddedMongoDataDir).toAbsolutePath()
+        Files.createDirectories(databaseDir)
+        Logger.log("EmbeddedMongo", "Starting shared embedded mongod at $sharedUri (dbPath=$databaseDir)")
+        val state = mongod(host, port, databaseDir).start(Version.Main.V7_0)
         val addr = state.current().serverAddress
         val u = "mongodb://${addr.host}:${addr.port}"
         running = state
@@ -43,5 +55,23 @@ object EmbeddedMongo {
         }
         running = null
         uri = null
+    }
+
+    private fun mongod(host: String, port: Int, databaseDir: Path): Mongod {
+        return Mongod.builder()
+            .net(Start.to(Net::class.java).initializedWith(Net.of(host, port, false)))
+            .databaseDir(Start.to(DatabaseDir::class.java).initializedWith(DatabaseDir.of(databaseDir)))
+            .build()
+    }
+
+    private fun canConnect(host: String, port: Int): Boolean {
+        return try {
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(host, port), 250)
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }

@@ -56,7 +56,9 @@ pub fn launch_rs3(
     // on Windows when the injector is found — preserves historical gating).
     #[cfg(windows)]
     let mut cmd = build_windows_command(&target_argv, needs_patcher, rsa_modulus, proxy_mode);
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
+    let mut cmd = build_macos_command(&target_argv, binary, needs_patcher, rsa_modulus, proxy_mode);
+    #[cfg(all(unix, not(target_os = "macos")))]
     let mut cmd = build_unix_command(&target_argv, binary, needs_patcher, rsa_modulus, proxy_mode);
     #[cfg(not(any(windows, unix)))]
     let mut cmd = {
@@ -114,7 +116,7 @@ pub fn launch_rs3(
 /// Preserves the historical gating exactly: DARKAN_RSA_MODULUS and
 /// DARKAN_PROXY_MODE are only set when the patcher library is found, so
 /// behavior is unchanged for any existing Linux deploy.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn build_unix_command(
     target_argv: &[String],
     binary: &Path,
@@ -140,6 +142,62 @@ fn build_unix_command(
             log::warn!(
                 "Patcher needed but libdarkan_patcher.so not found. \
                  Build it with: cd client/launcher/patcher && cargo build --release"
+            );
+        }
+    }
+    cmd
+}
+
+/// macOS command construction. The analogue of `build_unix_command`, but it
+/// sets `DYLD_INSERT_LIBRARIES` (not `LD_PRELOAD`) and looks for the
+/// `libdarkan_patcher.dylib` (not `.so`). dyld runs the dylib's `#[ctor]`
+/// constructor before rs2client's C++ static initializers, so the RSA strings
+/// are patched before they are parsed into BigIntegers — same guarantee as the
+/// Linux LD_PRELOAD path.
+///
+/// Preserves the historical gating exactly: DARKAN_RSA_MODULUS and
+/// DARKAN_PROXY_MODE are only set when the patcher dylib is found.
+///
+/// NOTE on the argv contract: the macOS `rs2client` takes the config URI as
+/// `argv[1]` in the form `rs-launch://HOST:PORT/jav_config.ws` (NO `--configURI`
+/// flag exists — see docs/binary/patch-targets-948-mac.md §P5). `launch_rs3`
+/// above currently builds a `--configURI <uri>` argv, which is correct for the
+/// Linux launch chain (rs3linux) but NOT for spawning the mac rs2client
+/// directly. Wiring the GUI launcher's full mac launch path (resolve the mac
+/// client binary + build the `rs-launch://` argv + spawn rs2client directly,
+/// not via `open`/LaunchServices which strips DYLD_*) is a separate change;
+/// until then the testable harness is `run-client-mac.sh` at the repo root,
+/// which spawns rs2client directly with the correct `rs-launch://` argv and the
+/// same DYLD_INSERT_LIBRARIES + DARKAN_* env this function sets.
+#[cfg(target_os = "macos")]
+fn build_macos_command(
+    target_argv: &[String],
+    binary: &Path,
+    needs_patcher: bool,
+    rsa_modulus: Option<&str>,
+    proxy_mode: bool,
+) -> Command {
+    let mut cmd = Command::new(&target_argv[0]);
+    for arg in &target_argv[1..] {
+        cmd.arg(arg);
+    }
+    if needs_patcher {
+        if let Some(patcher_path) = find_patcher_library(binary) {
+            log::info!(
+                "Setting DYLD_INSERT_LIBRARIES to {}",
+                patcher_path.display()
+            );
+            cmd.env("DYLD_INSERT_LIBRARIES", &patcher_path);
+            if let Some(modulus) = rsa_modulus {
+                cmd.env("DARKAN_RSA_MODULUS", modulus);
+            }
+            if proxy_mode {
+                cmd.env("DARKAN_PROXY_MODE", "1");
+            }
+        } else {
+            log::warn!(
+                "Patcher needed but libdarkan_patcher.dylib not found. \
+                 Build it with: cd client/launcher/patcher-mac && ./build-mac.sh"
             );
         }
     }
@@ -232,7 +290,7 @@ pub fn launcher_binary_name() -> &'static str {
 /// `find_patcher_dll`, which is a diagnostic affordance only. The Windows
 /// runtime patcher is loaded by `darkan_injector.exe`, which performs its own
 /// independent DLL search at injection time.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> {
     let lib_name = "libdarkan_patcher.so";
 
@@ -269,6 +327,77 @@ pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> 
                 .join("..")
                 .join("patcher")
                 .join("target")
+                .join("release")
+                .join(lib_name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+/// Locate the patcher shared library on macOS (`libdarkan_patcher.dylib`).
+///
+/// macOS analogue of the Linux `find_patcher_library`. The dylib is set as
+/// `DYLD_INSERT_LIBRARIES` before spawning rs2client (see `build_macos_command`)
+/// and must be x86_64 + adhoc-signed (produced by `patcher-mac/build-mac.sh`).
+///
+/// Search order:
+/// 1. Next to the launcher executable itself
+/// 2. In the same directory as the client binary
+/// 3. ~/darkan-3/macos/ (and ~/darkan-3/macos/Jagex/launcher/) — the macOS
+///    custom-mode runtime directory (mirrors build-mac.sh's deploy slots)
+/// 4. In ../patcher-mac/target/x86_64-apple-darwin/release/ relative to the
+///    launcher executable (dev builds)
+#[cfg(target_os = "macos")]
+pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> {
+    let lib_name = "libdarkan_patcher.dylib";
+
+    // Next to the launcher executable
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let candidate = parent.join(lib_name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // Next to the client binary
+    if let Some(parent) = client_binary.parent() {
+        let candidate = parent.join(lib_name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    // ~/darkan-3/macos/ and ~/darkan-3/macos/Jagex/launcher/ — the macOS
+    // custom-mode runtime dir (canonical client slot lives under it).
+    if let Ok(home) = std::env::var("HOME") {
+        let macos_root = std::path::PathBuf::from(&home).join("darkan-3").join("macos");
+        for candidate in [
+            macos_root.join(lib_name),
+            macos_root.join("Jagex").join("launcher").join(lib_name),
+        ] {
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // Dev build location: relative to launcher exe at
+    // ../patcher-mac/target/x86_64-apple-darwin/release/
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let candidate = parent
+                .join("..")
+                .join("..")
+                .join("..")
+                .join("patcher-mac")
+                .join("target")
+                .join("x86_64-apple-darwin")
                 .join("release")
                 .join(lib_name);
             if candidate.exists() {

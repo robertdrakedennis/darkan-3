@@ -4,6 +4,8 @@ import org.darkan.core.net.prot.PlayerInfo
 import org.darkan.core.net.prot.update.ActiveMaskKeys
 import org.darkan.core.net.prot.update.PlayerUpdateMaskEncoder
 import org.darkan.core.net.prot.update.PlayerUpdateMaskKey
+import org.darkan.core.net.prot.update.UpdateMask
+import org.darkan.core.net.prot.update.UpdateMaskHeader
 import org.darkan.world.entity.Player
 import org.darkan.world.world.Players
 import world.gregs.voidps.buffer.write.BufferWriter
@@ -30,9 +32,6 @@ import world.gregs.voidps.buffer.write.BufferWriter
  */
 object PlayerInfoBuilder {
 
-    /** Maximum bit-packed body size for buildInit: 30 bits + 2047 × 18 bits = 36876 bits ≈ 4610 bytes. */
-    private const val INIT_BUFFER_CAPACITY = 5200
-
     /** Initial per-tick bit-packed body capacity — generous default; grows naturally via ByteBuffer reallocation if needed. */
     private const val TICK_BUFFER_CAPACITY = 8192
 
@@ -41,57 +40,141 @@ object PlayerInfoBuilder {
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
 
     /**
-     * First-tick init form. Per A4 §"4A — Pass Structure" (with cross-protocol convention from
-     * OSRS / 919-era init payloads): the body is purely bit-packed, no ext-info; the bit layout
-     * is:
-     *  * 30 bits — local player tile, encoded as `(level << 28) | (x << 14) | y` (matches
-     *    [Tile.id] / [Tile.toInt]).
-     *  * 2047 × 18 bits — region hashes for player slots 1..2047, encoded as
-     *    `(plane << 16) | (regionX << 8) | regionY` (matches [Tile.getRegionHash]). Slot 0 is
-     *    not transmitted (reserved sentinel).
+     * First-tick GPI init form — **generated from local state**, Shape A per
+     * `docs/protocol/world-bootstrap-948.md` §0/§4.3/§5. This is the ONLY GPI on the first tick
+     * (op81 ships no prefix), so it must be a coherent standalone `ProcessPlayerInfo @0x001618a0`
+     * init whose local 30-bit tile equals the op81 coord-header centre zone (the same spawn tile).
      *
-     * After buildInit completes:
-     *  * Local player's APPEARANCE ext-info IS emitted via [build] on the NEXT tick (not
-     *    here) — the first-tick payload carries positions only and the client will render
-     *    placeholder appearances until the first per-tick APPEARANCE block lands.
-     *  * `viewport.firstTick` is set to `false`.
+     * The bit block is the same four-pass structure the per-tick [build] emits
+     * (high-res-active → high-res-inactive → low-res-active → low-res-inactive over the viewport's
+     * cohorts), with one difference: the local player (high-res slot 0 == `playerIndex`) is routed
+     * through the **absolute-tile / teleport** high-res path instead of the per-tick movementType-0
+     * path. That path (§4.3 + `GetHighResolutionPlayerPosition @0x00154d30`) is:
+     *   gBit(1)=1   hasUpdate
+     *   gBit(1)     hasExtendedInfo
+     *   gBit(2)=3   movementType = 3 (teleport / jump → read absolute tile next)
+     *   gBit(30)    absolute tile = `(plane<<28) | (x<<14) | y`  (== [Tile.id])
+     *
+     * On a solo first-light the viewport has ONLY the local player in `highResIndices` and an empty
+     * `lowResIndices` (see [Viewport]); the other three passes are empty loops, which is exactly the
+     * "empty other-slots / no other players visible" init §4.3 blesses. No 2047-slot region array is
+     * written (the doc §1.3/§8 explicitly warns the prefix is NOT a flat 2047×18-bit array — and
+     * Shape A's standalone init sidesteps that bit layout entirely while no other players exist).
+     *
+     * **APPEARANCE ext-info:** emitted (with its 2-byte length prefix, added by the op22 codec) ONLY
+     * when the local player has a real pre-built appearance blob ([Appearance.cachedBytes]). The
+     * appearance PAYLOAD byte format (what goes inside [UpdateMask.Appearance.data], read by the
+     * client's `QueueExtendedInfoPacket`) is NOT documented and is cache-coupled, so we never
+     * fabricate it — if there is no real blob we set `hasExtendedInfo=0` for the local player and the
+     * avatar renders with a placeholder appearance. Per §0 the appearance is NOT the quit driver
+     * (coordinate coherence + single-GPI is); a placeholder avatar keeps the client alive. When a
+     * real appearance builder lands upstream, populating `cachedBytes` automatically lights up the
+     * block here with no further change.
+     *
+     * `viewport.firstTick` is set to `false`.
      */
     fun buildInit(player: Player): PlayerInfo {
         val viewport = player.viewport
-        val bitOut = BufferWriter(INIT_BUFFER_CAPACITY)
+        viewport.firstTick = false
+
+        val bitOut = BufferWriter(TICK_BUFFER_CAPACITY)
         bitOut.startBitAccess()
 
-        // Local player slot — 30-bit packed tile id (level, x, y).
-        // Decomposition per A4 §4B's 30-bit teleport raw layout: `(level << 28) | (x << 14) | y`.
-        // We split into two writeBits calls because writeBits takes Int (≤32 bits) and we need
-        // to ensure the upper 2 bits are placed in the MSB position of the 30-bit field.
-        val tile = player.tile
-        val packed30 = ((tile.level and 0x3) shl 28) or ((tile.x and 0x3FFF) shl 14) or (tile.y and 0x3FFF)
-        bitOut.writeBits(30, packed30)
+        // Players flagged hasExtendedInfo this tick, in cohort processing order. The local player
+        // is appended first when its appearance block is available.
+        val flaggedForExtInfo = ArrayList<Int>(8)
 
-        // Slots 1..2047 — 18-bit region hash for every OTHER player. For slot == local player's
-        // index we still emit a hash (consistent with the protocol — the client maps the local
-        // slot to its actual entity separately via the 30-bit prefix). For all other slots we
-        // emit the latest known position if a player exists; otherwise 0.
-        for (slot in 1..2047) {
-            if (slot == player.index) {
-                // Local player's region (same hash form, used for low-res list rebuild on client).
-                bitOut.writeBits(18, tile.getRegionHash() and 0x3FFFF)
-            } else {
-                val other = Players.get(slot)
-                val hash = other?.tile?.getRegionHash() ?: 0
-                bitOut.writeBits(18, hash and 0x3FFFF)
-            }
-        }
+        // Pass 1: HIGH-RES ACTIVE — the local player (slot 0) takes the absolute-tile init path;
+        // any other high-res actives (none on first light) fall back to the per-tick high-res path.
+        encodeHighResInitPass(bitOut, player, viewport.highResIndices, activeFilter = true, flaggedForExtInfo)
+        // Pass 2: HIGH-RES INACTIVE.
+        encodeHighResInitPass(bitOut, player, viewport.highResIndices, activeFilter = false, flaggedForExtInfo)
+        // Pass 3 & 4: LOW-RES (empty on first light — no other players in viewport yet).
+        encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = true, flaggedForExtInfo)
+        encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = false, flaggedForExtInfo)
 
         bitOut.stopBitAccess()
-        viewport.firstTick = false
+
+        // Record the appearance we sent so the per-tick path won't re-emit it next tick.
+        val cached = player.appearance.cachedBytes
+        if (cached != null && player.index in viewport.cachedApprHashes.indices) {
+            viewport.cachedApprHashes[player.index] = cached
+        }
+
+        // Build ext-info blocks per flagged player (currently only the local player's APPEARANCE).
+        val extendedInfo = ArrayList<ByteArray>(flaggedForExtInfo.size)
+        for (slot in flaggedForExtInfo) {
+            val target = Players.get(slot) ?: continue
+            extendedInfo.add(encodeExtendedInfoBlock(target))
+        }
 
         return PlayerInfo(
             bitBlock = bitOut.toArray(),
-            extendedInfo = emptyList(),
+            extendedInfo = extendedInfo,
             firstTick = true,
         )
+    }
+
+    /**
+     * High-res pass for the INIT form. Identical cohort filtering to [encodeHighResPass], but the
+     * local player (the viewport owner) is encoded via the absolute-tile teleport path
+     * [encodeLocalPlayerInit] so the client places the avatar at its real spawn tile. Any other
+     * high-res player (not present on first light) uses the standard per-tick high-res encoder.
+     */
+    private fun encodeHighResInitPass(
+        out: BufferWriter,
+        viewer: Player,
+        indices: List<Int>,
+        activeFilter: Boolean,
+        flaggedForExtInfo: MutableList<Int>,
+    ) {
+        for (slot in indices) {
+            val target = Players.get(slot) ?: continue
+            val matches = if (activeFilter) target.active else !target.active
+            if (!matches) continue
+
+            if (target.index == viewer.index) {
+                encodeLocalPlayerInit(out, target, flaggedForExtInfo)
+            } else {
+                val needsUpdate = needsAnyUpdate(viewer, target)
+                if (needsUpdate) {
+                    out.writeBits(1, 1)
+                    encodeHighResPosition(out, target, flaggedForExtInfo)
+                } else {
+                    out.writeBits(1, 0)
+                    out.writeBits(2, 0)
+                }
+            }
+        }
+    }
+
+    /**
+     * Local-player first-transmission high-res init (absolute-tile / teleport path), per
+     * `docs/protocol/world-bootstrap-948.md` §4.3 and `GetHighResolutionPlayerPosition`:
+     *   gBit(1)=1 hasUpdate ; gBit(1) hasExtInfo ; gBit(2)=3 movementType(teleport) ; gBit(30) tile.
+     *
+     * The 30-bit tile is `(plane<<28)|(x<<14)|y` ([Tile.id]) — this MUST equal the op81 coord-header
+     * centre zone's tile (the coherence constraint that stops the quit). hasExtInfo is set only when
+     * a real appearance blob exists (we do not fabricate the undocumented appearance payload).
+     */
+    private fun encodeLocalPlayerInit(
+        out: BufferWriter,
+        local: Player,
+        flaggedForExtInfo: MutableList<Int>,
+    ) {
+        val hasExtInfo = hasFlaggableExtendedInfo(local)
+        out.writeBits(1, 1)                       // hasUpdate
+        out.writeBits(1, if (hasExtInfo) 1 else 0) // hasExtendedInfo
+        out.writeBits(2, 3)                       // movementType = 3 (teleport → absolute tile)
+        out.writeBits(30, local.tile.id)          // absolute tile (plane<<28)|(x<<14)|y
+        if (hasExtInfo) {
+            flaggedForExtInfo.add(local.index)
+        }
+    }
+
+    fun buildIfNeeded(player: Player): PlayerInfo? {
+        if (player.viewport.firstTick) return buildInit(player)
+        return if (hasTickUpdate(player)) build(player) else null
     }
 
     /**
@@ -310,7 +393,7 @@ object PlayerInfoBuilder {
                     // so the next tick won't re-emit unless game logic explicitly queues another one.
                     effective.add(
                         appearanceKey to
-                            org.darkan.core.net.prot.update.UpdateMask.Appearance(cached)
+                            UpdateMask.Appearance(cached)
                     )
                 }
             }
@@ -330,30 +413,8 @@ object PlayerInfoBuilder {
             flagBitset = flagBitset or key.flag
         }
 
-        // Determine how many bytes the bitset needs. The expansion-driven layout is:
-        //  byte 0 always; if (byte0 & 0x01) byte 1; if (byte1 & 0x40) byte 2; if (byte2 & 0x04) byte 3.
-        // We compute the natural byte length from the highest set bit, then set expansion bits
-        // in the LOWER bytes accordingly.
-        val highestBit = 31 - Integer.numberOfLeadingZeros(flagBitset)
-        val byteCount = when {
-            highestBit < 8 -> 1
-            highestBit < 16 -> 2
-            highestBit < 24 -> 3
-            else -> 4
-        }
-        // Set expansion ("continue") bits. These are revision-dependent (947-3 = {0,14,18};
-        // 948 = {0,13,22}) so they are driven from the active codec's published positions
-        // (ActiveMaskKeys.playerExpansionBits) rather than hardcoded literals — see
-        // Rev948PlayerUpdateMaskKey.EXPANSION_BITS / docs/net/serverprot/948-research-C-*.md.
-        // EXPANSION_BITS[N] is the continue-bit in byte N that tells the client to read byte N+1.
-        val expansionBits = ActiveMaskKeys.playerExpansionBits
-        for (byte in 1 until byteCount) {
-            flagBitset = flagBitset or (1 shl expansionBits[byte - 1])
-        }
-
-        // Write LSB-first.
-        for (i in 0 until byteCount) {
-            extOut.writeByte((flagBitset ushr (i * 8)) and 0xFF)
+        for (byte in UpdateMaskHeader.player(flagBitset, ActiveMaskKeys.playerExpansionBits)) {
+            extOut.writeByte(byte.toInt() and 0xFF)
         }
 
         // Per-flag blocks in fixed processing order (ascending by PlayerUpdateMaskKey.order).
@@ -390,6 +451,26 @@ object PlayerInfoBuilder {
             return true
         }
         return false
+    }
+
+    private fun hasTickUpdate(viewer: Player): Boolean {
+        val viewport = viewer.viewport
+        for (slot in viewport.highResIndices) {
+            val target = Players.get(slot) ?: continue
+            if (hasQueuedUpdateOrUndeliveredAppearance(viewer, target)) return true
+        }
+        for (slot in viewport.lowResIndices) {
+            val target = Players.get(slot) ?: continue
+            if (hasQueuedUpdateOrUndeliveredAppearance(viewer, target)) return true
+        }
+        return false
+    }
+
+    private fun hasQueuedUpdateOrUndeliveredAppearance(viewer: Player, target: Player): Boolean {
+        if (target.pendingUpdates.hasPlayerUpdates()) return true
+        val cached = target.appearance.cachedBytes ?: return false
+        val viewerHashes = viewer.viewport.cachedApprHashes
+        return target.index in viewerHashes.indices && viewerHashes[target.index] == null
     }
 
     /**

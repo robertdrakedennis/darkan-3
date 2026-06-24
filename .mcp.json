@@ -1,13 +1,13 @@
 {
   "mcpServers": {
     "ghidra": {
-      "command": "python",
+      "command": "/Users/robert/.local/share/ghidramcp/.venv-darkan/bin/python",
       "args": [
-        "/home/trent/projects/project-undercut/bridge_mcp_ghidra.py",
-        "--base-port",
-        "8080",
-        "--port-range",
-        "10"
+        "/Users/robert/.local/src/GhidraMCP/bridge_mcp_ghidra.py",
+        "--ghidra-server",
+        "http://127.0.0.1:9080/",
+        "--token-file",
+        "/Users/robert/.config/ghidramcp/token"
       ]
     }
   }

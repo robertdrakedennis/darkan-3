@@ -119,7 +119,10 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
                     opcodeByte = withTimeoutOrNull(5000) { input.readByte() }
                     if (opcodeByte == null) {
                         val idleSec = (System.currentTimeMillis() - lastRequestTime) / 1000
-                        logFinest("JS5 idle ${idleSec}s after $requestCount requests from $ip")
+                        // DIAGNOSTIC (JS5 stall): surfaced at INFO so a pilot run at the default
+                        // TRACE/FINER level shows whether the reader is alive and idling on the
+                        // persistent socket (i.e. the client sent nothing) vs. parsing requests.
+                        logInfo("JS5 idle ${idleSec}s after $requestCount requests from $ip")
                     }
                 }
 
@@ -134,7 +137,9 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
                         val index = input.readByte().toInt() and 0xFF
                         val group = input.readInt()
                         input.readInt() // padding
-                        logFinest("JS5 request: index=$index group=$group opcode=$opcode (${if (urgent) "urgent" else "prefetch"} pri=$priority) from $ip")
+                        // DIAGNOSTIC (JS5 stall): INFO-level so post-master-index content requests
+                        // on the persistent TCP socket are visible without enabling FINEST.
+                        logInfo("JS5 request: index=$index group=$group opcode=$opcode (${if (urgent) "urgent" else "prefetch"} pri=$priority) from $ip")
                         val ref = (index.toLong() shl 32) or (group.toLong() and 0xFFFFFFFFL)
                         val request = JS5Request(index, group, urgent, priority, ref)
                         val item = JS5QueueItem.FileRequest(request)

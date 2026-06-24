@@ -14,7 +14,14 @@ interface ClientProt
 @JvmInline
 value class Ping(val dummy: Int = 0) : ClientProt
 
+@JvmInline
+value class MapBuildComplete(val dummy: Int = 0) : ClientProt
+
+data class AntiCheatChallengeResponse(val challengeA: Int, val challengeB: Int, val sequence: Int) : ClientProt
+
 data class RequestWorldList(val worldlistVersion: Int) : ClientProt
+
+data class SceneGraphReport(val value: Int) : ClientProt
 
 // --- Social ---
 
@@ -55,6 +62,8 @@ data class RequestWorldList(val worldlistVersion: Int) : ClientProt
  * (ushr 16) and component id (and 0xFFFF). slotId/itemId identify the clicked sub-element.
  */
 data class IfButton(val buttonId: Int, val interfaceHash: Int, val slotId: Int, val itemId: Int) : ClientProt
+
+data class MacOsLobbyHandoff(val button: IfButton?) : ClientProt
 
 /** RESUME_P_NAMEDIALOG (opcode 84, varByte) — typed display name from name dialog. */
 data class ResumePNameDialog(val name: String) : ClientProt

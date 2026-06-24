@@ -21,6 +21,8 @@ import org.darkan.core.model.IFEvents
 import org.darkan.core.model.Vars
 import org.darkan.core.formatForProtocol
 import org.darkan.core.mongo.Accounts
+import org.darkan.core.net.login.LoginToken
+import org.darkan.core.net.login.RsaCredentialTailParser
 import org.darkan.core.security.PasswordHash
 import org.darkan.core.net.prot.*
 import org.darkan.core.net.prot.handler.PacketHandlers
@@ -146,19 +148,15 @@ class LoginServer {
         val sessionCheck = decryptedRsa.readLong()
         logTrace("RSA session check: $sessionCheck from $ip")
 
-        // 947-1 RSA block layout after session check:
-        //   1. Auth token (RS string) — binary hash/token, not a typed password
-        //   2. Password (RS string) — the actual plaintext password
-        //   3. Two longs (unknown purpose)
-        val authToken = if (decryptedRsa.remaining > 0) decryptedRsa.readRSString() else ""
-        logTrace("RSA auth token: ${authToken.length} bytes from $ip")
-        val password = if (decryptedRsa.remaining > 0) decryptedRsa.readRSString() else ""
-        logTrace("RSA password: ${password.length} chars from $ip")
-
-        while (decryptedRsa.remaining > 0) {
-            val remaining = decryptedRsa.readByteArray(decryptedRsa.remaining.toInt())
-            logTrace("RSA remaining ${remaining.size} bytes: ${remaining.joinToString(" ") { "%02x".format(it) }}")
+        val credentialTail = if (decryptedRsa.remaining > 0) {
+            RsaCredentialTailParser.parse(decryptedRsa.readByteArray(decryptedRsa.remaining.toInt()))
+        } else {
+            RsaCredentialTailParser.parse(ByteArray(0))
         }
+        logTrace("RSA credential type: ${credentialTail.credentialType ?: "legacy"} from $ip")
+        logTrace("RSA token string: ${credentialTail.tokenString.length} bytes from $ip")
+        val password = credentialTail.password
+        logTrace("RSA password: ${password.length} chars from $ip")
 
         // Step 4: XTEA-decrypted section
         val xteaData = packet.readByteArray(packet.remaining.toInt())
@@ -255,8 +253,12 @@ class LoginServer {
 
     /**
      * Build the lobby login data blob using real account data.
+     *
+     * `internal` (not `private`) so [LobbyLoginResponseTest] can pin the world-connect target tail
+     * (worldId/host/portA/portB, #26–#29) byte-for-byte — it is the only thing that gets a cold
+     * lobby into a world (§10), so a regression there is silent-but-fatal.
      */
-    private fun buildLobbyData(account: Account): ByteArray {
+    internal fun buildLobbyData(account: Account): ByteArray {
         val buf = BufferWriter(128)
         val nowMs = System.currentTimeMillis()
 
@@ -282,15 +284,49 @@ class LoginServer {
         buf.writeShort(0)                         // #20 unknown7
         buf.writeShort(0)                         // #21 unknown8
         buf.writeByte(1)                          // #22 isMembersWorld (bool)
-        buf.writePrefixedString(account.displayName) // #23 displayName
+        // #23 displayName — read mid-block by the client with gStr (FUN_00126e90 = NUL-terminated
+        // CP1252, NO leading length/flag byte) into record +0x68 (§10.3, @0x001cd7c7). MUST be
+        // writeString (CP1252 + single trailing NUL), NOT writePrefixedString. writePrefixedString
+        // prepends an extra 0x00, which gStr reads as an immediate terminator → displayName parses as
+        // empty (consuming 1 byte) → the real name bytes + the ENTIRE world-target tail (host/portA/
+        // portB/sid1/sid2) desync. Same gStr reader and same fix as the world host (#27 below).
+        buf.writeString(account.displayName)      // #23 displayName
+
+        // ── World-connect target tail (docs/protocol/lobby-world-switch-948.md §10.3) ──
+        // VERIFIED against rs2client.948-5 LoginStepHandleLoginData @0x001cd360 (LOBBY branch).
+        // This is how a cold-lobby "Play Now" learns the world host:port — NOT op212/op213.
+        // The client parses worldId(g2) → host(gStr) → portA(g2) → portB(g2) → sid1(u64) →
+        // sid2(u64) at the TAIL of this block, builds a WorldTarget, stages it PENDING at
+        // WorldSwitcher+0xa8, and CommitWorldTargetFromLogin promotes it to CURRENT (+0x20) —
+        // the slot LoginStepWaitingConnectionOpened reads for the (type-2) world connect.
         buf.writeByte(0)                          // #24 unknown9
         buf.writeInt(0)                           // #25 unknown10
-        buf.writeShort(EnvVars.worldId)               // #26 worldId
-        buf.writePrefixedString(EnvVars.worldHost)    // #27 serverHostname
-        buf.writeShort(EnvVars.worldPort)             // #28 gamePort (43595 — world server, NOT lobby)
-        buf.writeShort(443)                           // #29 httpsPort
-        buf.writeLong(0x4461726B616E3333L)        // #30 sessionToken1 = "Darkan33"
-        buf.writeLong(0x5365727665723033L)        // #31 sessionToken2 = "Server03"
+        // #26 worldId — g2 (BE u16). MUST be the real world number, NOT 0xffff: the client maps
+        // 0xffff→-1 ("no world") and CommitWorldTargetFromLogin (@0x001acdf0) early-returns on
+        // worldId==-1, leaving CURRENT (+0x20) empty so the world connect has no target.
+        buf.writeShort(EnvVars.worldId)
+        // #27 serverHostname — host the client opens the world TCP socket to. The client reads it
+        // with gStr (FUN_00126e90 = NUL-terminated CP1252, NO leading length byte), so this MUST be
+        // writeString (CP1252 + NUL), NOT writePrefixedString. writePrefixedString prepends an extra
+        // 0x00, which gStr reads as an immediate terminator → empty host → the real host bytes are
+        // then misparsed as portA/portB and every following field desyncs. (Was writePrefixedString.)
+        buf.writeString(EnvVars.worldHost)
+        // #28/#29 portA/portB — g2 (BE u16) each. OpenConnection (@0x00b21d70) uses portA when the
+        // target's +0x2c select byte is 0; the login-response builder sets +0x2c=1 → portB is used.
+        // Send the same world listen port (EnvVars.worldPort, default 43595) in BOTH so the connect
+        // hits the world server regardless of which the select byte picks. There is NO hardcoded 443
+        // in the connect path — the prior 443 here (an "httpsPort" guess) would have been the port the
+        // client connected to via portB. Port comes from config; do not hardcode.
+        buf.writeShort(EnvVars.worldPort)         // #28 portA
+        buf.writeShort(EnvVars.worldPort)         // #29 portB
+        val worldToken = LoginToken.issueCompact(
+            username = account.username,
+            nowMs = nowMs,
+            ttlMs = EnvVars.worldLoginTokenTtlMs,
+            secret = EnvVars.worldLoginTokenSecret,
+        )
+        buf.writeLong(worldToken.part1)           // #30 sessionId1 (u64 BE) — compact world-login token; → LoginManager+0xf0
+        buf.writeLong(worldToken.part2)           // #31 sessionId2 (u64 BE) — compact world-login signature; → LoginManager+0xf8
 
         return buf.toArray()
     }
@@ -415,8 +451,6 @@ class LoginServer {
         logInfo("Sent lobby init packets to ${session.ip}")
     }
 
-    // sendVarc removed — use Vars.setVarc() instead
-
     /**
      * Dispatch loop for the lobby session.
      * Reads decoded packets from [session.readChannel] and dispatches to handlers.
@@ -448,9 +482,10 @@ class LoginServer {
                 // Flush any queued responses after processing packets
                 session.flush()
 
+                val now = System.currentTimeMillis()
+
                 // Send periodic keepalives — flushed immediately so they aren't delayed
                 // until the next loop iteration.
-                val now = System.currentTimeMillis()
                 if (now - lastKeepaliveSent > KEEPALIVE_INTERVAL_MS) {
                     session.send(NoTimeout())
                     session.flush()

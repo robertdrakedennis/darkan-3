@@ -1,0 +1,39 @@
+[package]
+name = "darkan-patcher-mac"
+version = "0.1.0"
+edition = "2021"
+
+# This crate is macOS-only. Building on any other platform is unsupported —
+# the Linux equivalent lives at `client/launcher/patcher/` (LD_PRELOAD + mprotect
+# + /proc/self/maps) and the Windows equivalent at `client/launcher/patcher-win/`
+# (LoadLibrary injection + VirtualProtect). This crate uses
+# DYLD_INSERT_LIBRARIES injection + mach_vm_protect(VM_PROT_COPY) + the dyld
+# image-enumeration / LC_SEGMENT_64 walk (_dyld_* APIs).
+#
+# One artifact:
+#   * `libdarkan_patcher.dylib` — cdylib injected via DYLD_INSERT_LIBRARIES into
+#     the rs2client process. A `#[ctor]` constructor (which dyld runs BEFORE the
+#     main executable's __mod_init_func C++ static initializers) scans the
+#     rs2client main image's __TEXT segment for known patterns and overwrites
+#     them in time for the RSA BigInteger init to read the patched hex strings.
+#
+# Must be built `--target x86_64-apple-darwin`: rs2client is x86_64 (it runs
+# under Rosetta on Apple Silicon), and a translated process can only load an
+# x86_64 dylib. After building, the dylib must be adhoc-signed (`codesign -s -`)
+# so it is acceptable to dyld — see build-mac.sh.
+
+[lib]
+name = "darkan_patcher"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+ctor = "0.4"
+libc = "0.2"
+memchr = "2"
+mach2 = "0.4"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "z"

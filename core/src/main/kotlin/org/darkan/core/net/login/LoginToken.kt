@@ -68,10 +68,16 @@ object LoginToken {
     private const val NONCE_BYTES = 8
     private const val SIGNATURE_BYTES = 16
     private const val HEADER_BYTES = 1 + 4 + 4 + 1  // version + issued + expires + usernameLen
+    private const val COMPACT_VERSION: Byte = 1
 
     private val secureRandom = SecureRandom()
     private val base64Encoder = Base64.getUrlEncoder().withoutPadding()
     private val base64Decoder = Base64.getUrlDecoder()
+
+    data class Compact(
+        val part1: Long,
+        val part2: Long,
+    )
 
     data class Verified(
         val username: String,
@@ -96,6 +102,18 @@ object LoginToken {
         return "${base64Encoder.encodeToString(payload)}.${base64Encoder.encodeToString(signature)}"
     }
 
+    fun issueCompact(username: String, nowMs: Long, ttlMs: Long, secret: String): Compact {
+        val usernameBytes = username.toByteArray(StandardCharsets.UTF_8)
+        require(usernameBytes.size in 1..255) { "Username must be 1-255 UTF-8 bytes" }
+
+        val expiresAtSec = ((nowMs + ttlMs) / 1000) and 0xFFFFFFFFL
+        val nonce = secureRandom.nextInt().toLong() and 0xFFFFFFFFL
+        val part1 = (expiresAtSec shl 32) or nonce
+        val part2 = compactSignature(usernameBytes, part1, secret)
+
+        return Compact(part1, part2)
+    }
+
     fun verify(token: String, nowMs: Long, secret: String): Verified? {
         val dotIndex = token.indexOf('.')
         if (dotIndex <= 0 || dotIndex >= token.lastIndex) return null
@@ -112,6 +130,17 @@ object LoginToken {
         if (!MessageDigest.isEqual(expected, signature)) return null
 
         return parsePayload(payload, nowMs)
+    }
+
+    fun verifyCompact(username: String, token: Compact, nowMs: Long, secret: String): Boolean {
+        if (token.part1 == 0L && token.part2 == 0L) return false
+
+        val expiresAtSec = token.part1 ushr 32
+        if (expiresAtSec * 1000 < nowMs) return false
+
+        val usernameBytes = username.toByteArray(StandardCharsets.UTF_8)
+        val expected = compactSignature(usernameBytes, token.part1, secret)
+        return MessageDigest.isEqual(longBytes(expected), longBytes(token.part2))
     }
 
     private fun parsePayload(payload: ByteArray, nowMs: Long): Verified? {
@@ -142,6 +171,19 @@ object LoginToken {
             init(SecretKeySpec(keyBytes, "HmacSHA256"))
         }.doFinal(data)
     }
+
+    private fun compactSignature(usernameBytes: ByteArray, part1: Long, secret: String): Long {
+        val payload = ByteBuffer.allocate(1 + 8 + 1 + usernameBytes.size).apply {
+            put(COMPACT_VERSION)
+            putLong(part1)
+            put(usernameBytes.size.toByte())
+            put(usernameBytes)
+        }.array()
+        return ByteBuffer.wrap(computeHmac(payload, secret), 0, 8).long
+    }
+
+    private fun longBytes(value: Long): ByteArray =
+        ByteBuffer.allocate(Long.SIZE_BYTES).putLong(value).array()
 
     private fun generateNonce(): ByteArray = ByteArray(NONCE_BYTES).also { secureRandom.nextBytes(it) }
 }

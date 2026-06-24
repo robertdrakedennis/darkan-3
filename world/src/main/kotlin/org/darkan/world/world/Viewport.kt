@@ -1,6 +1,7 @@
 package org.darkan.world.world
 
 import org.darkan.world.entity.Player
+import world.gregs.voidps.type.Tile
 
 /**
  * Per-player visibility state read each tick by the PLAYER_INFO / NPC_INFO builders
@@ -43,13 +44,39 @@ class Viewport(val owner: Player) {
     val sentNpcAdds: MutableSet<Int> = mutableSetOf()
 
     /**
-     * Build area centre in chunk (zone) coordinates. Default Lumbridge: tile
-     * (3200, 3200) -> chunk (400, 400). [buildAreaSize] is 13 chunks (= 104 tiles)
-     * matching the standard NXT viewport.
+     * The build-area map-square (region) grid the client allocated from the last op81, and the
+     * authoritative spatial gate for zone streaming (`ZoneBundleBuilder`). Computed from the
+     * owner's spawn tile + a [BuildAreaSize] by [loadBuildArea]; defaults to a window centred on
+     * the owner's current tile so the viewport is coherent before the first explicit rebuild.
+     *
+     * Per `docs/protocol/packed-coord-buildarea-948.md`, this drives op81's `packedCoordA`
+     * (SW corner) / `packedCoordB` (NE corner). Keep it in sync with what was sent on the wire:
+     * [loadBuildArea] is the single routine that recomputes it and (callers then) re-send op81.
      */
-    var buildAreaChunkX: Int = 400
-    var buildAreaChunkY: Int = 400
-    var buildAreaSize: Int = 13
+    var buildArea: BuildArea = BuildArea.of(owner.tile)
+        private set
+
+    /**
+     * Build area centre in chunk (zone) coordinates — the op81 coord-header centre zone. Derived
+     * from the owner's spawn tile (`tile >> 3`); the render scene window is positioned here inside
+     * the larger [buildArea] map-square grid (spec §2). Default Lumbridge tile (3200,3200) -> zone
+     * (400,400).
+     */
+    var buildAreaChunkX: Int = owner.tile.x shr 3
+    var buildAreaChunkY: Int = owner.tile.y shr 3
+
+    /**
+     * Recomputes [buildArea] (and the centre zone) from the given spawn tile + size, returning the
+     * new build area so the caller can encode op81's corners from it. This is the
+     * `loadMapRegions`-style routine (alerion shape): one place that recomputes the build-area
+     * state, keeping [buildArea] coherent with the op81 the world server then ships.
+     */
+    fun loadBuildArea(tile: Tile, size: BuildAreaSize = BuildAreaSize.DEFAULT): BuildArea {
+        buildArea = BuildArea.of(tile, size)
+        buildAreaChunkX = tile.x shr 3
+        buildAreaChunkY = tile.y shr 3
+        return buildArea
+    }
 
     /** First-tick init flag — must send the init-form PlayerInfo with 18-bit region hashes. */
     var firstTick: Boolean = true

@@ -4,11 +4,14 @@ import org.darkan.core.net.prot.Codec
 import org.darkan.core.net.prot.ProtSize
 
 /**
- * Registers opcode metadata (name + size) for ALL 130 ClientProt opcodes in rev 948-2-2.
+ * Registers opcode metadata for rev 948 ClientProt: the 130 `RegisterAll` opcodes plus
+ * live macOS 948-5 packets found in production captures.
  * Opcodes that have real decoder registrations will NOT be overwritten (putIfAbsent).
  *
- * SIZES: 130/130 extracted directly from `jag::ClientProt::RegisterAll @ 0x000c45b0` in
- * rs2client.948-2-2 (each `ClientProt(&entry, opcode, size)` call). Authoritative.
+ * SIZES: 130/130 `RegisterAll` entries were extracted directly from
+ * `jag::ClientProt::RegisterAll @ 0x000c45b0` in rs2client.948-2-2 (each
+ * `ClientProt(&entry, opcode, size)` call). Live additions are capture-derived until
+ * their senders are mapped.
  *
  * NAMES — THE LAW: every name is the OFFICIAL `jag::ClientProt::<NAME>` enum symbol harvested
  * from the beta unstripped binary (librs2client.so, the `jag::ClientProt` ProtEntry globals at
@@ -174,6 +177,9 @@ internal fun Codec.registerRev948ClientProtStubs() {
     c(127, "IF_BUTTON1", 8)                           // CONFIRMED — beta 0x00a394d0 / 948 IfButtonXInner 0x002978d0, CS2-table opt1 slot 0x01365920->ProtEntry 0x015d36c0 (xref-verified) / capture op127 size8 (interface click). 8B click: interfaceHash intLittle + slotId uShortAddLittle + itemId uShortAdd. Decoder in Rev948ClientCodecs.
     c(128, "UNKNOWN_128", -2)                         // CONF:NONE — UNBOUND (RegisterAll only)
     c(129, "UNKNOWN_129", -1)                         // CONF:NONE — fn SendOpLocCS2 @ 0x0033e140 (entry 0x015d36a0); no official OPLOC*_CS2 enum
+    c(203, "UNKNOWN_203", -2)                         // LIVE: post-world macOS 948-5 client sync packet; keep framed while reverse engineering exact sender.
+    c(218, "UNKNOWN_218", 70)                         // LIVE: macOS 948-5 lobby handoff tail packet. Production session-20260622-152729-production-isaac decodes clean only at fixed 70; Linux 948-5 RegisterAll has no op218 entry.
+    c(240, "UNKNOWN_240", 7)                          // LIVE: macOS 948-5 post-world-login wrapper; payload is 0x5e + op52 display-info body in production session-20260622-152729-production-isaac. Linux 948-5 RegisterAll has no op240 entry.
 }
 
 private fun Codec.c(opcode: Int, name: String, size: Int) {

@@ -20,7 +20,9 @@ import java.util.zip.CRC32
  */
 
 private const val HOST = "localhost"
-private const val PORT = 43594
+// Lobby/JS5 port. NOTE: the mac split-port setup uses .env LOBBY_PORT=43596;
+// point this at 43596 (not the legacy 43594) when testing that running server.
+private const val PORT = 43596
 private const val MAJOR_VERSION = 948
 private const val MINOR_VERSION = 1
 private const val JS5_TOKEN = "ev9+VAp5/tMKeNR/7MOuH6lKWS+rGkHK"

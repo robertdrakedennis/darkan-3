@@ -260,7 +260,7 @@ Size codes: positive int = fixed byte length; `-1` = varByte (1-byte length pref
 | 213 | 0xd5 | -1 | SWITCH_WORLD | was op 179 (SWITCH_WORLD) | H | 0x001ae9e0 |
 | 214 | 0xd6 | 0 | UNKNOWN_214 | — | ? | 0x00182650 |
 | 215 | 0xd7 | 8 | UNKNOWN_215 | — | ? | 0x001deaa0 |
-| 216 | 0xd8 | -2 | UNKNOWN_216 | — | ? | 0x0018fea0 |
+| 216 | 0xd8 | -2 | WORLDLIST_FETCH_REPLY | WorldData::WORLDLIST_FETCH_REPLY | H | 0x00190020 |
 | 217 | 0xd9 | 4 | SOUND_MODIFY | new in 948 (no 947-3 equivalent) | M | 0x00175c90 |
 
 ---

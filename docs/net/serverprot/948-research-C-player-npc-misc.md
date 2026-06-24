@@ -28,6 +28,20 @@ CORRECT.
 
 ## 3. The 948 ext-info "scrambled" reader family (NEW vs 947-3, IMPORTANT)
 
+> **⚠️ CORRECTION (2026-06-22, world-entry RE).** The claim below that "Server may
+> always emit mode 0 + plain BE value" / "prefix each scrambled scalar with
+> `writeByte(0)`" is **WRONG**. The mode selector is **NOT on the wire** — the
+> `packet+0x28` mode cursor is initialised to a pointer into **read-only `.rodata`**
+> (`@0x00cb6a80`, block `.rodata` r=true **w=false**) and reset to a fixed offset
+> before each dispatch block (36 resets in `PlayerEntity::ProcessExtendedInfo @0x0015e290`,
+> 948-5; the 948-2-2 `0x0015e110` drifted). The modes are a **fixed client-side
+> obfuscation table, not transmitted**, so the server must apply the *table-dictated*
+> transform per field — NOT prepend a `0` byte (which the client would consume as
+> real data → desync). The transform table below is still correct; only the
+> "transmitted mode byte" model is wrong. Full analysis + the APPEARANCE example
+> (length=mode3, body=mode2 at base `0x00cb6ac0`) in
+> `docs/protocol/player-appearance-948.md` §1 and §6.
+
 Every scalar field in both ext-info handlers is read through a `gScrambled*` reader
 (`gScrambledByte/Ubyte`, `gScrambledUshort`=`jag::Packet::gScrambledUshort @ 0x0047f170`,
 `FUN_0047f240` mode-select short, `gScrambledUint`, `gScrambledMedium`) or the mode-select
@@ -137,17 +151,9 @@ FORCED_MOVEMENT/NAME_OVERRIDE/COMBAT_LEVEL_HEADBAR all on wrong bits). Now corre
   ResetAllVarps 5, NoTimeout 54, RunClientScript 110, WorldlistReply 216, FriendStatus 26) were
   registered + handler-verified by the prior pass; not re-walked here.
 
-## 7. Cross-domain bug to escalate (NOT my owned file)
+## 7. Cross-domain bug status
 
-`world/.../PlayerInfoBuilder.kt` (lines ~342-350) **hardcodes the player expansion bits to the 947
-values {0,14,18}** (`flagBitset or 0x0001 / 0x4000 / 0x040000`). Under 948 the expansion bits are
-**{0,13,22}** (`or 0x0001 / 0x2000 / 0x400000`). First-tick APPEARANCE (bit 3 → 1-byte header) is
-unaffected, but any multi-byte player mask combination will write a wrong header under 948.
-
-`world/.../NpcInfoBuilder.kt` (lines ~184-187) has the **same bug**: hardcoded 947 NPC expansion
-bits `or 0x40 / 0x2000 / 0x400000 / 0x01000000` (= bits {6,13,22,24}). 948 NPC needs
-`or 0x40 / 0x100 / 0x80000 / 0x2000000` (= bits {6,8,19,25}).
-
-**networking-protocol-engineer must make the expansion-bit OR-masks revision-aware** — drive them
-from `Rev948PlayerUpdateMaskKey.EXPANSION_BITS` {0,13,22} and `Rev948NpcUpdateMaskKey.EXPANSION_BITS`
-{6,8,19,25} (both now expose these arrays) instead of the hardcoded 947 literals.
+The world builders now drive extended-info header bytes from the active revision instead of
+hardcoded 947 literals. `PlayerInfoBuilder` and `NpcInfoBuilder` call `UpdateMaskHeader` with
+`ActiveMaskKeys.playerExpansionBits` and `ActiveMaskKeys.npcExpansionBits`; `UpdateMaskHeaderTest`
+guards both 947 and 948 byte outputs for multi-byte player and NPC masks.
