@@ -9,34 +9,43 @@ import java.nio.file.StandardCopyOption
 import java.util.zip.CRC32
 
 /**
- * One downloadable NXT client target. The `binaryType` query param on jav_config.ws selects the
- * platform; each returns its own `codebase` host, `download_name_0`, `download_crc_0` (which is the
- * CRC32 of the *decompressed* binary) and `server_version`.
+ * One per-OS NXT client target. The `binaryType` query param on jav_config.ws selects the platform;
+ * each returns its own `codebase` host, `download_name_0`, `download_crc_0` (CRC32 of the
+ * *decompressed* binary) and `server_version`.
  *
- * `localPath` is the path, relative to the client root (./data/client), where this OS's binary
- * lives. Linux + Windows-64 keep the legacy top-level names already used by the server/version dirs
- * (`rs2client`, `rs2client.exe`); macOS and the legacy 32-bit Windows build go under subdirectories
- * because their `download_name` collides with the primary ones.
+ * Each OS gets its own folder under the client root (`./data/client/<key>/`) holding the game client,
+ * the Jagex launcher (`rs3*`) and our patcher lib — so per-OS files never collide (Linux and macOS
+ * clients are both named `rs2client`). This tool downloads/verifies the **game client**; the
+ * `rs3*` launcher is acquired/seeded by the cross-platform Rust launcher (it already extracts the
+ * Linux one from Jagex's .deb), and this tool only reports whether it is present.
+ *
+ * The 32-bit Windows build (binaryType 1) is intentionally omitted: it is an ~80 KB i386 stub, not a
+ * real client. The working Windows client is 64-bit (binaryType 2).
  */
 enum class OsTarget(
-    val key: String,
+    val key: String,            // folder name under the client root AND the --os CLI key
     val binaryType: Int,
     val label: String,
-    val localPath: String,
+    val clientName: String,     // game-client filename inside the folder
+    val launcherName: String,   // Jagex launcher (rs3*) filename inside the folder
     val magicName: String,
     val magic: ByteArray,
-    val inDefaultSet: Boolean,
-    /** Native executable for this host? (ELF/Mach-O get +x; Windows .exe files don't, matching the version dirs.) */
+    /** Native executable on its host? ELF/Mach-O get +x; the Windows .exe does not. */
     val executable: Boolean,
 ) {
-    LINUX("linux", 4, "Linux x86-64", "rs2client", "ELF", byteArrayOf(0x7F, 0x45, 0x4C, 0x46), true, true),
-    WIN64("win64", 2, "Windows 64-bit", "rs2client.exe", "PE/MZ", byteArrayOf(0x4D, 0x5A), true, false),
-    MACOS("macos", 3, "macOS x86-64", "macos/rs2client", "Mach-O", byteArrayOf(0xCF.toByte(), 0xFA.toByte(), 0xED.toByte(), 0xFE.toByte()), true, true),
-    WIN32("win32", 1, "Windows 32-bit (legacy)", "win32/rs2client.exe", "PE/MZ", byteArrayOf(0x4D, 0x5A), false, false);
+    LINUX("linux", 4, "Linux x86-64", "rs2client", "rs3linux", "ELF", byteArrayOf(0x7F, 0x45, 0x4C, 0x46), true),
+    WINDOWS("windows", 2, "Windows 64-bit", "rs2client.exe", "rs3windows.exe", "PE/MZ", byteArrayOf(0x4D, 0x5A), false),
+    MACOS("macos", 3, "macOS x86-64", "rs2client", "rs3mac", "Mach-O", byteArrayOf(0xCF.toByte(), 0xFA.toByte(), 0xED.toByte(), 0xFE.toByte()), true);
+
+    /** Game-client path relative to the client root, e.g. `linux/rs2client`. */
+    val clientPath: String get() = "$key/$clientName"
+
+    /** Jagex launcher path relative to the client root, e.g. `linux/rs3linux`. */
+    val launcherPath: String get() = "$key/$launcherName"
 
     companion object {
         fun byKey(key: String): OsTarget? = entries.firstOrNull { it.key.equals(key, ignoreCase = true) }
-        val defaultSet: List<OsTarget> = entries.filter { it.inDefaultSet }
+        val defaultSet: List<OsTarget> = entries.toList()
     }
 }
 
@@ -55,6 +64,8 @@ data class TargetResult(
     val sizeBytes: Long? = null,
     val sha256: String? = null,
     val sourceUrl: String? = null,
+    val launcherPresent: Boolean = false,
+    val launcherSize: Long? = null,
     val note: String? = null,
 )
 
@@ -69,10 +80,18 @@ data class UpdateOptions(
 class ClientUpdater(private val options: UpdateOptions) {
 
     fun process(target: OsTarget): TargetResult {
+        val launcherFile = File(options.rootDir, target.launcherPath)
+        val launcherPresent = launcherFile.isFile
+        val launcherSize = if (launcherPresent) launcherFile.length() else null
+
         val cfg = try {
             JavConfig.fetch(javConfigUrl(target.binaryType))
         } catch (e: Exception) {
-            return TargetResult(target, Status.ERROR, Action.FAILED, note = "jav_config fetch failed: ${e.message}")
+            return TargetResult(
+                target, Status.ERROR, Action.FAILED,
+                launcherPresent = launcherPresent, launcherSize = launcherSize,
+                note = "jav_config fetch failed: ${e.message}",
+            )
         }
 
         val codebase = cfg.settings["codebase"]
@@ -82,11 +101,12 @@ class ClientUpdater(private val options: UpdateOptions) {
         if (codebase.isNullOrBlank() || name.isNullOrBlank() || latestCrc == null) {
             return TargetResult(
                 target, Status.ERROR, Action.FAILED, serverVersion = serverVersion,
+                launcherPresent = launcherPresent, launcherSize = launcherSize,
                 note = "jav_config missing codebase/download_name_0/download_crc_0",
             )
         }
 
-        val localFile = File(options.rootDir, target.localPath)
+        val localFile = File(options.rootDir, target.clientPath)
         val localCrc = if (localFile.isFile) crc32(localFile.readBytes()) else null
         val status = when {
             localCrc == null -> Status.MISSING
@@ -96,9 +116,9 @@ class ClientUpdater(private val options: UpdateOptions) {
 
         val base = TargetResult(
             target, status, serverVersion = serverVersion, latestCrc = latestCrc, localCrc = localCrc,
+            launcherPresent = launcherPresent, launcherSize = launcherSize,
         )
 
-        // Decide whether to fetch the binary.
         val shouldDownload = when {
             options.checkOnly -> false
             options.force -> true

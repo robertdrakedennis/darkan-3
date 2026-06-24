@@ -498,6 +498,9 @@ impl IpcState {
         .join("darkan-3");
 
         let launcher_name = crate::game::process::launcher_binary_name();
+        // Per-OS source layout: data/client/<host-os>/{rs3*, patcher lib}
+        let os_dir = crate::game::process::host_os_dir();
+        let patcher_name = crate::game::process::patcher_lib_name();
 
         tokio::spawn(async move {
             // Held for the whole task; clears the launch flag on drop (all paths).
@@ -530,12 +533,30 @@ impl IpcState {
                 return;
             }
 
-            // Ensure rs3linux is in ~/darkan-3; seed from ./data/client/ if needed
+            // Ensure the rs3 launcher is in ~/darkan-3; seed from the host-OS
+            // folder data/client/<host-os>/ if needed.
             let target_binary = darkan_dir.join(launcher_name);
             if !target_binary.exists() {
-                let source = std::path::PathBuf::from("data")
-                    .join("client")
-                    .join(launcher_name);
+                let client_root = std::path::PathBuf::from("data").join("client");
+                let mut source = client_root.join(os_dir).join(launcher_name);
+
+                // On Windows/macOS the per-OS launcher may not be on disk yet
+                // (only the game client ships pre-extracted). Auto-acquire it
+                // from Jagex's installer into data/client/<host-os>/ on demand.
+                // (Linux's rs3linux comes from the .deb flow in live mode.)
+                if !source.exists() {
+                    send_status("Downloading Jagex launcher...");
+                    let acq_client = crate::http_client();
+                    match crate::game::rs3::acquire_host_launcher(&acq_client, &client_root).await {
+                        Ok(()) => {
+                            source = client_root.join(os_dir).join(launcher_name);
+                        }
+                        Err(e) => {
+                            log::warn!("Launcher auto-acquisition failed: {}", e);
+                        }
+                    }
+                }
+
                 if source.exists() {
                     send_status("Installing launcher binary...");
                     if let Err(e) = tokio::fs::copy(&source, &target_binary).await {
@@ -553,33 +574,40 @@ impl IpcState {
                     }
                 } else {
                     send_error(&format!(
-                        "{} not found in ~/darkan-3 or ./data/client/",
-                        launcher_name
+                        "{} not found in ~/darkan-3 or ./data/client/{}/ (and auto-download unavailable)",
+                        launcher_name, os_dir
                     ));
                     return;
                 }
             }
 
-            // Also seed libdarkan_patcher.so if available and not yet in ~/darkan-3
-            let patcher_name = "libdarkan_patcher.so";
+            // Also seed the host's patcher library (linux .so / mac .dylib /
+            // win .dll) if available and not yet in ~/darkan-3.
             let target_patcher = darkan_dir.join(patcher_name);
             if !target_patcher.exists() {
-                // Check next to launcher exe, then ./data/client/, then dev build path
+                // Check the per-OS data folder, then next to the launcher exe,
+                // then the dev build path.
+                let dev_crate = if cfg!(target_os = "macos") {
+                    "patcher-mac"
+                } else {
+                    "patcher"
+                };
                 let candidates = [
-                    std::env::current_exe()
-                        .ok()
-                        .and_then(|e| e.parent().map(|p| p.join(patcher_name))),
                     Some(
                         std::path::PathBuf::from("data")
                             .join("client")
+                            .join(os_dir)
                             .join(patcher_name),
                     ),
+                    std::env::current_exe()
+                        .ok()
+                        .and_then(|e| e.parent().map(|p| p.join(patcher_name))),
                     std::env::current_exe().ok().and_then(|e| {
                         e.parent().map(|p| {
                             p.join("..")
                                 .join("..")
                                 .join("..")
-                                .join("patcher")
+                                .join(dev_crate)
                                 .join("target")
                                 .join("release")
                                 .join(patcher_name)

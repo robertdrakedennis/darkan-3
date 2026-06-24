@@ -93,9 +93,10 @@ DEST_PATHS=(
     # "next to client binary" for rs3linux). Also noted as required in project memory.
     "$HOME/darkan-3/$LIB_NAME"
     "$HOME/darkan-3/Jagex/launcher/$LIB_NAME"
-    # Project tree copies (project root + ./data/client used by run-client.sh).
+    # Project tree copies (project root + ./data/client/linux used by run-client.sh
+    # and find_patcher_library's data/client/<host-os>/ slot).
     "$HOME/projects/darkan-3/$LIB_NAME"
-    "$HOME/projects/darkan-3/data/client/$LIB_NAME"
+    "$HOME/projects/darkan-3/data/client/linux/$LIB_NAME"
     # Next to the launcher executable itself (release + debug) — find_patcher_library's
     # first candidate, and the dev "../patcher/target/release" candidate.
     "$HOME/projects/darkan-3/client/launcher/target/release/$LIB_NAME"

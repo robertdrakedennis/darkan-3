@@ -56,7 +56,9 @@ pub fn launch_rs3(
     // on Windows when the injector is found — preserves historical gating).
     #[cfg(windows)]
     let mut cmd = build_windows_command(&target_argv, needs_patcher, rsa_modulus, proxy_mode);
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
+    let mut cmd = build_macos_command(&target_argv, binary, needs_patcher, rsa_modulus, proxy_mode);
+    #[cfg(all(unix, not(target_os = "macos")))]
     let mut cmd = build_unix_command(&target_argv, binary, needs_patcher, rsa_modulus, proxy_mode);
     #[cfg(not(any(windows, unix)))]
     let mut cmd = {
@@ -114,7 +116,7 @@ pub fn launch_rs3(
 /// Preserves the historical gating exactly: DARKAN_RSA_MODULUS and
 /// DARKAN_PROXY_MODE are only set when the patcher library is found, so
 /// behavior is unchanged for any existing Linux deploy.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn build_unix_command(
     target_argv: &[String],
     binary: &Path,
@@ -140,6 +142,57 @@ fn build_unix_command(
             log::warn!(
                 "Patcher needed but libdarkan_patcher.so not found. \
                  Build it with: cd client/launcher/patcher && cargo build --release"
+            );
+        }
+    }
+    cmd
+}
+
+/// macOS command construction. Mirrors `build_unix_command` but uses the dyld
+/// equivalents of LD_PRELOAD:
+///   * `DYLD_INSERT_LIBRARIES` — the macOS preload mechanism (= LD_PRELOAD).
+///   * `DYLD_FORCE_FLAT_NAMESPACE=1` — required so the injected dylib's symbols
+///     participate in the flat lookup; without it, two-level-namespace binaries
+///     (rs2client is `TWOLEVEL`) won't honour interposition and, more relevant
+///     here, the dylib's `__attribute__((constructor))` may not run reliably for
+///     all preload styles. We only need the constructor to fire (the patcher
+///     scans memory in its ctor, it does not interpose libc symbols), but
+///     forcing the flat namespace is the documented, robust way to guarantee
+///     the insert library is initialised before the host's main().
+///
+/// The env var name differs from Linux, but the DARKAN_* gating contract is
+/// identical: they are only set when the dylib is actually located, so an
+/// un-patched (live) launch is the safe fallback when the dylib is missing.
+#[cfg(target_os = "macos")]
+fn build_macos_command(
+    target_argv: &[String],
+    binary: &Path,
+    needs_patcher: bool,
+    rsa_modulus: Option<&str>,
+    proxy_mode: bool,
+) -> Command {
+    let mut cmd = Command::new(&target_argv[0]);
+    for arg in &target_argv[1..] {
+        cmd.arg(arg);
+    }
+    if needs_patcher {
+        if let Some(patcher_path) = find_patcher_library(binary) {
+            log::info!(
+                "Setting DYLD_INSERT_LIBRARIES to {}",
+                patcher_path.display()
+            );
+            cmd.env("DYLD_INSERT_LIBRARIES", &patcher_path);
+            cmd.env("DYLD_FORCE_FLAT_NAMESPACE", "1");
+            if let Some(modulus) = rsa_modulus {
+                cmd.env("DARKAN_RSA_MODULUS", modulus);
+            }
+            if proxy_mode {
+                cmd.env("DARKAN_PROXY_MODE", "1");
+            }
+        } else {
+            log::warn!(
+                "Patcher needed but libdarkan_patcher.dylib not found. \
+                 Build it with: cd client/launcher/patcher-mac && cargo build --release"
             );
         }
     }
@@ -211,22 +264,63 @@ fn build_windows_command(
     cmd
 }
 
-/// Determine the rs3linux launcher binary name for the current platform
+/// The host OS folder name under `data/client/` for the current platform.
+///
+/// The per-OS data layout (introduced alongside the Kotlin client-manager) is:
+///   data/client/linux/    rs2client     rs3linux       libdarkan_patcher.so
+///   data/client/windows/  rs2client.exe rs3windows.exe darkan_patcher.dll + darkan_injector.exe
+///   data/client/macos/    rs2client     rs3mac         libdarkan_patcher.dylib
+///
+/// The launcher always operates on the host's folder — there is no manual
+/// override; we cross-compile per target and auto-detect at runtime.
+pub fn host_os_dir() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
+}
+
+/// The host's patcher shared-library file name for the current platform.
+///   linux   → libdarkan_patcher.so
+///   windows → darkan_patcher.dll
+///   macos   → libdarkan_patcher.dylib
+pub fn patcher_lib_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "darkan_patcher.dll"
+    } else if cfg!(target_os = "macos") {
+        "libdarkan_patcher.dylib"
+    } else {
+        "libdarkan_patcher.so"
+    }
+}
+
+/// Determine the Jagex launcher (`rs3*`) binary name for the current platform.
+///   linux   → rs3linux
+///   windows → rs3windows.exe
+///   macos   → rs3mac
 pub fn launcher_binary_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "rs3windows.exe"
+    } else if cfg!(target_os = "macos") {
+        "rs3mac"
     } else {
         "rs3linux"
     }
 }
 
-/// Locate the patcher shared library on Linux (`libdarkan_patcher.so`).
+/// Locate the host's patcher shared library on a unix host.
+///   Linux → `libdarkan_patcher.so`   macOS → `libdarkan_patcher.dylib`
 ///
 /// Search order:
-/// 1. Next to the launcher executable itself
-/// 2. In the same directory as the client binary
-/// 3. ~/darkan-3/ (project runtime directory)
-/// 4. In ../patcher/target/release/ relative to the launcher executable (dev builds)
+/// 1. `data/client/<host-os>/` relative to the launcher's working dir — the new
+///    canonical per-OS layout, checked first so a fresh per-OS build always wins.
+/// 2. Next to the launcher executable itself
+/// 3. In the same directory as the client binary
+/// 4. ~/darkan-3/ (project runtime directory used by custom mode)
+/// 5. In ../patcher{,-mac}/target/release/ relative to the launcher exe (dev builds)
 ///
 /// On Windows this returns None — the equivalent DLL lookup is exposed via
 /// `find_patcher_dll`, which is a diagnostic affordance only. The Windows
@@ -234,13 +328,25 @@ pub fn launcher_binary_name() -> &'static str {
 /// independent DLL search at injection time.
 #[cfg(unix)]
 pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> {
-    let lib_name = "libdarkan_patcher.so";
+    let lib_name = patcher_lib_name();
+
+    // Canonical per-OS layout: data/client/<host-os>/<lib>. This is the slot the
+    // user requires the launcher to load from at launch time.
+    let os_slot = std::path::PathBuf::from("data")
+        .join("client")
+        .join(host_os_dir())
+        .join(lib_name);
+    if os_slot.exists() {
+        return Some(os_slot);
+    }
 
     // Next to the launcher executable
     if let Ok(exe) = std::env::current_exe() {
-        let candidate = exe.parent()?.join(lib_name);
-        if candidate.exists() {
-            return Some(candidate);
+        if let Some(parent) = exe.parent() {
+            let candidate = parent.join(lib_name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
         }
     }
 
@@ -260,14 +366,20 @@ pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> 
         }
     }
 
-    // Dev build location: relative to launcher exe at ../patcher/target/release/
+    // Dev build location: relative to launcher exe at ../patcher{,-mac}/target/release/.
+    // macOS dylibs come from the `patcher-mac` crate, Linux .so from `patcher`.
+    let dev_crate = if cfg!(target_os = "macos") {
+        "patcher-mac"
+    } else {
+        "patcher"
+    };
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             let candidate = parent
                 .join("..")
                 .join("..")
                 .join("..")
-                .join("patcher")
+                .join(dev_crate)
                 .join("target")
                 .join("release")
                 .join(lib_name);

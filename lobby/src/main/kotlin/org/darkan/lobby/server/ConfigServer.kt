@@ -24,12 +24,112 @@ import kotlin.time.Duration.Companion.seconds
 class ConfigServer(private val fileProvider: FileProvider? = null) {
     private lateinit var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>
 
-    private val binaryCrc: Long = computeBinaryCrc(EnvVars.clientBinaryPath)
-    private val binaryHash: String = computeBinaryHash(EnvVars.clientBinaryPath)
-    private val binarySize: Long = java.io.File(EnvVars.clientBinaryPath).let { if (it.exists()) it.length() else 0L }
+    /**
+     * Precomputed per-OS client binary metadata for jav_config + binary serving.
+     *
+     * @param path           absolute/relative filesystem path to the (raw, decompressed) binary
+     * @param downloadName    download_name_0 value the launcher expects ("rs2client" / "rs2client.exe")
+     * @param crc             CRC32 of the raw binary (download_crc_0)
+     * @param hash            RSA-signed Whirlpool hash (download_hash_0)
+     * @param size            raw binary size in bytes (download)
+     */
+    private data class BinaryInfo(
+        val path: String,
+        val downloadName: String,
+        val crc: Long,
+        val hash: String,
+        val size: Long,
+    )
+
+    // Per-OS registry, precomputed eagerly at construction. The "linux" entry is the
+    // fallback default and preserves today's single-binary behavior exactly.
+    private val binaries: Map<String, BinaryInfo> = buildBinaryRegistry()
+    private val defaultBinary: BinaryInfo = binaries.getValue("linux")
+
+    private fun buildBinaryRegistry(): Map<String, BinaryInfo> {
+        // clientBinaryPath defaults to ./data/client/linux/rs2client → clientRoot = ./data/client
+        val clientRoot = java.io.File(EnvVars.clientBinaryPath).parentFile?.parentFile
+
+        // Candidate (os → path, downloadName). Always include "linux" so the default
+        // entry exists even when clientRoot can't be derived.
+        val candidates = linkedMapOf(
+            "linux" to (EnvVars.clientBinaryPath to "rs2client"),
+        )
+        if (clientRoot != null) {
+            candidates["windows"] =
+                java.io.File(java.io.File(clientRoot, "windows"), "rs2client.exe").path to "rs2client.exe"
+            candidates["macos"] =
+                java.io.File(java.io.File(clientRoot, "macos"), "rs2client").path to "rs2client"
+        }
+
+        val registry = linkedMapOf<String, BinaryInfo>()
+        for ((os, spec) in candidates) {
+            val (path, downloadName) = spec
+            val file = java.io.File(path)
+            if (file.exists()) {
+                registry[os] = BinaryInfo(
+                    path = path,
+                    downloadName = downloadName,
+                    crc = computeBinaryCrc(path),
+                    hash = computeBinaryHash(path),
+                    size = file.length(),
+                )
+            } else {
+                logWarn("Client binary for OS '$os' not found at $path — it will not be served")
+            }
+        }
+
+        // Guarantee a "linux" fallback entry even if the linux file is missing, so
+        // defaultBinary is always resolvable (size/crc 0 → matches prior missing-file behavior).
+        if (!registry.containsKey("linux")) {
+            registry["linux"] = BinaryInfo(
+                path = EnvVars.clientBinaryPath,
+                downloadName = "rs2client",
+                crc = computeBinaryCrc(EnvVars.clientBinaryPath),
+                hash = computeBinaryHash(EnvVars.clientBinaryPath),
+                size = java.io.File(EnvVars.clientBinaryPath).let { if (it.exists()) it.length() else 0L },
+            )
+        }
+        return registry
+    }
+
+    /** Resolve a binaryType query param to one of "linux"/"windows"/"macos". null/4/unknown → linux. */
+    private fun binaryTypeToOs(bt: Int?): String = when (bt) {
+        3 -> "macos"
+        1, 2, 5, 6 -> "windows"
+        else -> "linux" // includes null and 4 (linux)
+    }
+
+    /** Look up a BinaryInfo for an OS, falling back to the linux default with a warning. */
+    private fun binaryForOs(os: String): BinaryInfo {
+        val info = binaries[os]
+        if (info == null) {
+            logWarn("No client binary registered for OS '$os' — falling back to linux default")
+            return defaultBinary
+        }
+        return info
+    }
 
     fun start() {
-        logInfo("Client binary CRC32: $binaryCrc (path: ${EnvVars.clientBinaryPath})")
+        logInfo("Client binary registry:")
+        for (os in listOf("linux", "windows", "macos")) {
+            val info = binaries[os]
+            if (info != null) {
+                logInfo("  $os -> ${info.path} (crc=${info.crc}, size=${info.size}, present)")
+            } else {
+                val expected = when (os) {
+                    "linux" -> EnvVars.clientBinaryPath
+                    "windows" -> java.io.File(EnvVars.clientBinaryPath).parentFile?.parentFile?.let {
+                        java.io.File(java.io.File(it, "windows"), "rs2client.exe").path
+                    } ?: "(unknown)"
+                    else -> java.io.File(EnvVars.clientBinaryPath).parentFile?.parentFile?.let {
+                        java.io.File(java.io.File(it, "macos"), "rs2client").path
+                    } ?: "(unknown)"
+                }
+                logInfo("  $os -> $expected (absent)")
+            }
+        }
+        logInfo("Client binary CRC32: ${defaultBinary.crc} (path: ${defaultBinary.path})")
         server = embeddedServer(Netty, port = EnvVars.configHttpPort) {
             install(WebSockets) {
                 pingPeriod = 15.seconds
@@ -88,15 +188,33 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
                     val path = call.request.local.uri
                     logInfo("HTTP request: ${call.request.local.method.value} $path")
                     if (path.contains("jav_config.ws")) {
+                        val binaryType = call.request.queryParameters["binaryType"]?.toIntOrNull()
+                        val os = binaryTypeToOs(binaryType)
+                        val info = binaryForOs(os)
+                        logInfo("Serving jav_config for binaryType=$binaryType -> os=$os (binary=${info.downloadName})")
                         call.respondText(
-                            generateJavConfig(),
+                            generateJavConfig(info),
                             ContentType.Text.Plain.withCharset(Charsets.ISO_8859_1)
                         )
                     } else if (path.contains("rs2client")) {
-                        // Serve the client binary so rs3linux can download it
-                        val file = java.io.File(EnvVars.clientBinaryPath)
+                        // Serve the client binary so the launcher can download it. The launcher
+                        // appends ?binaryType=N (&fileName=NAME) when fetching the binary.
+                        val binaryType = call.request.queryParameters["binaryType"]?.toIntOrNull()
+                        val os = if (binaryType != null) {
+                            binaryTypeToOs(binaryType)
+                        } else {
+                            // No binaryType — infer from fileName (rs2client.exe → windows), else linux.
+                            val fileName = call.request.queryParameters["fileName"]
+                            if (fileName != null && fileName.endsWith(".exe", ignoreCase = true)) "windows" else "linux"
+                        }
+                        val info = binaryForOs(os)
+                        var file = java.io.File(info.path)
+                        if (!file.exists()) {
+                            logWarn("Client binary for os=$os missing at ${info.path} — falling back to ${EnvVars.clientBinaryPath}")
+                            file = java.io.File(EnvVars.clientBinaryPath)
+                        }
                         if (file.exists()) {
-                            logInfo("Serving client binary: ${file.absolutePath} (${file.length()} bytes)")
+                            logInfo("Serving client binary (os=$os): ${file.absolutePath} (${file.length()} bytes)")
                             call.respondFile(file)
                         } else {
                             call.respondText("Client binary not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
@@ -154,7 +272,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         call.respondBytes(response, ContentType.Application.OctetStream)
     }
 
-    private fun generateJavConfig(): String = buildString {
+    private fun generateJavConfig(info: BinaryInfo): String = buildString {
         val host = "localhost"
         val lobbyPort = EnvVars.lobbyPort
 
@@ -165,9 +283,9 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("adverturl=")
         line("codebase=http://$host:${EnvVars.configHttpPort}/")
         line("binary_name=rs2client")
-        line("download_name_0=rs2client")
-        line("download_crc_0=$binaryCrc")
-        line("download_hash_0=$binaryHash")
+        line("download_name_0=${info.downloadName}")
+        line("download_crc_0=${info.crc}")
+        line("download_hash_0=${info.hash}")
         line("binary_count=1")
         line("launcher_version=224")
         line("server_version=${EnvVars.majorVersion}")
@@ -175,7 +293,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("cache_variant_suffix=")
         line("termsurl=https://legal.jagex.com/docs/terms")
         line("privacyurl=https://legal.jagex.com/docs/policies")
-        line("download=$binarySize")
+        line("download=${info.size}")
         line("window_preferredwidth=1024")
         line("window_preferredheight=768")
         line("advert_height=96")

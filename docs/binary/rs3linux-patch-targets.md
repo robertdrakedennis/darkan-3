@@ -7,6 +7,25 @@ codebase URL whitelist.
 Produced by: ghidra-reverse-engineer agent
 Binary: `client/rs3linux` (ELF64, PIE/ET_DYN, image base 0x00100000 in Ghidra)
 
+> **Per-OS data layout (2026-06-24).** The client/launcher binaries now live
+> under a per-OS tree at `data/client/<os>/`:
+> | OS | game client | Jagex launcher | patcher artifact |
+> |----|-------------|----------------|------------------|
+> | linux   | `data/client/linux/rs2client`     | `data/client/linux/rs3linux`       | `libdarkan_patcher.so` |
+> | windows | `data/client/windows/rs2client.exe` | `data/client/windows/rs3windows.exe` | `darkan_patcher.dll` + `darkan_injector.exe` |
+> | macos   | `data/client/macos/rs2client`     | `data/client/macos/rs3mac`         | `libdarkan_patcher.dylib` |
+>
+> The launcher auto-detects the host via `cfg!(target_os = ...)` and resolves
+> the launcher binary name (`launcher_binary_name`), the patcher lib name
+> (`patcher_lib_name`) and the per-OS folder (`host_os_dir`) in
+> `client/launcher/src/game/process.rs`. The `rs3linux` patches below are
+> **Linux-launcher-only** (the codebase regex and LZMA flag do not exist in the
+> Windows/macOS launcher binaries, and are verified absent from the Mach-O
+> rs2client). The macOS rs2client runtime patches (login + JS5 RSA moduli, HTTP
+> port) are documented in `patch-targets-macos.md` and implemented by the
+> `client/launcher/patcher-mac` crate (`libdarkan_patcher.dylib`,
+> `DYLD_INSERT_LIBRARIES`).
+
 ---
 
 ## 1. RSA Modulus (download_hash verification)

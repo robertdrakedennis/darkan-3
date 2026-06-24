@@ -12,19 +12,19 @@ import java.time.Instant
 
 /**
  * Downloads the latest NXT game client (`rs2client`) for every major OS from Jagex's CDN and checks
- * each against the copy in ./data/client.
+ * each against the copy in ./data/client/<os>/.
  *
  * For each OS it fetches `jav_config.ws?binaryType=N` to learn the live `download_crc_0` (CRC32 of
  * the decompressed binary) and `server_version`, then compares that CRC against the local file.
  * MISSING binaries are filled in by default; OUTDATED ones are reported and only replaced with
- * `--update`. The download is LZMA-alone compressed and CRC-verified after decompression.
+ * `--update`. The download is LZMA-alone compressed and CRC-verified after decompression. The
+ * per-OS Jagex launcher (`rs3*`) is reported but acquired by the cross-platform Rust launcher.
  *
  * Run:  ./gradlew :tools:run -PmainClass=org.darkan.tools.clientupdater.MainKt --args="..."
  *
  * Flags:
  *   --dir <path>   Client root to check/update      (default ./data/client)
- *   --os a,b,c     Subset of {linux,win64,macos,win32} (default linux,win64,macos)
- *   --all          Include every known target (adds the legacy win32 stub)
+ *   --os a,b,c     Subset of {linux,windows,macos}  (default: all three)
  *   --check        Dry run: report status only, never download or write
  *   --update       Also replace OUTDATED existing binaries (not just fill MISSING ones)
  *   --force        Re-download every selected target even if UP-TO-DATE
@@ -41,14 +41,14 @@ fun main(rawArgs: Array<String>) {
     val checkOnly = args.flag("--check")
     val update = args.flag("--update")
     val force = args.flag("--force")
-    val all = args.flag("--all")
 
-    val targets: List<OsTarget> = when {
-        args.value("--os") != null -> args.value("--os")!!.split(",").mapNotNull { spec ->
-            OsTarget.byKey(spec.trim()).also { if (it == null) System.err.println("Unknown OS '$spec' — known: ${OsTarget.entries.joinToString(",") { t -> t.key }}") }
+    val targets: List<OsTarget> = when (val os = args.value("--os")) {
+        null -> OsTarget.defaultSet
+        else -> os.split(",").mapNotNull { spec ->
+            OsTarget.byKey(spec.trim()).also {
+                if (it == null) System.err.println("Unknown OS '$spec' — known: ${OsTarget.entries.joinToString(",") { t -> t.key }}")
+            }
         }
-        all -> OsTarget.entries.toList()
-        else -> OsTarget.defaultSet
     }
     if (targets.isEmpty()) {
         System.err.println("No valid OS targets selected.")
@@ -81,6 +81,12 @@ fun main(rawArgs: Array<String>) {
     if (!checkOnly) writeManifest(rootDir, results)
 
     println()
+    val missingLaunchers = results.filterNot { it.launcherPresent }
+    if (missingLaunchers.isNotEmpty()) {
+        println("ℹ launcher (rs3*) not yet present for: " +
+            missingLaunchers.joinToString(", ") { "${it.target.key} (${it.target.launcherPath})" } +
+            ". The cross-platform launcher seeds these into the OS folders.")
+    }
     val outdated = results.filter { it.action == Action.SKIPPED_OUTDATED }
     if (outdated.isNotEmpty()) {
         println("ℹ ${outdated.size} target(s) are OUTDATED but were left untouched: " +
@@ -111,15 +117,15 @@ private fun oneLineStatus(r: TargetResult): String {
 }
 
 private fun printTable(results: List<TargetResult>) {
-    val header = listOf("OS", "Rev", "Latest CRC", "Local CRC", "Status", "Action")
+    val header = listOf("OS", "Rev", "Latest CRC", "Local CRC", "Client", "Launcher")
     val rows = results.map { r ->
         listOf(
             r.target.key,
             r.serverVersion ?: "?",
             r.latestCrc?.toString() ?: "-",
             r.localCrc?.toString() ?: "(none)",
-            r.status.name,
-            actionLabel(r),
+            clientCell(r),
+            if (r.launcherPresent) "present" else "MISSING",
         )
     }
     val widths = header.indices.map { c -> (rows + listOf(header)).maxOf { it[c].length } }
@@ -129,12 +135,12 @@ private fun printTable(results: List<TargetResult>) {
     rows.forEach { println(line(it)) }
 }
 
-private fun actionLabel(r: TargetResult): String = when (r.action) {
+private fun clientCell(r: TargetResult): String = when (r.action) {
     Action.INSTALLED -> "installed"
     Action.REPLACED -> "replaced"
-    Action.SKIPPED_OUTDATED -> "skipped (--update)"
-    Action.FAILED -> "failed"
-    Action.NONE -> "-"
+    Action.SKIPPED_OUTDATED -> "OUTDATED (--update)"
+    Action.FAILED -> "FAILED"
+    Action.NONE -> r.status.name
 }
 
 /** Records what we last installed per OS so future runs (and humans) have a version trail. */
@@ -151,12 +157,13 @@ private fun writeManifest(rootDir: File, results: List<TargetResult>) {
             // Carry forward entries for OS targets not touched in this run.
             priorClients?.forEach { (k, v) -> if (results.none { it.target.key == k }) put(k, v) }
             for (r in results) {
-                // Only persist entries we have authoritative data for (installed, or already present).
                 if (r.latestCrc == null) continue
                 putJsonObject(r.target.key) {
                     put("binaryType", r.target.binaryType)
                     put("label", r.target.label)
-                    put("path", r.target.localPath)
+                    put("clientPath", r.target.clientPath)
+                    put("launcherPath", r.target.launcherPath)
+                    put("launcherPresent", r.launcherPresent)
                     put("serverVersion", r.serverVersion)
                     put("latestCrc", r.latestCrc)
                     r.localCrc?.let { put("localCrc", it) }
@@ -175,6 +182,7 @@ private fun writeManifest(rootDir: File, results: List<TargetResult>) {
         }
         putJsonArray("notes") {
             add("download_crc_0 is the CRC32 of the DECOMPRESSED binary; the download is LZMA-alone compressed.")
+            add("Layout: data/client/<os>/{rs2client[.exe], rs3<os>, patcher-lib}. clientPath is what ConfigServer serves per OS.")
         }
     }
     manifest.parentFile?.mkdirs()
@@ -192,16 +200,17 @@ private fun printHelp() {
 
         Flags:
           --dir <path>   Client root to check/update          (default ./data/client)
-          --os a,b,c     Subset of {linux,win64,macos,win32}  (default linux,win64,macos)
-          --all          Include every known target (adds the legacy win32 stub)
+          --os a,b,c     Subset of {linux,windows,macos}      (default: all three)
           --check        Dry run: report status only, no downloads or writes
           --update       Replace OUTDATED existing binaries (MISSING are always filled)
           --force        Re-download every selected target even if up to date
           -h, --help     Show this help
 
-        Storage layout under the client root:
-          linux  -> rs2client            win64 -> rs2client.exe
-          macos  -> macos/rs2client      win32 -> win32/rs2client.exe   (legacy)
+        Per-OS layout under the client root (game client downloaded; rs3* launcher + patcher seeded
+        by the cross-platform launcher):
+          linux   -> linux/rs2client       linux/rs3linux        linux/libdarkan_patcher.so
+          windows -> windows/rs2client.exe windows/rs3windows.exe windows/darkan_patcher.dll
+          macos   -> macos/rs2client       macos/rs3mac          macos/libdarkan_patcher.dylib
         """.trimIndent(),
     )
 }
