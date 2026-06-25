@@ -1,6 +1,6 @@
 package com.undercut.script.api
 
-import com.undercut.cache.type.items.ItemType
+import world.gregs.voidps.cache.Cache
 import com.undercut.game.cs2.CS2Executor
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.script.Script
@@ -88,7 +88,7 @@ object MakeX {
         val grid = interfaces.getComponent(PANEL, GRID) ?: return emptyList()
         return grid.slotChildren
             .filter { it.itemId > 0 }
-            .map { Craftable(it.itemId, ItemType.get(it.itemId).name, it.slotId - 1) }
+            .map { Craftable(it.itemId, Cache.item(it.itemId)?.name ?: "null", it.slotId - 1) }
     }
 
     /** The category list currently populated (depends on which window the make interface is docked in). */

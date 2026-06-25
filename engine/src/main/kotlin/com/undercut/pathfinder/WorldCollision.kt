@@ -1,13 +1,13 @@
 package com.undercut.pathfinder
 
-import com.undercut.cache.type.maps.ObjectShape
-import com.undercut.cache.type.maps.Region
-import com.undercut.cache.type.objects.ObjectType
 import com.undercut.game.Tile
 import com.undercut.game.bootstrap.Bootstrap
+import com.undercut.game.map.ObjectShape
+import com.undercut.game.map.Region
 import com.undercut.game.nxt.entity.location.SceneObject
 import com.undercut.script.api.inInstancedArea
 import com.undercut.util.MapUtils
+import world.gregs.voidps.cache.definition.data.ObjectDefinition
 
 object WorldCollision {
     private const val CHUNK_SIZE = 2048 //2048 chunk size = max capacity 16384x16384 tiles
@@ -360,7 +360,7 @@ object WorldCollision {
         val type: ObjectShape = obj.shape
         val rotation: Int = obj.rotation.toInt()
 
-        val defs: ObjectType = obj.defs
+        val defs: ObjectDefinition = obj.defs
 
         if (defs.clipType == 0) return
 
@@ -395,7 +395,7 @@ object WorldCollision {
             return
         val type: ObjectShape = obj.shape
         val rotation: Int = obj.rotation.toInt()
-        val defs: ObjectType = obj.defs
+        val defs: ObjectDefinition = obj.defs
 
         if (defs.clipType == 0) return
 

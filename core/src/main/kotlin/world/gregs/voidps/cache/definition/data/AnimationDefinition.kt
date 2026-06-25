@@ -2,6 +2,7 @@ package world.gregs.voidps.cache.definition.data
 
 import world.gregs.voidps.cache.Definition
 import world.gregs.voidps.cache.definition.Extra
+import world.gregs.voidps.cache.definition.Parameterized
 
 data class AnimationDefinition(
     override var id: Int = -1,
@@ -24,9 +25,20 @@ data class AnimationDefinition(
     var volumes: IntArray? = null,
     var primarySpeeds: IntArray? = null,
     var secondarySpeeds: IntArray? = null,
+    override var params: Map<Int, Any>? = null,
     override var stringId: String = "",
     override var extras: Map<String, Any>? = null
-) : Definition, Extra {
+) : Definition, Extra, Parameterized {
+
+    /** Engine (SeqType) alias for [frames] (frame ids). */
+    val frameIds: IntArray? get() = frames
+
+    /** Engine (SeqType) alias for [durations] (per-frame lengths). */
+    val frameLengths: IntArray? get() = durations
+
+    /** Engine (SeqType) alias for [loopOffset]. */
+    val loopDelay: Int get() = loopOffset
+
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

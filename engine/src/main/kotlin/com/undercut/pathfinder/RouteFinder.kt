@@ -1714,7 +1714,7 @@ fun routeToObject(tile: Tile, obj: SceneObject, maxTurns: Int = DEFAULT_MAX_TURN
             destHeight = if (obj.rotation == 0.toByte() || obj.rotation == 2.toByte()) obj.defs.sizeY else obj.defs.sizeX,
             objRot = obj.rotation.toInt(),
             objShape = obj.shape.id,
-            accessBitMask = if (obj.rotation != 0.toByte()) ((obj.defs.accessBlockFlag shl obj.rotation.toInt()) and 0xF) + (obj.defs.accessBlockFlag shr (4 - obj.rotation)) else obj.defs.accessBlockFlag,
+            accessBitMask = if (obj.rotation != 0.toByte()) ((obj.defs.blockFlag shl obj.rotation.toInt()) and 0xF) + (obj.defs.blockFlag shr (4 - obj.rotation)) else obj.defs.blockFlag,
 
             maxTurns = maxTurns
         )

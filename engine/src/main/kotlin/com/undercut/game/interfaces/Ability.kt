@@ -1,10 +1,10 @@
 package com.undercut.game.interfaces
 
-import com.undercut.cache.type.structs.StructType
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.script.api.varcs
 import com.undercut.script.event.impl.Varc
 import com.undercut.util.format
+import world.gregs.voidps.cache.Cache
 
 enum class Ability(val properName: String, val enumId: Int, val slotId: Int, val structId: Int, val varcEndCd: Int = -1) {
     MELEE_BASIC_ATTACK("Basic Attack", 10307, 0, 49531),
@@ -498,7 +498,7 @@ enum class Ability(val properName: String, val enumId: Int, val slotId: Int, val
         }
     }
 
-    fun getStructParam(paramId: Int) = StructType.get(structId)?.params?.getInt(paramId, 0) ?: 0
+    fun getStructParam(paramId: Int) = Cache.struct(structId)?.getIntValue(paramId, 0) ?: 0
     fun isSecondaryGlobalCDType() = getStructParam(ABILITY_SECONDARY_GLOBAL_COOLDOWN_PARAM) == 1
 
     val cooldownTicks: Double

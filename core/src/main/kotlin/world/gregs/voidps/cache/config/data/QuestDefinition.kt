@@ -84,6 +84,14 @@ data class QuestDefinition(
         return "QuestDefinition(id=$id, name=$name, description=$description, listName=$listName, sortKey=$sortKey, difficulty=$difficulty, members=$members, questFlags=$questFlags, questPoints=$questPoints, pathStart=${pathStart?.contentToString()}, otherPathStart=$otherPathStart, questRequirements=${questRequirements?.contentToString()}, skillRequirements=${skillRequirements?.contentDeepToString()}, itemSprite=$itemSprite, params=$params, stringId='$stringId', extras=$extras)"
     }
 
+    // --- Engine (QuestType) public-surface aliases ---
+
+    /** Engine alias for [questPoints]. */
+    val questPointReward: Int get() = questPoints
+
+    /** Engine alias for [itemSprite]. */
+    val spriteId: Int get() = itemSprite
+
     companion object {
         val EMPTY = QuestDefinition()
     }

@@ -1,8 +1,7 @@
 package com.undercut.game.nxt.entity.location
 
-import com.undercut.cache.type.maps.ObjectShape
-import com.undercut.cache.type.objects.ObjectType
 import com.undercut.game.Tile
+import com.undercut.game.map.ObjectShape
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.memory.NativeAccess.deref
 import com.undercut.game.memory.NativeAccess.pointerAtOffset
@@ -11,6 +10,8 @@ import com.undercut.game.memory.NativeAccess.readInt
 import com.undercut.game.memory.NativeAccess.toShared
 import com.undercut.game.nxt.OCombinedLocationSection
 import com.undercut.game.nxt.entity.Entity
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.ObjectDefinition
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout.ADDRESS
 
@@ -35,8 +36,8 @@ class CombinedLocationSection(ptr: MemorySegment) : Entity(ptr), SceneObject {
 //    val visibleId: Int
 //        get() = ptr.readInt(OCombinedLocationSection.VISIBLE_ID)
 
-    override val defs: ObjectType
-        get() = ObjectType.get(id)
+    override val defs: ObjectDefinition
+        get() = Cache.obj(id) ?: ObjectDefinition.EMPTY
 
     override val sizeX: Int
         get() = realType?.sizeX ?: 1

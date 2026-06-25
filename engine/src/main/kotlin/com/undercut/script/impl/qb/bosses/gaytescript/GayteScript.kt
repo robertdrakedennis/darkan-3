@@ -1,6 +1,6 @@
 package com.undercut.script.impl.qb.bosses.gaytescript
 
-import com.undercut.cache.type.maps.ObjectShape
+import com.undercut.game.map.ObjectShape
 import com.undercut.game.Skill
 import com.undercut.game.Tile
 import com.undercut.game.interfaces.Ability

@@ -1,6 +1,5 @@
 package com.undercut.script.impl.trent.urncrafter
 
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.game.Skill
 import com.undercut.game.Tile
 import com.undercut.script.BooleanConfigItem
@@ -23,7 +22,8 @@ import com.undercut.ui.backend.dsl.ImGuiDsl
 import com.undercut.ui.backend.dsl.scopes.image
 import com.undercut.ui.backend.dsl.scopes.text
 import com.undercut.ui.backend.dsl.scopes.xpProgressBar
-import com.undercut.ui.backend.native.getTexture
+import com.undercut.ui.backend.native.SpriteIds
+import com.undercut.ui.backend.native.spriteTexture
 import com.undercut.util.formatElapsedTime
 import com.undercut.util.gaussian
 import com.undercut.util.getFormattedXpPerHour
@@ -217,7 +217,7 @@ class UrnCrafter : Script() {
 
     override fun render() {
         ImGuiDsl.window("Urn Crafter") {
-            image(Sprite.get(Sprite.CRAFTING).getTexture(), 32f, 32f)
+            image(spriteTexture(SpriteIds.CRAFTING), 32f, 32f)
             text("Urn: ${family ?: "detecting…"}")
             text("Phase: ${phase.label}")
             text("Status: $statusText")

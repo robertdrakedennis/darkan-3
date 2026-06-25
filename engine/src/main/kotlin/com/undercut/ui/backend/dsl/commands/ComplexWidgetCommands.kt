@@ -1,6 +1,5 @@
 package com.undercut.ui.backend.dsl.commands
 
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.ui.backend.dsl.ImGuiState
 import com.undercut.ui.backend.dsl.utils.Corner
 import com.undercut.ui.backend.dsl.utils.ImGuiCol
@@ -9,6 +8,7 @@ import com.undercut.ui.backend.dsl.utils.SpriteNineSlice
 import com.undercut.ui.backend.native.ImGuiTexture
 import com.undercut.ui.backend.native.NativeBridge
 import com.undercut.ui.backend.native.getTexture
+import world.gregs.voidps.cache.Cache
 import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout
 import java.util.concurrent.atomic.AtomicReference
@@ -331,9 +331,9 @@ data class TriSliceImageButtonFromIdsCommand(
     val onClick: () -> Unit
 ) : ImGuiCommand() {
     override fun execute() {
-        val leftSprite = Sprite.get(leftSpriteId)
-        val midSprite = Sprite.get(middleSpriteId)
-        val rightSprite = Sprite.get(rightSpriteId)
+        val leftSprite = Cache.sprite(leftSpriteId) ?: return
+        val midSprite = Cache.sprite(middleSpriteId) ?: return
+        val rightSprite = Cache.sprite(rightSpriteId) ?: return
         val leftTex = leftSprite.getTexture()
         val midTex = midSprite.getTexture()
         val rightTex = rightSprite.getTexture()
@@ -715,12 +715,12 @@ data class OverlayVScrollbarCommand(
         val scrollY = NativeBridge.getScrollY()
         val scrollMaxY = NativeBridge.getScrollMaxY().coerceAtLeast(0f)
 
-        val trackSprite = Sprite.get(trackSpriteId)
+        val trackSprite = Cache.sprite(trackSpriteId) ?: return
         val trackTex = trackSprite.getTexture()
         val trackW = trackSprite.maxWidth.toFloat().coerceAtLeast(1f)
         val trackH = trackSprite.maxHeight.toFloat().coerceAtLeast(1f)
 
-        val thumbSprite = Sprite.get(thumbSpriteId)
+        val thumbSprite = Cache.sprite(thumbSpriteId) ?: return
         val thumbTex = thumbSprite.getTexture()
         val thumbW = thumbSprite.maxWidth.toFloat().coerceAtLeast(1f)
         val thumbBaseH = thumbSprite.maxHeight.toFloat().coerceAtLeast(1f)

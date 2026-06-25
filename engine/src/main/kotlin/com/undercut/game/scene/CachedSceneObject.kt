@@ -1,9 +1,10 @@
 package com.undercut.game.scene
 
-import com.undercut.cache.type.maps.ObjectShape
-import com.undercut.cache.type.objects.ObjectType
 import com.undercut.game.Tile
+import com.undercut.game.map.ObjectShape
 import com.undercut.game.nxt.entity.location.SceneObject
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.ObjectDefinition
 import java.lang.foreign.MemorySegment
 
 class CachedSceneObject(
@@ -14,8 +15,8 @@ class CachedSceneObject(
     override val shape: ObjectShape,
     override val rotation: Byte
 ) : SceneObject {
-    override val defs
-        get() = ObjectType.get(typeId)
+    override val defs: ObjectDefinition
+        get() = Cache.obj(typeId) ?: ObjectDefinition.EMPTY
     override val exists: Boolean = true
     override val graphNode = null
 }

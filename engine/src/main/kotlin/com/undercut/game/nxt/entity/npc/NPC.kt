@@ -1,6 +1,5 @@
 package com.undercut.game.nxt.entity.npc
 
-import com.undercut.cache.type.npcs.NPCType
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.memory.NativeAccess.readByte
 import com.undercut.game.memory.NativeAccess.readInt
@@ -8,6 +7,8 @@ import com.undercut.game.nxt.DoActionOpcode
 import com.undercut.game.nxt.ONPC
 import com.undercut.game.nxt.entity.PathingEntity
 import com.undercut.script.api.combatTarget
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.NPCDefinition
 import java.lang.foreign.MemorySegment
 
 private val MENU_OPS = arrayOf(
@@ -71,7 +72,7 @@ class NPC(ptr: MemorySegment) : PathingEntity(ptr) {
         return true
     }
 
-    fun getDef(): NPCType = NPCType.get(if (typeId == -1) id else typeId)
+    fun getDef(): NPCDefinition = Cache.npc(if (typeId == -1) id else typeId) ?: NPCDefinition.EMPTY
 
     fun hasOption(option: String): Boolean = getDef().containsOp(option)
 

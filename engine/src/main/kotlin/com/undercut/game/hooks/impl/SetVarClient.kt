@@ -1,7 +1,5 @@
 package com.undercut.game.hooks.impl
 
-import com.undercut.cache.type.vars.VarDomain
-import com.undercut.cache.type.vars.VarbitType
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.hooks.Hook
 import com.undercut.game.hooks.HookManager
@@ -12,6 +10,8 @@ import com.undercut.script.ScriptExecutor
 import com.undercut.script.event.impl.Varc
 import com.undercut.script.event.impl.Varcbit
 import com.undercut.ui.UI
+import world.gregs.voidps.cache.definition.data.VarBitDefinition
+import world.gregs.voidps.cache.definition.data.VarDomain
 import java.lang.foreign.MemorySegment
 
 object SetVarClient {
@@ -29,7 +29,7 @@ object SetVarClient {
                         UI.addVarTableEntry("varc", varId, prev, value)
                     }
                     ScriptExecutor.pushEvent(Varc(varId, prev, value))
-                    val varBits = VarbitType.baseVarMap[VarDomain.CLIENT]?.get(varId)
+                    val varBits = VarBitDefinition.baseVarMap[VarDomain.CLIENT]?.get(varId)
                     varBits?.forEach { bit ->
                         val vbPrev = bit.getValue(prev)
                         val vbValue = bit.getValue(value)

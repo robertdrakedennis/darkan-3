@@ -88,6 +88,23 @@ data class ObjectDefinition(
 
     var block: Int = PROJECTILE or ROUTE
 
+    // --- Collision surface aliases (consumed by engine WorldCollision) ---
+
+    /** Clip mode: 0 = no clip, 1 = floor-decoration clip, 2 = full clip. Backed by [solid] (opcodes 17/27). */
+    var clipType: Int
+        get() = solid
+        set(value) { solid = value }
+
+    /** Whether the object also blocks projectiles. Backed by [blocksSky] (opcodes 17/18). */
+    var blocks: Boolean
+        get() = blocksSky
+        set(value) { blocksSky = value }
+
+    /** Whether the alternate (route) clip is ignored. Backed by [ignoreOnRoute] (opcode 74). */
+    var ignoreAltClip: Boolean
+        get() = ignoreOnRoute
+        set(value) { ignoreOnRoute = value }
+
     fun optionsIndex(option: String): Int = if (options != null) {
         options!!.indexOf(option)
     } else {
@@ -120,6 +137,16 @@ data class ObjectDefinition(
 
     /** Legacy overload that accepts a vars parameter for transform support. Returns this definition's name. */
     fun getName(vars: Any?): String = name
+
+    // --- Engine (ObjectType) public-surface methods ---
+
+    fun getOpIdForName(opName: String): Int =
+        options?.indexOfFirst { it?.equals(opName, ignoreCase = true) == true } ?: -1
+
+    fun getOp(optionId: Int): String = options?.getOrNull(optionId) ?: "null"
+
+    fun containsOp(option: String): Boolean =
+        options?.any { it?.equals(option, ignoreCase = true) == true } == true
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

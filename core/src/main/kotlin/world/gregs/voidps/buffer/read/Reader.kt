@@ -63,7 +63,49 @@ interface Reader {
 
     fun readLargeSmart(): Int
 
+    /**
+     * Unsigned 1-or-2 byte smart (jag `gSmart1or2`). Values < 128 use one byte,
+     * otherwise two bytes biased by 0x8000. Identical to [readSmart].
+     */
+    fun readUnsignedSmart(): Int = readSmart()
+
+    /**
+     * Alias of [readSmart] kept for naming parity with the client's small-smart
+     * reads (jag `gSmart1or2`) — same byte semantics as [readSmart].
+     */
+    fun readSmallSmart(): Int = readSmart()
+
+    /**
+     * Signed 1-or-2 byte smart (jag `gSmart1or2s`): a value in [-64, 63] is a
+     * single byte biased by 0x40, otherwise two bytes biased by -0x4000.
+     */
+    fun readSignedSmart(): Int {
+        val peek = readUnsignedByte()
+        return if (peek < 128) {
+            peek - 64
+        } else {
+            (((peek shl 8) or readUnsignedByte()) + 0x4000).toShort().toInt()
+        }
+    }
+
+    /**
+     * Accumulating smart size (jag `gSmart2or4s` size loop): sums repeated
+     * [readUnsignedSmart] runs while each equals 32767. Identical to [readLargeSmart].
+     */
+    fun readSmartSizeVar(): Int = readLargeSmart()
+
+    /**
+     * Unsigned 3-byte big-endian integer (jag `g3`). Identical to [readUnsignedMedium].
+     */
+    fun readTriByte(): Int = readUnsignedMedium()
+
     fun readLong(): Long
+
+    /**
+     * Big-endian 32-bit IEEE-754 float, matching `java.nio.ByteBuffer.getFloat`
+     * (the client's default-order float reads used by map water-patch data).
+     */
+    fun readFloat(): Float = Float.fromBits(readInt())
 
     fun readString(): String
 

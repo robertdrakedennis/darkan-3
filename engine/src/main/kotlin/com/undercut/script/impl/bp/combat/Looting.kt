@@ -95,13 +95,13 @@ class Looting : Script(), ConfigurableScript {
     private fun canLoot(item: Item): Boolean {
         if (!inventory.isFull) return true
         val definition = item.getDef()
-        return definition.isStackable && inventory.hasItem(item.id)
+        return definition.isStackable() && inventory.hasItem(item.id)
     }
 
     private fun canLoot(item: GroundItem): Boolean {
         if (!inventory.isFull) return true
         val definition = item.getDef()
-        return definition.isStackable && inventory.hasItem(item.id)
+        return definition.isStackable() && inventory.hasItem(item.id)
     }
 
     private suspend fun lootFromAreaLoot(fragments: List<String>): Boolean {

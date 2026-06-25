@@ -221,9 +221,16 @@ class SQLiteCache private constructor(
             ThreadLocal.withInitial { DecompressionContext() }
 
         fun load(): Cache {
-            val path = Paths.get(EnvVars.cachePath)
+            return load(EnvVars.cachePath)
+        }
+
+        /**
+         * Loads the cache from [cachePath], signing the version table with the
+         * server's JS5 RSA keys from [EnvVars]. Used by the server default [load].
+         */
+        fun load(cachePath: String): Cache {
             return load(
-                path,
+                Paths.get(cachePath),
                 BigInteger(EnvVars.js5RsaExponent),
                 BigInteger(EnvVars.js5RsaModulus)
             )

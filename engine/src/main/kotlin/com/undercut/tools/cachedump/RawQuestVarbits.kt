@@ -1,7 +1,7 @@
 package com.undercut.tools.cachedump
 
-import com.undercut.cache.Cache
-import com.undercut.cache.Index
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.Index
 import java.nio.ByteBuffer
 
 // JagString: one version byte (always 0 in current caches), then a null-terminated CP1252
@@ -37,10 +37,11 @@ object RawQuestVarbits {
 
     fun loadAll(): List<CacheQuestRecord> {
         val cache = Cache.get()
-        val archive = runCatching { cache.getArchive(Index.CONFIG, ARCHIVE_ID) }.getOrNull() ?: return emptyList()
+        val fileIds = runCatching { cache.files(Index.CONFIGS, ARCHIVE_ID) }.getOrNull() ?: return emptyList()
         val out = mutableListOf<CacheQuestRecord>()
-        for ((fileId, file) in archive.files) {
-            val record = runCatching { decode(fileId, ByteBuffer.wrap(file.data)) }.getOrNull() ?: continue
+        for (fileId in fileIds) {
+            val data = runCatching { cache.data(Index.CONFIGS, ARCHIVE_ID, fileId) }.getOrNull() ?: continue
+            val record = runCatching { decode(fileId, ByteBuffer.wrap(data)) }.getOrNull() ?: continue
             out += record
         }
         return out

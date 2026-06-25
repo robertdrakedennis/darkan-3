@@ -1,7 +1,5 @@
 package com.undercut.game.hooks.impl
 
-import com.undercut.cache.type.vars.VarDomain
-import com.undercut.cache.type.vars.VarbitType
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.hooks.Hook
 import com.undercut.game.hooks.HookManager
@@ -13,6 +11,8 @@ import com.undercut.script.event.impl.Varp
 import com.undercut.script.event.impl.Varpbit
 import com.undercut.ui.UI
 import com.undercut.ui.UIState
+import world.gregs.voidps.cache.definition.data.VarBitDefinition
+import world.gregs.voidps.cache.definition.data.VarDomain
 import java.lang.foreign.MemorySegment
 
 object SetVarPlayer {
@@ -31,7 +31,7 @@ object SetVarPlayer {
                         UI.addVarTableEntry("varp", varId, prev, value)
                     }
                     ScriptExecutor.pushEvent(Varp(varId, prev, value))
-                    val varBits = VarbitType.baseVarMap[VarDomain.PLAYER]?.get(varId)
+                    val varBits = VarBitDefinition.baseVarMap[VarDomain.PLAYER]?.get(varId)
                     varBits?.forEach { bit ->
                         val vbPrev = bit.getValue(prev)
                         val vbValue = bit.getValue(value)
@@ -67,7 +67,7 @@ object SetVarPlayer {
                         UI.addVarTableEntry("varp", varId, prev, value)
                     }
                     ScriptExecutor.pushEvent(Varp(varId, prev, value))
-                    val varBits = VarbitType.baseVarMap[VarDomain.PLAYER]?.get(varId)
+                    val varBits = VarBitDefinition.baseVarMap[VarDomain.PLAYER]?.get(varId)
                     varBits?.forEach { bit ->
                         val vbPrev = bit.getValue(prev)
                         val vbValue = bit.getValue(value)

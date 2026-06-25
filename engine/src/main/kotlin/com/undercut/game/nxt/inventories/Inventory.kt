@@ -1,7 +1,5 @@
 package com.undercut.game.nxt.inventories
 
-import com.undercut.cache.type.vars.VarbitType
-import com.undercut.cache.type.vars.VarbitType.Companion.BIT_MASKS
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.game.items.Item
 import com.undercut.game.memory.NativeAccess.getInt
@@ -10,6 +8,8 @@ import com.undercut.game.memory.NativeAccess.readInt
 import com.undercut.game.memory.eastl.EastlHashTable
 import com.undercut.game.nxt.OInventory
 import com.undercut.game.nxt.types.Vector
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.VarBitDefinition.Companion.BIT_MASKS
 import java.lang.foreign.MemorySegment
 
 class Inventory(val ptr: MemorySegment, val interfaceId: Int = -1, val componentId: Int = -1) : Iterable<Item> {
@@ -125,7 +125,7 @@ class ObjVarDomain(val ptr: MemorySegment) : EastlHashTable(ptr.pointerAtOffset(
     fun getVarBit(id: Int): Int {
         if (!isValid) return 0
         try {
-            val type = VarbitType.get(id)
+            val type = Cache.varbit(id) ?: return 0
             return getVar(type.baseVar) shr type.startBit and BIT_MASKS[type.endBit - type.startBit]
         } catch (e: Throwable) {
             return 0

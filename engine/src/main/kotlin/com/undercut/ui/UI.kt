@@ -1,6 +1,5 @@
 package com.undercut.ui
 
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.game.Skill
 import com.undercut.game.hooks.Priority
 import com.undercut.game.interfaces.effects.Effect
@@ -27,7 +26,7 @@ import com.undercut.ui.backend.flags.WindowFlags
 import com.undercut.ui.backend.native.ImGuiTexture
 import com.undercut.ui.backend.native.ImageHelper.getNoiseTexture
 import com.undercut.ui.backend.native.SpriteRotation
-import com.undercut.ui.backend.native.getTexture
+import com.undercut.ui.backend.native.spriteTexture
 import com.undercut.ui.backend.rendering.ImGUIRender
 import com.undercut.ui.tabs.*
 import java.io.File
@@ -264,8 +263,8 @@ object UI {
                 window("Project Undercut", WindowFlags.NoTitleBar) {
                     // Best-effort decorations — never let a failed texture abort the window content.
                     runCatching {
-                        watermark(Sprite.get(18026).getTexture(SpriteRotation.R0), Corner.BottomLeft, scale = 1.5f)
-                        watermark(Sprite.get(18026).getTexture(SpriteRotation.R270), Corner.BottomRight, scale = 1.5f)
+                        watermark(spriteTexture(18026, SpriteRotation.R0), Corner.BottomLeft, scale = 1.5f)
+                        watermark(spriteTexture(18026, SpriteRotation.R270), Corner.BottomRight, scale = 1.5f)
                         applyBackgroundOverlay(getNoiseTexture(), 0.25f)
                     }
 
@@ -464,8 +463,8 @@ object UI {
                         flags = WindowFlags.None,
                         open = windowState
                     ) {
-                        watermark(Sprite.get(18026).getTexture(SpriteRotation.R0), Corner.BottomLeft, scale = 1.2f)
-                        watermark(Sprite.get(18026).getTexture(SpriteRotation.R270), Corner.BottomRight, scale = 1.2f)
+                        watermark(spriteTexture(18026, SpriteRotation.R0), Corner.BottomLeft, scale = 1.2f)
+                        watermark(spriteTexture(18026, SpriteRotation.R270), Corner.BottomRight, scale = 1.2f)
                         applyBackgroundOverlay(getNoiseTexture(), 0.25f)
                         renderScriptConfig(instance)
 

@@ -1,9 +1,10 @@
 package com.undercut.mcp.tools
 
-import com.undercut.cache.type.vars.VarDomain
-import com.undercut.cache.type.vars.VarbitType
-import com.undercut.cache.type.vars.VarbitType.Companion.BIT_MASKS
 import com.undercut.game.memory.NativeAccess.readInt
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.VarBitDefinition
+import world.gregs.voidps.cache.definition.data.VarBitDefinition.Companion.BIT_MASKS
+import world.gregs.voidps.cache.definition.data.VarDomain
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import kotlinx.serialization.json.buildJsonArray
@@ -87,11 +88,7 @@ object VarTools {
                 val args = request.arguments ?: throw BadRequest("missing arguments")
                 val id = args["id"]?.jsonPrimitive?.content?.toIntOrNull() ?: throw BadRequest("missing/invalid 'id'")
                 val client = requireLoggedIn()
-                val type = try {
-                    VarbitType.get(id)
-                } catch (t: Throwable) {
-                    throw BadRequest("unknown varbit id $id: ${t.message}")
-                }
+                val type = Cache.varbit(id) ?: throw BadRequest("unknown varbit id $id")
                 val domain = type.domain
                 put("varbit_id", id)
                 put("base_varp", type.baseVar)
@@ -267,7 +264,7 @@ object VarTools {
                 put("domain", domain.name)
                 put("raw_varp_value", rawValue)
 
-                val varbits = VarbitType.baseVarMap[domain]?.get(baseVarp) ?: emptySet()
+                val varbits = VarBitDefinition.baseVarMap[domain]?.get(baseVarp) ?: emptySet()
                 put("count", varbits.size)
                 put("items", buildJsonArray {
                     for (vb in varbits.sortedBy { it.id }) {

@@ -1,27 +1,27 @@
 package world.gregs.voidps.cache.definition.decoder
 
 import world.gregs.voidps.buffer.read.Reader
-import world.gregs.voidps.cache.Cache
-import world.gregs.voidps.cache.DefinitionDecoder
+import world.gregs.voidps.cache.Config.VAR_BIT
+import world.gregs.voidps.cache.config.ConfigDecoder
 import world.gregs.voidps.cache.definition.data.VarBitDefinition
+import world.gregs.voidps.cache.definition.data.VarDomain
 
-@Suppress("DEPRECATION")
-class VarBitDecoder : DefinitionDecoder<VarBitDefinition>(world.gregs.voidps.cache.Index.VAR_BIT) {
-
-    override fun size(cache: Cache): Int {
-        return cache.lastArchiveId(index) * 0x400 + cache.fileCount(index, cache.lastArchiveId(index))
-    }
+/**
+ * Decodes varbit types from the CONFIG index (2), archive 69, one file per id.
+ *
+ * (The legacy core decoder read from index 22 — the structs index — via the
+ * deprecated `Index.VAR_BIT` alias, which produced garbage. The NXT client reads
+ * varbits from CONFIG/69; this matches `jag::game::VarBitType::DecodeType`.)
+ */
+class VarBitDecoder : ConfigDecoder<VarBitDefinition>(VAR_BIT) {
 
     override fun create(size: Int) = Array(size) { VarBitDefinition(it) }
-
-    override fun getFile(id: Int) = id and 0x3ff
-
-    override fun getArchive(id: Int) = id ushr 10
 
     override fun VarBitDefinition.read(opcode: Int, buffer: Reader) {
         when (opcode) {
             1 -> {
-                buffer.readUnsignedByte() // domainId
+                domainId = buffer.readUnsignedByte().toByte()
+                domain = VarDomain.forId(domainId.toInt())
                 index = buffer.readUnsignedShort()
             }
             2 -> {

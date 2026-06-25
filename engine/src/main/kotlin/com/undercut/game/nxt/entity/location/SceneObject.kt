@@ -1,10 +1,11 @@
 package com.undercut.game.nxt.entity.location
 
-import com.undercut.cache.type.maps.ObjectShape
-import com.undercut.cache.type.objects.ObjectType
 import com.undercut.game.Tile
+import com.undercut.game.map.ObjectShape
 import com.undercut.game.nxt.DoActionOpcode
 import com.undercut.game.nxt.entity.GraphNode
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.ObjectDefinition
 import java.lang.foreign.MemorySegment
 
 private val MENU_OPS = arrayOf(
@@ -23,7 +24,7 @@ interface SceneObject {
     val tile: Tile
     val shape: ObjectShape
     val rotation: Byte
-    val defs: ObjectType
+    val defs: ObjectDefinition
     val graphNode: GraphNode?
 
     val exists: Boolean
@@ -76,7 +77,7 @@ interface SceneObject {
     val slot: Int
         get() = shape.slot
 
-    fun getDef(): ObjectType = ObjectType.get(if (typeId == -1) id else typeId)
+    fun getDef(): ObjectDefinition = Cache.obj(if (typeId == -1) id else typeId) ?: ObjectDefinition.EMPTY
 
     fun getName(): String = getDef().name
 

@@ -118,7 +118,7 @@ class AnimationDecoder : DefinitionDecoder<AnimationDefinition>(ANIMATIONS) {
                 buffer.readShort() // sound start
                 buffer.readShort() // sound end
             }
-            249 -> { } // parameters (if present in modern)
+            249 -> readParameters(buffer)
             else -> { }
         }
     }

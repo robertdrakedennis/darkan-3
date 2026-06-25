@@ -1,8 +1,8 @@
 package com.undercut.game.interfaces
 
-import com.undercut.cache.type.items.ItemType
 import com.undercut.game.nxt.interfaces.InterfaceComponent
 import com.undercut.script.api.interfaces
+import world.gregs.voidps.cache.Cache
 
 class Bank {
     companion object {
@@ -31,7 +31,7 @@ class Bank {
 
         internal fun doBankItemsAction(name: String, optionNum: Int): Boolean {
             for (item in fetchBankItemsArray()) {
-                if (ItemType.get(item.itemId).name == name)
+                if (Cache.item(item.itemId)?.name == name)
                     return doBankAction(BANK_ITEMS_COMPONENT_ID, item.slotId, optionNum)
             }
             return false
@@ -39,7 +39,7 @@ class Bank {
 
         internal fun doBankItemsAction(regex: Regex, optionNum: Int): Boolean {
             for (item in fetchBankItemsArray()) {
-                if (regex.matches(ItemType.get(item.itemId).name))
+                if (regex.matches(Cache.item(item.itemId)?.name ?: ""))
                     return doBankAction(BANK_ITEMS_COMPONENT_ID, item.slotId, optionNum)
             }
             return false
@@ -55,7 +55,7 @@ class Bank {
 
         internal fun doBankInventoryAction(name: String, optionNum: Int): Boolean {
             for (item in fetchBankInventoryArray()) {
-                if (ItemType.get(item.itemId).name == name)
+                if (Cache.item(item.itemId)?.name == name)
                     return doBankAction(BANK_INV_COMPONENT_ID, item.slotId, optionNum)
             }
             return false
@@ -63,7 +63,7 @@ class Bank {
 
         internal fun doBankInventoryAction(regex: Regex, optionNum: Int): Boolean {
             for (item in fetchBankInventoryArray()) {
-                if (regex.matches(ItemType.get(item.itemId).name))
+                if (regex.matches(Cache.item(item.itemId)?.name ?: ""))
                     return doBankAction(BANK_INV_COMPONENT_ID, item.slotId, optionNum)
             }
             return false

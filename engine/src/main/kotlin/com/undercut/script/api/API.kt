@@ -513,7 +513,7 @@ val areaLootContainsHoldableItems: Boolean
     get() {
         if (areaLoot.isEmpty) return false
         if (!inventory.isFull) return true
-        return areaLoot.any { it.id == 995 || (it.getDef().isStackable && inventory.hasItem(it.id)) }
+        return areaLoot.any { it.id == 995 || (it.getDef().isStackable() && inventory.hasItem(it.id)) }
     }
 
 val makeXOpen: Boolean

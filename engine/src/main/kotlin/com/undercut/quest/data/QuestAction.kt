@@ -57,7 +57,7 @@ sealed class QuestAction {
      * scheme as [ModelHighlight]:
      *   1. [itemId] — direct match on inventory item id.
      *   2. [modelIds] — runtime scan: for each visible inventory slot, look up
-     *      its [com.undercut.cache.type.items.ItemType] and check if its modelId
+     *      its [world.gregs.voidps.cache.definition.data.ItemDefinition] and check if its modelId
      *      appears in this list. Used when lua quest source referenced the item
      *      via `Model.new(N)` rather than `Models.items[...]`.
      *   3. [displayName] — case-insensitive substring match on slot name.

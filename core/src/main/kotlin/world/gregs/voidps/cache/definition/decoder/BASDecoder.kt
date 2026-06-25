@@ -1,103 +1,76 @@
 package world.gregs.voidps.cache.definition.decoder
 
 import world.gregs.voidps.buffer.read.Reader
-import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.Config.RENDER_ANIMATIONS
-import world.gregs.voidps.cache.DefinitionDecoder
-import world.gregs.voidps.cache.Index
+import world.gregs.voidps.cache.config.ConfigDecoder
 import world.gregs.voidps.cache.definition.data.BASDefinition
 
 /**
- * Decodes Base Animation Set (BAS / Render Animations) definitions from the
- * CONFIGS index (2), archive 32.
- *
- * BAS definitions store movement animation sets for players and NPCs,
- * including stand, walk, run, and teleport animations with directional
- * variants and turning animations.
+ * Decodes Base Animation Set (BAS / render animations) definitions from the
+ * CONFIG index (2), archive 32. Opcode mapping matches the NXT client for 948-5.
  */
-class BASDecoder : DefinitionDecoder<BASDefinition>(Index.CONFIGS) {
+class BASDecoder : ConfigDecoder<BASDefinition>(RENDER_ANIMATIONS) {
 
     override fun create(size: Int) = Array(size) { BASDefinition(it) }
 
-    override fun getArchive(id: Int) = RENDER_ANIMATIONS
-
-    override fun size(cache: Cache): Int {
-        return cache.lastFileId(Index.CONFIGS, RENDER_ANIMATIONS)
-    }
-
     override fun BASDefinition.read(opcode: Int, buffer: Reader) {
         when (opcode) {
-            // Opcode 1: stand + walk animations (two bigSmarts)
             1 -> {
-                standAnimation = buffer.readBigSmart()
-                walkAnimation = buffer.readBigSmart()
+                standAnim = buffer.readBigSmart()
+                standTurnAnim = buffer.readBigSmart()
             }
-            // Opcode 2-9: teleport and run animations
-            2 -> teleportAnimation = buffer.readBigSmart()
-            3 -> teleDir3 = buffer.readBigSmart()
-            4 -> teleDir2 = buffer.readBigSmart()
-            5 -> teleDir1 = buffer.readBigSmart()
-            6 -> runAnimation = buffer.readBigSmart()
-            7 -> runDir3 = buffer.readBigSmart()
-            8 -> runDir2 = buffer.readBigSmart()
-            9 -> runDir1 = buffer.readBigSmart()
-            // Opcode 26: modelWidth and modelLength (2 unsigned bytes, each * 4)
+            2 -> walkAnim = buffer.readBigSmart()
+            3 -> runAnim = buffer.readBigSmart()
+            4 -> turnAroundAnim = buffer.readBigSmart()
+            5 -> turnRightAnim = buffer.readBigSmart()
+            6 -> walkBackAnim = buffer.readBigSmart()
+            7 -> walkLeftAnim = buffer.readBigSmart()
+            8 -> walkRightAnim = buffer.readBigSmart()
+            9 -> crawlAnim = buffer.readBigSmart()
             26 -> {
-                buffer.readUnsignedByte() // modelWidth * 4
-                buffer.readUnsignedByte() // modelLength * 4
+                renderOffsetX = buffer.readUnsignedByte() shl 2
+                renderOffsetY = buffer.readUnsignedByte() shl 2
             }
-            // Opcode 27: skip count * 2 bytes
             27 -> {
                 val count = buffer.readUnsignedByte()
                 buffer.skip(count * 2)
             }
-            // Opcode 28: per-slot obj visibility array
             28 -> {
                 val count = buffer.readUnsignedByte()
-                repeat(count) {
-                    buffer.readUnsignedByte() // visibility value
-                }
+                buffer.skip(count)
             }
-            29, 31, 34, 37 -> buffer.skip(1) // single byte fields
-            30, 32, 33, 35, 36 -> buffer.skip(2) // short fields
-            // Opcodes 38-42: stand turn and walk directional animations
-            38 -> standTurn1 = buffer.readBigSmart()
-            39 -> standTurn2 = buffer.readBigSmart()
-            40 -> walkDir3 = buffer.readBigSmart()
-            41 -> walkDir2 = buffer.readBigSmart()
-            42 -> walkDir1 = buffer.readBigSmart()
-            43 -> buffer.readBigSmart() // anim43
-            44 -> buffer.readBigSmart() // anim44
-            45 -> buffer.readUnsignedShort() // field45
-            // Opcodes 46-51: turn animations for teleport, run, and walk
-            46 -> teleTurn1 = buffer.readBigSmart()
-            47 -> teleTurn2 = buffer.readBigSmart()
-            48 -> runTurn1 = buffer.readBigSmart()
-            49 -> runTurn2 = buffer.readBigSmart()
-            50 -> walkTurn1 = buffer.readBigSmart()
-            51 -> walkTurn2 = buffer.readBigSmart()
-            // Opcode 52: random stand sequences with flags and sub-values
+            29, 31, 34, 37 -> buffer.skip(1)
+            30, 32, 33, 35, 36 -> buffer.skip(2)
+            38 -> anim38 = buffer.readBigSmart()
+            39 -> anim39 = buffer.readBigSmart()
+            40 -> anim40 = buffer.readBigSmart()
+            41 -> anim41 = buffer.readBigSmart()
+            42 -> anim42 = buffer.readBigSmart()
+            43 -> anim43 = buffer.readBigSmart()
+            44 -> anim44 = buffer.readBigSmart()
+            45 -> field45 = buffer.readUnsignedShort()
+            46 -> anim46 = buffer.readBigSmart()
+            47 -> anim47 = buffer.readBigSmart()
+            48 -> anim48 = buffer.readBigSmart()
+            49 -> anim49 = buffer.readBigSmart()
+            50 -> anim50 = buffer.readBigSmart()
+            51 -> anim51 = buffer.readBigSmart()
             52 -> {
                 val count = buffer.readUnsignedByte()
                 repeat(count) {
-                    buffer.readBigSmart() // animation id
-                    val flags = buffer.readUnsignedByte()
+                    buffer.readBigSmart() // anim id
+                    buffer.readUnsignedByte() // flags
                     val subCount = buffer.readUnsignedByte()
-                    repeat(subCount) {
-                        buffer.readByte() // sub value
-                    }
+                    repeat(subCount) { buffer.readByte() }
                 }
             }
-            // Opcode 53: rendersShadow = false (boolean flag, no data bytes)
-            53 -> { }
-            // Opcode 54: hillRotateX and hillRotateZ (2 unsigned bytes, each << 6)
+            53 -> { } // flag, no bytes
             54 -> {
-                buffer.readUnsignedByte() // hillRotateX
-                buffer.readUnsignedByte() // hillRotateZ
+                renderOffsetX2 = buffer.readUnsignedByte() shl 2
+                renderOffsetY2 = buffer.readUnsignedByte() shl 2
             }
-            55 -> buffer.skip(3) // 3 bytes
-            56 -> buffer.skip(7) // 7 bytes
-            else -> { }
+            55 -> buffer.skip(3)
+            56 -> buffer.skip(7)
         }
     }
 }

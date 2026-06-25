@@ -1,7 +1,5 @@
 package com.undercut.script.impl.trent.aiosmithing
 
-import com.undercut.cache.type.items.ItemType
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.game.Skill
 import com.undercut.game.chat.MessageType
 import com.undercut.script.ConfigurableScript
@@ -30,7 +28,9 @@ import com.undercut.ui.backend.dsl.ImGuiDsl
 import com.undercut.ui.backend.dsl.scopes.image
 import com.undercut.ui.backend.dsl.scopes.text
 import com.undercut.ui.backend.dsl.scopes.xpProgressBar
-import com.undercut.ui.backend.native.getTexture
+import com.undercut.ui.backend.native.SpriteIds
+import com.undercut.ui.backend.native.spriteTexture
+import world.gregs.voidps.cache.Cache
 import com.undercut.util.formatElapsedTime
 import com.undercut.util.getFormattedXpPerHour
 
@@ -146,7 +146,7 @@ class AIOSmithing : Script(), ConfigurableScript {
         val made = smithSetQuantity(batch)
         if (made <= 0) { outOfMetal(barItem) { stop() }; return }
         makeFailures = 0
-        statusText = "Making $made base ${ItemType.get(base).name}"
+        statusText = "Making $made base ${Cache.item(base)?.name ?: "?"}"
         if (!smithMake()) { statusText = "Begin failed."; delay(2000); return }
         delayUntil(6000) { !Smithing.isOpen || hasUnfinished }
     }
@@ -167,7 +167,7 @@ class AIOSmithing : Script(), ConfigurableScript {
         val made = smithSetQuantity(want)
         if (made <= 0) { outOfMetal(barItem) { bank() }; return }
         makeFailures = 0
-        statusText = "Upgrading $made -> ${ItemType.get(produce).name}"
+        statusText = "Upgrading $made -> ${Cache.item(produce)?.name ?: "?"}"
         if (!smithMake()) { statusText = "Begin failed."; delay(2000); return }
         delayUntil(6000) { !Smithing.isOpen || hasUnfinished }
     }
@@ -180,7 +180,7 @@ class AIOSmithing : Script(), ConfigurableScript {
             return
         }
         makeFailures = 0
-        val metal = barItem.let { if (it > 0) ItemType.get(it).name else "metal" }
+        val metal = barItem.let { if (it > 0) Cache.item(it)?.name ?: "?" else "metal" }
         statusText = "Out of $metal."
         onEmpty()
     }
@@ -240,9 +240,9 @@ class AIOSmithing : Script(), ConfigurableScript {
 
     override fun render() {
         ImGuiDsl.window("AIO Smithing") {
-            image(Sprite.get(Sprite.SMITHING).getTexture(), 32f, 32f)
+            image(spriteTexture(SpriteIds.SMITHING), 32f, 32f)
             val base = Smithing.baseObjectId
-            text("Target: ${if (base > 0) ItemType.get(base).name else "—"} -> ${tierLabel(targetNum())}")
+            text("Target: ${if (base > 0) Cache.item(base)?.name ?: "?" else "—"} -> ${tierLabel(targetNum())}")
             text("Phase: ${phase.label}")
             text("Status: $statusText")
             if (base > 0) {
@@ -250,7 +250,7 @@ class AIOSmithing : Script(), ConfigurableScript {
                 val barItem = chainBarItem(chain)
                 if (barItem > 0) {
                     val cumulative = chainCumulativeBars(chain)
-                    text("Bars: ${smithBarsAvailable(barItem)} ${ItemType.get(barItem).name}  ($cumulative/item)")
+                    text("Bars: ${smithBarsAvailable(barItem)} ${Cache.item(barItem)?.name ?: "?"}  ($cumulative/item)")
                     text("Batch: ${smithBatchSize(barItem, cumulative)} items")
                 }
             }

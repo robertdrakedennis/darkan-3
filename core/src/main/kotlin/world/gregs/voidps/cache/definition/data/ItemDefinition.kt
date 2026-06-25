@@ -1,5 +1,6 @@
 package world.gregs.voidps.cache.definition.data
 
+import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.Definition
 import world.gregs.voidps.cache.definition.ColourPalette
 import world.gregs.voidps.cache.definition.Extra
@@ -84,6 +85,9 @@ data class ItemDefinition(
     var boundTemplateId: Int = -1,
     var headModels: IntArray? = null,
     var groundCursors: IntArray? = null,
+    var examine: String? = null,
+    var notedId: Int = -1,
+    var wornActions: Array<String?> = arrayOfNulls(8),
     override var params: Map<Int, Any>? = null,
     override var stringId: String = "",
     override var extras: Map<String, Any>? = null
@@ -97,6 +101,184 @@ data class ItemDefinition(
 
     val singleNote: Boolean
         get() = boundTemplateId != -1
+
+    // --- Engine (ItemType) public-surface aliases ---
+
+    var price: Long
+        get() = cost
+        set(value) { cost = value }
+
+    var equipmentSlot: Int
+        get() = wearPos
+        set(value) { wearPos = value }
+
+    var equipmentType: Int
+        get() = wearPos2
+        set(value) { wearPos2 = value }
+
+    var equipmentType2: Int
+        get() = wearPos3
+        set(value) { wearPos3 = value }
+
+    var maleModel1: Int
+        get() = primaryMaleModel
+        set(value) { primaryMaleModel = value }
+
+    var maleModel2: Int
+        get() = secondaryMaleModel
+        set(value) { secondaryMaleModel = value }
+
+    var maleModel3: Int
+        get() = tertiaryMaleModel
+        set(value) { tertiaryMaleModel = value }
+
+    var femaleModel1: Int
+        get() = primaryFemaleModel
+        set(value) { primaryFemaleModel = value }
+
+    var femaleModel2: Int
+        get() = secondaryFemaleModel
+        set(value) { secondaryFemaleModel = value }
+
+    var femaleModel3: Int
+        get() = tertiaryFemaleModel
+        set(value) { tertiaryFemaleModel = value }
+
+    /** Engine alias for [options] (inventory/right-click ops). */
+    val inventoryActions: Array<String?>
+        get() = options
+
+    /** Engine alias for [floorOptions] (ground item ops). */
+    val groundActions: Array<String?>
+        get() = floorOptions
+
+    /** Engine alias for [noteId] (the real item a note points to). */
+    val notedItemId: Int
+        get() = noteId
+
+    /** Engine alias for [notedTemplateId]. */
+    val notedTemplate: Int
+        get() = notedTemplateId
+
+    // Internal shims kept for the helpers below; delegate to the public
+    // [Parameterized.getParamInt]/[getParamString] pair. paramStringOrNull keeps
+    // the legacy "null" placeholder default (wornActions etc. expect it).
+    private fun paramInt(key: Int, default: Int = 0): Int = getParamInt(key, default)
+
+    private fun paramStringOrNull(key: Int): String = getParamString(key) ?: "null"
+
+    // --- Re-homed pure ItemType helpers ---
+
+    fun getInvOpIdForName(opName: String): Int {
+        inventoryActions.forEachIndexed { index, _ ->
+            if (containsInvOp(index, opName)) return index
+        }
+        return -1
+    }
+
+    fun getInvOp(optionId: Int): String {
+        return when (id) {
+            6099, 6100, 6101, 6102 -> if (optionId == 2) "Temple" else null
+            19760, 13561, 13562 -> when (optionId) {
+                0 -> inventoryActions[1]
+                1 -> inventoryActions[0]
+                else -> null
+            }
+            else -> null
+        } ?: inventoryActions.getOrNull(optionId) ?: "null"
+    }
+
+    fun containsInvOp(i: Int, option: String): Boolean =
+        inventoryActions.getOrNull(i)?.equals(option, ignoreCase = true) == true
+
+    fun containsInvOp(option: String): Boolean =
+        inventoryActions.any { it.equals(option, ignoreCase = true) }
+
+    fun getEquipOpIdForName(opName: String): Int {
+        wornActions.forEachIndexed { index, _ ->
+            if (containsEquipOp(index, opName)) return index
+        }
+        return -1
+    }
+
+    fun getEquipOp(optionId: Int): String = wornActions.getOrNull(optionId) ?: "null"
+
+    fun containsEquipOp(option: String): Boolean =
+        wornActions.any { it.equals(option, ignoreCase = true) }
+
+    fun containsEquipOp(optionId: Int, option: String): Boolean =
+        wornActions.getOrNull(optionId)?.equals(option, ignoreCase = true) == true
+
+    fun getGroundOp(optionId: Int): String = groundActions.getOrNull(optionId) ?: "null"
+
+    fun containsGroundOp(option: String): Boolean =
+        groundActions.any { it.equals(option, ignoreCase = true) }
+
+    fun containsGroundOp(optionId: Int, option: String): Boolean =
+        groundActions.getOrNull(optionId)?.equals(option, ignoreCase = true) == true
+
+    fun getGroundOpIdForName(opName: String): Int {
+        groundActions.forEachIndexed { index, _ ->
+            if (containsGroundOp(index, opName)) return index
+        }
+        return -1
+    }
+
+    /** Populates [wornActions] from equipment-op params (528-531, 1211, 6712-6714). */
+    fun loadEquippedOps() {
+        wornActions[0] = paramStringOrNull(528)
+        wornActions[1] = paramStringOrNull(529)
+        wornActions[2] = paramStringOrNull(530)
+        wornActions[3] = paramStringOrNull(531)
+        wornActions[4] = paramStringOrNull(1211)
+        wornActions[5] = paramStringOrNull(6712)
+        wornActions[6] = paramStringOrNull(6713)
+        wornActions[7] = paramStringOrNull(6714)
+    }
+
+    fun getCraftingType(): Int = paramInt(2696)
+
+    fun getCreationLevelReq(): Int = paramInt(2645)
+
+    fun getCreationSkillId(): Int = (Cache.enum(681)?.getValue(getCraftingType()) as? Int) ?: -1
+
+    fun getCreationAmount(): Int = paramInt(2653, 1)
+
+    fun getCreationExperience(): Double = paramInt(2697) / 10.0
+
+    fun getCombatMap(): StructDefinition? {
+        val structId = paramInt(686, 0)
+        return if (structId != 0) Cache.struct(structId) else null
+    }
+
+    fun getCombatOpcode(opcode: Int): Int {
+        val direct = paramInt(opcode, -1)
+        if (direct != -1) return direct
+        return (getCombatMap()?.params?.get(opcode) as? Int) ?: -1
+    }
+
+    fun getCombatStyle(): CombatStyle? = CombatStyle.forId(getCombatOpcode(2853))
+
+    fun getToolBeltReqItem(): Int = paramInt(2650, -1)
+
+    enum class CombatStyle(val id: Int) {
+        MAGIC_AIR(1),
+        MAGIC_WATER(2),
+        MAGIC_EARTH(3),
+        MAGIC_FIRE(4),
+        MELEE_STAB(5),
+        MELEE_SLASH(6),
+        MELEE_CRUSH(7),
+        RANGE_BOW(8),
+        RANGE_CROSSBOW(9),
+        RANGE_THROWN(10);
+
+        companion object {
+            private val MAP = entries.associateBy(CombatStyle::id)
+
+            fun forId(id: Int): CombatStyle? = MAP[id]
+        }
+    }
 
     // --- Java interop convenience methods ---
 

@@ -1,6 +1,5 @@
 package com.undercut.script.impl.trent.leagues
 
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.game.Skill
 import com.undercut.game.chat.MessageType
 import com.undercut.game.interfaces.effects.Effect
@@ -15,7 +14,8 @@ import com.undercut.ui.backend.dsl.ImGuiDsl.window
 import com.undercut.ui.backend.dsl.scopes.image
 import com.undercut.ui.backend.dsl.scopes.text
 import com.undercut.ui.backend.dsl.scopes.xpProgressBar
-import com.undercut.ui.backend.native.getTexture
+import com.undercut.ui.backend.native.SpriteIds
+import com.undercut.ui.backend.native.spriteTexture
 import com.undercut.util.*
 
 private val seeds = Regex(".*\\sseed$")
@@ -58,7 +58,7 @@ class LeaguesFarming : Script() {
 
     override fun render() {
         window("Leagues Farmer") {
-            image(Sprite.get(Sprite.FARMING).getTexture(), 32f, 32f)
+            image(spriteTexture(SpriteIds.FARMING), 32f, 32f)
             text("Runtime: ${formatElapsedTime(System.currentTimeMillis(), startTime)}")
             text("XP/hr: ${getFormattedXpPerHour(startingXp, getXp(Skill.FARMING), startTime)}")
             xpProgressBar(Skill.FARMING)

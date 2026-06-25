@@ -51,7 +51,7 @@ class ItemDecoder : DefinitionDecoder<ItemDefinition>(ITEMS) {
             40 -> readColours(buffer)
             41 -> readTextures(buffer)
             42 -> readColourPalette(buffer)
-            43 -> buffer.readInt() // notedId
+            43 -> notedId = buffer.readInt()
             44, 45 -> buffer.skip(2) // bitmask recolor/retexture
             65 -> exchangeable = true
             69 -> geBuyLimit = buffer.readInt()
@@ -138,5 +138,6 @@ class ItemDecoder : DefinitionDecoder<ItemDefinition>(ITEMS) {
         if (definition.boundTemplateId != -1) {
             definition.toSingleNote(definitions.getOrNull(definition.boundTemplateId), definitions.getOrNull(definition.bindId))
         }
+        definition.loadEquippedOps()
     }
 }

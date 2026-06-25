@@ -1,10 +1,10 @@
 package com.undercut.game.nxt
 
-import com.undercut.cache.type.vars.VarbitType
-import com.undercut.cache.type.vars.VarbitType.Companion.BIT_MASKS
 import com.undercut.game.memory.NativeAccess.pointerAtOffset
 import com.undercut.game.memory.NativeAccess.readInt
 import com.undercut.game.memory.eastl.EastlHashTable
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.VarBitDefinition.Companion.BIT_MASKS
 import java.lang.foreign.MemorySegment
 
 class PlayerVarDomain(val ptr: MemorySegment) {
@@ -14,7 +14,7 @@ class PlayerVarDomain(val ptr: MemorySegment) {
     fun getVar(id: Int) = hashTable[id]?.readInt() ?: 0
     fun getVarBit(id: Int): Int {
         try {
-            val type = VarbitType.get(id)
+            val type = Cache.varbit(id) ?: return 0
             return getVar(type.baseVar) shr type.startBit and BIT_MASKS[type.endBit - type.startBit]
         } catch(e: Throwable) {
             return 0

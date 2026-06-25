@@ -1,16 +1,5 @@
 package com.undercut.mcp.tools
 
-import com.undercut.cache.type.bas.BASType
-import com.undercut.cache.type.enums.EnumType
-import com.undercut.cache.type.inventories.InvType
-import com.undercut.cache.type.items.ItemType
-import com.undercut.cache.type.npcs.NPCType
-import com.undercut.cache.type.objects.ObjectType
-import com.undercut.cache.type.params.ParamType
-import com.undercut.cache.type.quests.QuestType
-import com.undercut.cache.type.sequences.SeqType
-import com.undercut.cache.type.structs.StructType
-import com.undercut.cache.type.vars.VarbitType
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import kotlinx.serialization.json.Json
@@ -26,6 +15,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import world.gregs.voidps.cache.Cache
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -131,17 +121,17 @@ object ContentTools {
 
     private fun lookupKotlinType(kind: String, id: Int): Any? = try {
         when (kind.lowercase()) {
-            "npc" -> NPCType.get(id)
-            "item" -> ItemType.get(id)
-            "obj", "loc" -> ObjectType.get(id)
-            "enum" -> EnumType.get(id)
-            "struct" -> StructType.get(id)
-            "param" -> ParamType.get(id)
-            "varbit" -> VarbitType.get(id)
-            "seq" -> SeqType.get(id)
-            "bas" -> BASType.get(id)
-            "inv" -> InvType.get(id)
-            "quest" -> QuestType.get(id)
+            "npc" -> Cache.npc(id)
+            "item" -> Cache.item(id)
+            "obj", "loc" -> Cache.obj(id)
+            "enum" -> Cache.enum(id)
+            "struct" -> Cache.struct(id)
+            "param" -> Cache.param(id)
+            "varbit" -> Cache.varbit(id)
+            "seq" -> Cache.seq(id)
+            "bas" -> Cache.bas(id)
+            "inv" -> Cache.inv(id)
+            "quest" -> Cache.quest(id)
             else -> null
         }
     } catch (_: Throwable) {
@@ -326,19 +316,22 @@ object ContentTools {
         }
     }
 
+    // param/inv/quest have no eager whole-array decoder in :core, so a full id scan
+    // (and therefore list_content_type) isn't available for them; get_content_type
+    // still resolves a single id via the per-id accessors.
     private fun parserMaxId(kind: String): Int = try {
         when (kind.lowercase()) {
-            "npc" -> NPCType.getParser().getMaxId()
-            "item" -> ItemType.getParser().getMaxId()
-            "obj", "loc" -> ObjectType.getParser().getMaxId()
-            "enum" -> EnumType.getParser().getMaxId()
-            "struct" -> StructType.getParser().getMaxId()
-            "param" -> ParamType.getParser().getMaxId()
-            "varbit" -> VarbitType.getParser().getMaxId()
-            "seq" -> SeqType.getParser().getMaxId()
-            "bas" -> BASType.getParser().getMaxId()
-            "inv" -> InvType.getParser().getMaxId()
-            "quest" -> QuestType.getParser().getMaxId()
+            "npc" -> Cache.npcs.size - 1
+            "item" -> Cache.items.size - 1
+            "obj", "loc" -> Cache.objects.size - 1
+            "enum" -> Cache.enums.size - 1
+            "struct" -> Cache.structs.size - 1
+            "varbit" -> Cache.varbits.size - 1
+            "seq" -> Cache.animations.size - 1
+            "bas" -> Cache.bas.size - 1
+            "param" -> Cache.params.size - 1
+            "inv" -> Cache.invs.size - 1
+            "quest" -> Cache.quests.size - 1
             else -> -1
         }
     } catch (_: Throwable) {

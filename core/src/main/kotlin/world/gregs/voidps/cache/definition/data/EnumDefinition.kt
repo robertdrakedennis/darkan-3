@@ -14,6 +14,12 @@ data class EnumDefinition(
     override var stringId: String = "",
     override var extras: Map<String, Any>? = null
 ) : Definition, Extra {
+
+    /** Engine alias for [map] as a mutable view (the backing decode map is mutable). */
+    @Suppress("UNCHECKED_CAST")
+    val values: MutableMap<Int, Any>
+        get() = (map as? MutableMap<Int, Any>) ?: mutableMapOf()
+
     fun getKey(value: Any) = map?.filterValues { it == value }?.keys?.lastOrNull() ?: -1
 
     fun getInt(id: Int) = map?.get(id) as? Int ?: defaultInt
@@ -36,9 +42,6 @@ data class EnumDefinition(
 
     /** Legacy alias for [defaultInt]. */
     fun getDefaultIntValue(): Int = defaultInt
-
-    /** Gets the values map, or empty map if null. */
-    fun getValues(): Map<Int, Any> = map ?: emptyMap()
 
     /** Gets the number of entries in this enum. */
     fun getSize(): Int = map?.size ?: 0

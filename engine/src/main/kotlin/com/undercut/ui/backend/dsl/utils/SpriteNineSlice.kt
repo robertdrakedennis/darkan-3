@@ -1,8 +1,8 @@
 package com.undercut.ui.backend.dsl.utils
 
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.ui.backend.native.ImGuiTexture
 import com.undercut.ui.backend.native.getTexture
+import world.gregs.voidps.cache.Cache
 
 /**
  * Minimal nine-slice descriptor backed by cache sprites.
@@ -34,7 +34,7 @@ data class SpriteNineSlice(
             bottomRight: Int
         ): SpriteNineSlice {
             fun load(id: Int): SpritePiece {
-                val s = Sprite.get(id)
+                val s = Cache.sprite(id) ?: error("Sprite $id doesn't exist.")
                 val tex = s.getTexture()
                 return SpritePiece(id, tex, s.maxWidth, s.maxHeight)
             }

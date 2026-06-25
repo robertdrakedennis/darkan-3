@@ -1,6 +1,6 @@
 package com.undercut.script.api
 
-import com.undercut.cache.type.items.ItemType
+import world.gregs.voidps.cache.Cache
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.script.Script
@@ -132,7 +132,7 @@ suspend fun Script.smithMake(): Boolean {
  *  reports the selected base name for display; the produced tiered item is derived in-game on Make. */
 fun smithSelectedDisplay(): String {
     val base = Smithing.baseObjectId
-    val name = if (base > 0) ItemType.get(base).name else Smithing.selectedName
+    val name = if (base > 0) Cache.item(base)?.name ?: "?" else Smithing.selectedName
     val suffix = when (val t = Smithing.tier) {
         0 -> ""; 50 -> " (Burial)"; else -> " +$t"
     }

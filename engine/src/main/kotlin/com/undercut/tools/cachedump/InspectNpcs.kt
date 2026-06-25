@@ -1,6 +1,7 @@
 package com.undercut.tools.cachedump
 
-import com.undercut.cache.type.npcs.NPCType
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.NPCDefinition
 
 object InspectNpcsMain {
     @JvmStatic
@@ -8,9 +9,9 @@ object InspectNpcsMain {
         val targets = intArrayOf(3090, 781, 783, 5706, 4365, 4026, 4575, 4497)
 
         val parentsOf = mutableMapOf<Int, MutableList<Int>>()
-        val byId = mutableMapOf<Int, NPCType>()
+        val byId = mutableMapOf<Int, NPCDefinition>()
         for (id in 0..50_000) {
-            val t = runCatching { NPCType.get(id) }.getOrNull() ?: continue
+            val t = runCatching { Cache.npc(id) }.getOrNull() ?: continue
             byId[id] = t
             t.transformTo?.forEach { child ->
                 if (child > 0) parentsOf.getOrPut(child) { mutableListOf() }.add(id)

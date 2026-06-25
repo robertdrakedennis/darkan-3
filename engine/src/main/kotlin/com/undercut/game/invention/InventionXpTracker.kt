@@ -1,6 +1,5 @@
 package com.undercut.game.invention
 
-import com.undercut.cache.type.items.ItemType
 import com.undercut.game.Skill
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.items.Item
@@ -8,6 +7,7 @@ import com.undercut.game.nxt.Client
 import com.undercut.game.nxt.MainState
 import com.undercut.ui.UIState
 import com.undercut.util.hoursElapsed
+import world.gregs.voidps.cache.Cache
 
 /**
  * Estimates effective Invention XP/hour from the item experience that augmented gear
@@ -195,7 +195,7 @@ object InventionXpTracker {
     private fun isAugmented(item: Item, itemXp: Int): Boolean {
         if (item.varDomain == null) return false
         if (itemXp > 0) return true
-        return runCatching { ItemType.get(item.id).params.getInt(PARAM_AUGMENT_STATE, 0) != 0 }.getOrDefault(false)
+        return runCatching { (Cache.item(item.id)?.params?.get(PARAM_AUGMENT_STATE) as? Int ?: 0) != 0 }.getOrDefault(false)
     }
 
     private fun itemLevel(xp: Int): Int {
@@ -220,7 +220,7 @@ object InventionXpTracker {
         return runCatching {
             var tier = tierFromParams(itemId)
             if (tier <= 0) {
-                val baseId = ItemType.get(itemId).params.getInt(PARAM_UNAUGMENTED_ID, -1)
+                val baseId = (Cache.item(itemId)?.params?.get(PARAM_UNAUGMENTED_ID) as? Int ?: -1)
                 if (baseId > 0) tier = tierFromParams(baseId)
             }
             if (tier > 0) tier to true else DEFAULT_TIER to false
@@ -228,10 +228,10 @@ object InventionXpTracker {
     }
 
     private fun tierFromParams(itemId: Int): Int {
-        val params = ItemType.get(itemId).params
-        val explicit = params.getInt(PARAM_ITEM_TIER, -1)
+        val params = Cache.item(itemId)?.params ?: emptyMap()
+        val explicit = params[PARAM_ITEM_TIER] as? Int ?: -1
         if (explicit > 0) return explicit
-        return WIELD_REQ_PARAMS.maxOf { params.getInt(it, 0) }
+        return WIELD_REQ_PARAMS.maxOf { params[it] as? Int ?: 0 }
     }
 
     private fun perHour(total: Double, startMs: Long): Int {

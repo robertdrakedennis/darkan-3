@@ -1,11 +1,12 @@
 package com.undercut.game.nxt.entity
 
-import com.undercut.cache.type.items.ItemType
 import com.undercut.game.Tile
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.game.nxt.DoActionOpcode
 import com.undercut.script.api.interfaces
 import com.undercut.script.api.localPlayer
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.ItemDefinition
 
 private val MENU_OPS = arrayOf(
     DoActionOpcode.GROUND_ITEM_1,
@@ -18,10 +19,10 @@ private val MENU_OPS = arrayOf(
 
 data class GroundItem(val id: Int, var amount: Int = 1, val tile: Tile) {
     val name: String
-        get() = ItemType.get(id).name
+        get() = Cache.item(id)?.name ?: "null"
 
     val groundOps: Array<String?>
-        get() = ItemType.get(id).groundActions
+        get() = Cache.item(id)?.groundActions ?: arrayOfNulls(6)
 
     fun interact(option: Int): Boolean {
         if (!localPlayer.tile.withinDistance(tile, 25)) return false
@@ -45,7 +46,7 @@ data class GroundItem(val id: Int, var amount: Int = 1, val tile: Tile) {
         return false
     }
 
-    fun getDef() = ItemType.get(id)
+    fun getDef() = Cache.item(id) ?: ItemDefinition.EMPTY
 
     fun interact(option: String): Boolean {
         val op = getDef().getGroundOpIdForName(option)

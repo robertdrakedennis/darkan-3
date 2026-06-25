@@ -1,6 +1,5 @@
 package com.undercut.game.items
 
-import com.undercut.cache.type.items.ItemType
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.game.nxt.entity.GroundItem
 import com.undercut.game.nxt.entity.location.SceneObject
@@ -10,6 +9,8 @@ import com.undercut.script.api.bank
 import com.undercut.script.api.equipment
 import com.undercut.script.api.interfaces
 import com.undercut.script.api.inventory
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.ItemDefinition
 
 data class Item(
     val id: Int,
@@ -18,10 +19,10 @@ data class Item(
     val varDomain: ObjVarDomain? = null
 ) {
     val name: String
-        get() = ItemType.get(id).name
+        get() = Cache.item(id)?.name ?: "null"
 
     val invOps: Array<String?>
-        get() = ItemType.get(id).inventoryActions
+        get() = Cache.item(id)?.inventoryActions ?: arrayOfNulls(5)
 
     fun click(option: Int): Boolean {
         return slot.click(option)
@@ -73,7 +74,7 @@ data class Item(
 //        return false
 //    }
 
-    fun getDef() = ItemType.get(id)
+    fun getDef() = Cache.item(id) ?: ItemDefinition.EMPTY
 
     fun click(option: String): Boolean {
         var op = -1

@@ -44,8 +44,6 @@ dependencies {
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("io.github.classgraph:classgraph:4.8.177")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
-    implementation("org.xerial:sqlite-jdbc:3.46.1.3")
-    implementation("org.apache.commons:commons-compress:1.28.0")
     implementation("com.github.weisj:darklaf-core:3.0.2")
     implementation("com.formdev:flatlaf:3.4")
     implementation("com.formdev:flatlaf-intellij-themes:3.2")

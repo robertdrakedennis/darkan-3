@@ -28,6 +28,8 @@ class SpriteDecoder : DefinitionDecoder<SpriteDefinition>(SPRITES) {
 
         val offsetX: Int = buffer.readShort()
         val offsetY: Int = buffer.readShort()
+        maxWidth = offsetX
+        maxHeight = offsetY
 
         val paletteSize: Int = buffer.readUnsignedByte() + 1
 

@@ -56,7 +56,7 @@ object Pickpocket : State<GenericPickpocket>() {
 
         if (inventory.freeSlots < 2) {
             inventory.forEach {
-                if (!it.getDef().isStackable) {
+                if (!it.getDef().isStackable()) {
                     it.click("Drop")
                     delay(554, 733)
                 }

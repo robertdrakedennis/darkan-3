@@ -265,6 +265,30 @@ data class NPCDefinition(
     /** Legacy overload that accepts a vars parameter for transform support. Returns this definition's name. */
     fun getName(vars: Any?): String = name
 
+    // --- Engine (NPCType) public-surface aliases / methods ---
+
+    /** Engine alias for [dialogueModels]. */
+    val headModels: IntArray? get() = dialogueModels
+
+    /** Engine alias for [transforms]. */
+    val transformTo: IntArray? get() = transforms
+
+    /** Engine alias for [varbit]. */
+    var varpBit: Int
+        get() = varbit
+        set(value) { varbit = value }
+
+    fun getOpIdForName(opName: String): Int =
+        options.indexOfFirst { it.equals(opName, ignoreCase = true) }.takeIf { it >= 0 } ?: -1
+
+    fun getOp(optionId: Int): String = options.getOrNull(optionId) ?: "null"
+
+    fun containsOp(i: Int, option: String): Boolean =
+        options.getOrNull(i)?.equals(option, ignoreCase = true) == true
+
+    fun containsOp(option: String): Boolean =
+        options.any { it?.equals(option, ignoreCase = true) == true }
+
     companion object {
         val EMPTY = NPCDefinition()
     }

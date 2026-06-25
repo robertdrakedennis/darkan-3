@@ -104,12 +104,12 @@ object EntitiesTab {
                     nextColumn()
                     text("${obj.tile.x}, ${obj.tile.y}, ${obj.tile.plane}")
                     nextColumn()
-                    text(obj.defs.options.joinToString(", ") { it ?: "None" })
+                    text(obj.defs.options?.joinToString(", ") { it ?: "None" } ?: "")
 
                     if (obj.typeId != -1 && obj.typeId != obj.id) {
                         val def = obj.defs
                         val controlledBy = when {
-                            def.varpBit != -1 -> "via varbit ${def.varpBit}"
+                            def.varbit != -1 -> "via varbit ${def.varbit}"
                             def.varp != -1 -> "via varp ${def.varp}"
                             else -> "via transform"
                         }

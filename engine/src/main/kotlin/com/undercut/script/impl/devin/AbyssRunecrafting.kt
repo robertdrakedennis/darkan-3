@@ -1,6 +1,5 @@
 package com.undercut.script.impl.devin
 
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.game.Skill
 import com.undercut.game.Tile
 import com.undercut.game.interfaces.Ability
@@ -14,7 +13,8 @@ import com.undercut.ui.backend.dsl.ImGuiDsl
 import com.undercut.ui.backend.dsl.scopes.image
 import com.undercut.ui.backend.dsl.scopes.text
 import com.undercut.ui.backend.dsl.scopes.xpProgressBar
-import com.undercut.ui.backend.native.getTexture
+import com.undercut.ui.backend.native.SpriteIds
+import com.undercut.ui.backend.native.spriteTexture
 import com.undercut.util.formatElapsedTime
 import com.undercut.util.gaussian
 import com.undercut.util.getFormattedXpPerHour
@@ -389,7 +389,7 @@ class AbyssRunecrafting : StateMachineScript<AbyssRunecrafting>(), ConfigurableS
 
     override fun render() {
         ImGuiDsl.window("Abyss Runecrafting") {
-            image(Sprite.get(Sprite.RUNECRAFTING).getTexture(), 32f, 32f)
+            image(spriteTexture(SpriteIds.RUNECRAFTING), 32f, 32f)
             text("Runtime: ${formatElapsedTime(System.currentTimeMillis(), startTime)}")
             text("Location: ${if (rune.value != Altar.SPIRIT) rune.value.displayName else "None yet. Select one."}")
             text("XP/hr: ${getFormattedXpPerHour(startingXp, getXp(Skill.RUNECRAFTING), startTime)}")

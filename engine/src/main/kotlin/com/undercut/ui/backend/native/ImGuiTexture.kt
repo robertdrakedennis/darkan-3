@@ -1,7 +1,8 @@
 package com.undercut.ui.backend.native
 
-import com.undercut.cache.type.sprites.Sprite
-import com.undercut.cache.type.sprites.toRGBABytes
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.SpriteDefinition
+import world.gregs.voidps.cache.definition.data.toRGBABytes
 import java.awt.image.BufferedImage
 import java.lang.ref.Cleaner
 import java.util.concurrent.atomic.AtomicBoolean
@@ -60,22 +61,40 @@ enum class SpriteRotation(val turns: Int) {
     val degrees: Int get() = turns * 90
 }
 
-fun Sprite.getTexture(): ImGuiTexture = getTexture(SpriteRotation.R0)
+/** Skill/UI sprite ids previously held on the engine's deleted Sprite companion. */
+object SpriteIds {
+    const val MINING = 13198
+    const val CRAFTING = 13203
+    const val RUNECRAFTING = 13206
+    const val WOODCUTTING = 13207
+    const val SMITHING = 13208
+    const val FARMING = 13213
+    const val DUNGEONEERING = 13215
+    const val DIVINATION_HIRES = 20342
+}
 
-fun Sprite.getTexture(rotation: SpriteRotation): ImGuiTexture =
-    spriteTextureCache.getOrPut(SpriteKey(archiveId, rotation.turns)) {
-        createTexture(rotation) ?: error("Sprite $archiveId doesn't exist.")
+/** Decode [id] from the shared cache and build its ImGui texture, erroring if absent (matches the
+ *  old non-null `Sprite.get(id).getTexture()` ergonomics). */
+fun spriteTexture(id: Int, rotation: SpriteRotation = SpriteRotation.R0): ImGuiTexture =
+    (Cache.sprite(id) ?: error("Sprite $id doesn't exist.")).getTexture(rotation)
+
+fun SpriteDefinition.getTexture(): ImGuiTexture = getTexture(SpriteRotation.R0)
+
+fun SpriteDefinition.getTexture(rotation: SpriteRotation): ImGuiTexture =
+    spriteTextureCache.getOrPut(SpriteKey(id, rotation.turns)) {
+        createTexture(rotation) ?: error("Sprite $id doesn't exist.")
     }
 
-fun Sprite.createTexture(rotation: SpriteRotation): ImGuiTexture? {
-    if (subImages.isEmpty()) return null
+fun SpriteDefinition.createTexture(rotation: SpriteRotation): ImGuiTexture? {
+    val subs = sprites ?: return null
+    if (subs.isEmpty() || maxWidth <= 0 || maxHeight <= 0) return null
 
     val fullImage = BufferedImage(maxWidth, maxHeight, BufferedImage.TYPE_INT_ARGB)
     val graphics = fullImage.createGraphics()
 
     // Draw all sub-images onto the full canvas
-    for (subImg in subImages) {
-        graphics.drawImage(subImg.img, subImg.x, subImg.y, null)
+    for (sub in subs) {
+        graphics.drawImage(sub.toBufferedImage(), sub.offsetX, sub.offsetY, null)
     }
     graphics.dispose()
 
@@ -90,8 +109,8 @@ fun Sprite.createTexture(rotation: SpriteRotation): ImGuiTexture? {
     return ImGuiTexture.fromRGBA(rgbaBytes, w, h)
 }
 
-fun Sprite.clearTextureCache() {
-    val keys = spriteTextureCache.keys.filter { it.id == archiveId }
+fun SpriteDefinition.clearTextureCache() {
+    val keys = spriteTextureCache.keys.filter { it.id == id }
     keys.forEach { key -> spriteTextureCache.remove(key)?.destroy() }
 }
 

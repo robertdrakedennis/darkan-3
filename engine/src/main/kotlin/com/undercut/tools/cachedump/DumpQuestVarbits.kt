@@ -1,7 +1,7 @@
 package com.undercut.tools.cachedump
 
-import com.undercut.cache.Cache
-import com.undercut.cache.Index
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.Index
 import java.io.File
 
 object DumpQuestVarbitsMain {
@@ -14,20 +14,21 @@ object DumpQuestVarbitsMain {
 
         val firstOpcodes = mutableMapOf<Int, Int>()
         val cache = Cache.get()
-        val archive = cache.getArchive(Index.CONFIG, 35)
-        for ((_, file) in archive.files) {
-            if (file.data.isEmpty()) continue
-            val first = file.data[0].toInt() and 0xFF
+        val fileIds = cache.files(Index.CONFIGS, 35)
+        for (fid in fileIds) {
+            val data = cache.data(Index.CONFIGS, 35, fid) ?: continue
+            if (data.isEmpty()) continue
+            val first = data[0].toInt() and 0xFF
             firstOpcodes[first] = (firstOpcodes[first] ?: 0) + 1
         }
-        println("[dump-quest-varbits] First-byte (opcode) distribution across ${archive.files.size} files:")
+        println("[dump-quest-varbits] First-byte (opcode) distribution across ${fileIds.size} files:")
         firstOpcodes.entries.sortedBy { it.key }.forEach { (op, n) ->
             println("  opcode 0x%02x (%3d)  %5d files".format(op, op, n))
         }
 
         println("\n[dump-quest-varbits] Sample raw bytes (first 96) for selected ids:")
         for (id in listOf(0, 1, 6, 66, 173)) {
-            val data = archive.files[id]?.data ?: continue
+            val data = cache.data(Index.CONFIGS, 35, id) ?: continue
             val hex = data.take(96).joinToString(" ") { "%02x".format(it.toInt() and 0xFF) }
             println("  id=$id (size=${data.size}): $hex")
         }

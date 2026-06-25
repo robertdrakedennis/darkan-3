@@ -1,6 +1,5 @@
 package com.undercut.ui.backend.dsl.scopes
 
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.game.Skill
 import com.undercut.script.api.getXp
 import com.undercut.ui.backend.dsl.ImGuiState
@@ -13,6 +12,7 @@ import com.undercut.ui.backend.native.ImGuiTexture
 import com.undercut.ui.backend.rendering.CommandRenderer
 import com.undercut.util.getLevelForXp
 import com.undercut.util.getXpForLevel
+import world.gregs.voidps.cache.Cache
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -450,7 +450,7 @@ internal inline fun LayoutScope.scrollableWithSpriteScrollbar(
     windowFlags: Int = 0,
     block: ChildScope.() -> Unit
 ) {
-    val trackW = try { Sprite.get(trackSpriteId).maxWidth.toFloat().coerceAtLeast(1f) } catch (_: Throwable) { 12f }
+    val trackW = try { (Cache.sprite(trackSpriteId)?.maxWidth ?: 1).toFloat().coerceAtLeast(1f) } catch (_: Throwable) { 12f }
     // Reserve space for the custom scrollbar by setting ScrollbarSize
     commands.add(PushStyleVarFloatCommand(ImGuiStyleVar.ScrollbarSize, trackW))
 

@@ -1,6 +1,5 @@
 package com.undercut.script.impl.trent.cerbtokenfarm
 
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.game.Skill
 import com.undercut.game.Tile
 import com.undercut.game.chat.MessageType
@@ -17,7 +16,8 @@ import com.undercut.ui.backend.dsl.ImGuiDsl
 import com.undercut.ui.backend.dsl.scopes.image
 import com.undercut.ui.backend.dsl.scopes.text
 import com.undercut.ui.backend.dsl.scopes.xpProgressBar
-import com.undercut.ui.backend.native.getTexture
+import com.undercut.ui.backend.native.SpriteIds
+import com.undercut.ui.backend.native.spriteTexture
 import com.undercut.util.*
 
 @ScriptDescription(
@@ -65,7 +65,7 @@ class CerbTokenFarm : StateMachineScript<CerbTokenFarm>() {
     
     override fun render() {
         ImGuiDsl.window("Cerberus Token Farm") {
-            image(Sprite.get(Sprite.DUNGEONEERING).getTexture(), 32f, 32f)
+            image(spriteTexture(SpriteIds.DUNGEONEERING), 32f, 32f)
             text("Runtime: ${formatElapsedTime(System.currentTimeMillis(), startTime)}")
             text("Tokens/hr: ${format(tokensPerHour)}")
             text("XP/hr (inc. tokens): ${format(tokensPerHour + getXpPerHour(startingXp, getXp(Skill.DUNGEONEERING), startTime))}")

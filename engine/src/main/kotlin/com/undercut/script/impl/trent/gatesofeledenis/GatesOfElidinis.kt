@@ -1,6 +1,6 @@
 package com.undercut.script.impl.trent.gatesofeledenis
 
-import com.undercut.cache.type.maps.ObjectShape
+import com.undercut.game.map.ObjectShape
 import com.undercut.game.Tile
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.game.interfaces.InstanceSystem

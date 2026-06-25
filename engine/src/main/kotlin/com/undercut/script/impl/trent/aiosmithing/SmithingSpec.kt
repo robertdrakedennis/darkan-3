@@ -1,7 +1,7 @@
 package com.undercut.script.impl.trent.aiosmithing
 
-import com.undercut.cache.type.items.ItemType
-import com.undercut.cache.type.structs.StructType
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.StructDefinition
 
 // Smithable-item params (mirrors jag clientscript2542's upgrade walk).
 private const val PARAM_TIER = 7804       // this item's upgrade tier (absent on a base item -> 0)
@@ -12,9 +12,9 @@ private const val PARAM_IS_BURIAL = 7803  // 1 on the burial variant
 /** Burial is selected as tier 50 in the forge (varbitplayer_43239 / TIER_BUTTON). */
 const val BURIAL_TIER = 50
 
-fun itemTier(itemId: Int): Int = ItemType.get(itemId).params.getInt(PARAM_TIER, 0)
-fun itemUpgrade(itemId: Int): Int = ItemType.get(itemId).params.getInt(PARAM_UPGRADE, -1)
-fun itemIsBurial(itemId: Int): Boolean = ItemType.get(itemId).params.getInt(PARAM_IS_BURIAL, 0) == 1
+fun itemTier(itemId: Int): Int = Cache.item(itemId)?.params?.get(PARAM_TIER) as? Int ?: 0
+fun itemUpgrade(itemId: Int): Int = Cache.item(itemId)?.params?.get(PARAM_UPGRADE) as? Int ?: -1
+fun itemIsBurial(itemId: Int): Boolean = (Cache.item(itemId)?.params?.get(PARAM_IS_BURIAL) as? Int ?: 0) == 1
 
 /** The forge TIER_BUTTON value that produces [itemId] (its numeric tier, or [BURIAL_TIER]). */
 fun makeTierOf(itemId: Int): Int = if (itemIsBurial(itemId)) BURIAL_TIER else itemTier(itemId)
@@ -23,7 +23,7 @@ fun makeTierOf(itemId: Int): Int = if (itemIsBurial(itemId)) BURIAL_TIER else it
 fun familyBase(itemId: Int): Int {
     var id = itemId
     repeat(16) {
-        val down = ItemType.get(id).params.getInt(PARAM_DOWNGRADE, -1)
+        val down = Cache.item(id)?.params?.get(PARAM_DOWNGRADE) as? Int ?: -1
         if (down <= 0 || down == id) return id
         id = down
     }
@@ -56,20 +56,20 @@ private const val STRUCT_BAR_ITEM_PARAM = 7763
 private const val STRUCT_MATERIAL_ITEM_BASE = 2655
 private const val STRUCT_MATERIAL_QTY_BASE = 2665
 
-private fun recipeStruct(item: Int): StructType? =
-    ItemType.get(item).params.getInt(RECIPE_STRUCT_PARAM, -1).takeIf { it > 0 }?.let { StructType.get(it) }
+private fun recipeStruct(item: Int): StructDefinition? =
+    (Cache.item(item)?.params?.get(RECIPE_STRUCT_PARAM) as? Int ?: -1).takeIf { it > 0 }?.let { Cache.struct(it) }
 
 /** Metal bar the step producing [item] consumes (e.g. Rune bar 2363), or -1 (e.g. the burial step). */
-fun stepBarItem(item: Int): Int = recipeStruct(item)?.params?.getInt(STRUCT_BAR_ITEM_PARAM, -1) ?: -1
+fun stepBarItem(item: Int): Int = recipeStruct(item)?.getIntValue(STRUCT_BAR_ITEM_PARAM, -1) ?: -1
 
 /** Bars the step producing [item] consumes — the qty paired with the bar in its recipe struct; 0 if none. */
 fun stepBarCost(item: Int): Int {
     val struct = recipeStruct(item) ?: return 0
-    val bar = struct.params.getInt(STRUCT_BAR_ITEM_PARAM, -1)
+    val bar = struct.getIntValue(STRUCT_BAR_ITEM_PARAM, -1)
     if (bar < 0) return 0
     for (i in 0 until 6) {
-        if (struct.params.getInt(STRUCT_MATERIAL_ITEM_BASE + i, -1) == bar) {
-            return struct.params.getInt(STRUCT_MATERIAL_QTY_BASE + i, 0)
+        if (struct.getIntValue(STRUCT_MATERIAL_ITEM_BASE + i, -1) == bar) {
+            return struct.getIntValue(STRUCT_MATERIAL_QTY_BASE + i, 0)
         }
     }
     return 0

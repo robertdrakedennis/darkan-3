@@ -1,6 +1,5 @@
 package com.undercut.script.impl.trent.aiowoodcutting
 
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.game.Skill
 import com.undercut.game.Tile
 import com.undercut.game.nxt.entity.location.SceneObject
@@ -17,7 +16,8 @@ import com.undercut.ui.backend.dsl.ImGuiDsl
 import com.undercut.ui.backend.dsl.scopes.image
 import com.undercut.ui.backend.dsl.scopes.text
 import com.undercut.ui.backend.dsl.scopes.xpProgressBar
-import com.undercut.ui.backend.native.getTexture
+import com.undercut.ui.backend.native.SpriteIds
+import com.undercut.ui.backend.native.spriteTexture
 import com.undercut.util.formatElapsedTime
 import com.undercut.util.gaussian
 import com.undercut.util.getFormattedXpPerHour
@@ -49,7 +49,7 @@ class AIOWoodcutting : StateMachineScript<AIOWoodcutting>() {
 
     override fun render() {
         ImGuiDsl.window("AIO Woodcutting") {
-            image(Sprite.get(Sprite.WOODCUTTING).getTexture(), 32f, 32f)
+            image(spriteTexture(SpriteIds.WOODCUTTING), 32f, 32f)
             text("Runtime: ${formatElapsedTime(System.currentTimeMillis(), startTime)}")
             text("Location: ${if (hasWcSpot()) wcSpot else if (hasOtherName()) otherName else "None yet. Click a tree."}")
             text("XP/hr: ${getFormattedXpPerHour(startingXp, getXp(Skill.WOODCUTTING), startTime)}")

@@ -1,14 +1,9 @@
 package com.undercut.pathfinder
 
-import com.undercut.cache.Cache
-import com.undercut.cache.Index
-import com.undercut.cache.getSmartSizeVar
-import com.undercut.cache.getUnsignedSmart
-import com.undercut.cache.skip
-import com.undercut.cache.type.maps.ObjectShape
-import com.undercut.cache.type.maps.RenderFlag
 import com.undercut.game.Tile
 import com.undercut.game.bootstrap.Bootstrap
+import com.undercut.game.map.ObjectShape
+import com.undercut.game.map.RenderFlag
 import com.undercut.game.memory.NativeAccess.getOrNull
 import com.undercut.game.memory.NativeAccess.pointerAtOffset
 import com.undercut.game.memory.NativeAccess.readInt
@@ -19,11 +14,13 @@ import com.undercut.game.nxt.OMapSquare
 import com.undercut.game.nxt.OWorld
 import com.undercut.game.nxt.types.Vector
 import com.undercut.game.scene.CachedSceneObject
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.definition.data.RegionDefinition
+import world.gregs.voidps.cache.definition.data.RegionObject
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.lang.foreign.ValueLayout.JAVA_BYTE
 import java.lang.foreign.ValueLayout.JAVA_LONG
-import java.nio.ByteBuffer
 
 /**
  * Manages collision data for instanced (dynamic) regions.
@@ -45,7 +42,7 @@ object DynamicRegionCollision {
     private val loadedVirtualRegions = mutableSetOf<Int>()
 
     /** Cache decoded region data to avoid re-reading from cache */
-    private val regionDataCache = mutableMapOf<Int, RegionData>()
+    private val regionDataCache = mutableMapOf<Int, RegionDefinition>()
 
     /** Ticks spent in dynamic region (for CCD retry timing) */
     private var ticksInDynamic = 0
@@ -257,7 +254,7 @@ object DynamicRegionCollision {
                         rotation
                     )
                     applyZoneObjectCollision(
-                        regionData.objects + regionData.underwaterObjects,
+                        regionData.objects,
                         regionData.tileFlags,
                         localZoneX, localZoneY, sourceLevel,
                         targetBaseX, targetBaseY, plane,
@@ -273,23 +270,6 @@ object DynamicRegionCollision {
         }
         return zonesLoaded
     }
-
-    // ── Data Classes ──────────────────────────────────────────────────
-
-    private data class RegionData(
-        val tileFlags: Array<Array<ByteArray>>,  // [plane][x][y] — 4 × 64 × 64
-        val objects: List<DecodedObject>,
-        val underwaterObjects: List<DecodedObject>
-    )
-
-    private data class DecodedObject(
-        val objectId: Int,
-        val localX: Int,     // 0-63 within region
-        val localY: Int,     // 0-63 within region
-        val plane: Int,
-        val shape: ObjectShape,
-        val rotation: Int,   // 0-3
-    )
 
     // ── Zone Rotation ─────────────────────────────────────────────────
 
@@ -614,7 +594,7 @@ object DynamicRegionCollision {
 
                     // Apply object collision for this 8×8 zone
                     applyZoneObjectCollision(
-                        regionData.objects + regionData.underwaterObjects,
+                        regionData.objects,
                         regionData.tileFlags,
                         localZoneX, localZoneY, sourceLevel,
                         targetBaseX, targetBaseY, plane,
@@ -636,7 +616,7 @@ object DynamicRegionCollision {
      * Apply tile collision for a single 8×8 zone with rotation.
      */
     private fun applyZoneTileCollision(
-        tileFlags: Array<Array<ByteArray>>,
+        tileFlags: Array<Array<IntArray>>,
         localZoneX: Int, localZoneY: Int, sourceLevel: Int,
         virtualBaseX: Int, virtualBaseY: Int, virtualPlane: Int,
         rotation: Int
@@ -649,9 +629,9 @@ object DynamicRegionCollision {
                 val srcX = srcBaseX + lx
                 val srcY = srcBaseY + ly
 
-                if (RenderFlag.flagged(tileFlags[sourceLevel][srcX][srcY].toInt(), RenderFlag.CLIPPED)) {
+                if (RenderFlag.flagged(tileFlags[sourceLevel][srcX][srcY], RenderFlag.CLIPPED)) {
                     var finalPlane = virtualPlane
-                    if (RenderFlag.flagged(tileFlags[1][srcX][srcY].toInt(), RenderFlag.LOWER_OBJECTS_TO_OVERRIDE_CLIPPING)) {
+                    if (RenderFlag.flagged(tileFlags[1][srcX][srcY], RenderFlag.LOWER_OBJECTS_TO_OVERRIDE_CLIPPING)) {
                         finalPlane--
                     }
                     if (finalPlane >= 0) {
@@ -670,8 +650,8 @@ object DynamicRegionCollision {
      * Filters objects by source zone position and applies rotation.
      */
     private fun applyZoneObjectCollision(
-        objects: List<DecodedObject>,
-        tileFlags: Array<Array<ByteArray>>,
+        objects: List<RegionObject>,
+        tileFlags: Array<Array<IntArray>>,
         localZoneX: Int, localZoneY: Int, sourceLevel: Int,
         virtualBaseX: Int, virtualBaseY: Int, virtualPlane: Int,
         rotation: Int
@@ -693,7 +673,7 @@ object DynamicRegionCollision {
             // Plane adjustment from tile flags
             var objPlane = virtualPlane
             if (obj.localX in 0..63 && obj.localY in 0..63 &&
-                tileFlags[1][obj.localX][obj.localY].toInt() and 0x2 != 0) {
+                tileFlags[1][obj.localX][obj.localY] and 0x2 != 0) {
                 objPlane--
             }
             if (objPlane < 0) continue
@@ -704,9 +684,9 @@ object DynamicRegionCollision {
 
             val sceneObj = CachedSceneObject(
                 MemorySegment.NULL,
-                obj.objectId, obj.objectId,
+                obj.id, obj.id,
                 Tile.of(virtualBaseX + rx, virtualBaseY + ry, objPlane),
-                obj.shape, rotatedObjRotation.toByte()
+                ObjectShape.forId(obj.shape), rotatedObjRotation.toByte()
             )
             WorldCollision.clip(sceneObj)
         }
@@ -725,9 +705,9 @@ object DynamicRegionCollision {
         for (plane in 0 until 4) {
             for (localX in 0 until 64) {
                 for (localY in 0 until 64) {
-                    if (RenderFlag.flagged(regionData.tileFlags[plane][localX][localY].toInt(), RenderFlag.CLIPPED)) {
+                    if (RenderFlag.flagged(regionData.tileFlags[plane][localX][localY], RenderFlag.CLIPPED)) {
                         var finalPlane = plane
-                        if (RenderFlag.flagged(regionData.tileFlags[1][localX][localY].toInt(), RenderFlag.LOWER_OBJECTS_TO_OVERRIDE_CLIPPING)) {
+                        if (RenderFlag.flagged(regionData.tileFlags[1][localX][localY], RenderFlag.LOWER_OBJECTS_TO_OVERRIDE_CLIPPING)) {
                             finalPlane--
                         }
                         if (finalPlane >= 0) {
@@ -741,18 +721,18 @@ object DynamicRegionCollision {
         }
 
         // Apply object collision
-        for (obj in regionData.objects + regionData.underwaterObjects) {
+        for (obj in regionData.objects) {
             var objPlane = obj.plane
-            if (regionData.tileFlags[1][obj.localX][obj.localY].toInt() and 0x2 != 0) {
+            if (regionData.tileFlags[1][obj.localX][obj.localY] and 0x2 != 0) {
                 objPlane--
             }
             if (objPlane < 0) continue
 
             val sceneObj = CachedSceneObject(
                 MemorySegment.NULL,
-                obj.objectId, obj.objectId,
+                obj.id, obj.id,
                 Tile.of(virtualBaseX + obj.localX, virtualBaseY + obj.localY, objPlane),
-                obj.shape, obj.rotation.toByte()
+                ObjectShape.forId(obj.shape), obj.rotation.toByte()
             )
             WorldCollision.clip(sceneObj)
         }
@@ -761,108 +741,19 @@ object DynamicRegionCollision {
     // ── Region Data Cache ─────────────────────────────────────────────
 
     /**
-     * Get cached region data or load from MAPSV2 cache.
-     * Returns null if the archive doesn't exist.
+     * Get cached region data or load it from the shared cache. Returns null if the
+     * region archive doesn't exist. The DRC archive id packs the source region as
+     * `regionX or (regionY shl 7)`; the shared accessor keys on the standard packed
+     * region id (`regionX shl 8 or regionY`) — both resolve the same physical archive.
      */
-    private fun getOrLoadRegion(archiveId: Int): RegionData? {
+    private fun getOrLoadRegion(archiveId: Int): RegionDefinition? {
         regionDataCache[archiveId]?.let { return it }
 
-        if (!Cache.get().exists(Index.MAPSV2.id, archiveId)) return null
-        val archive = Cache.get().getArchive(Index.MAPSV2, archiveId)
-
-        // Decode tile flags
-        val tileFlags = archive.files[TILES_FILE]?.let { decodeTileFlags(it.data) }
-            ?: Array(4) { Array(64) { ByteArray(64) } }
-
-        // Decode objects
-        val objects = archive.files[OBJECTS_FILE]?.let { decodeObjects(it.data) } ?: emptyList()
-        val underwaterObjects = archive.files[UNDERWATER_FILE]?.let { decodeObjects(it.data) } ?: emptyList()
-
-        val data = RegionData(tileFlags, objects, underwaterObjects)
+        val regionX = archiveId and 0x7f
+        val regionY = archiveId shr 7
+        val data = Cache.region((regionX shl 8) or regionY) ?: return null
         regionDataCache[archiveId] = data
         return data
-    }
-
-    // ── Cache Decoding ────────────────────────────────────────────────
-
-    /**
-     * Decode tile flags from MAPSV2 tile file.
-     * Returns [plane][x][y] tile flag array.
-     */
-    private fun decodeTileFlags(data: ByteArray): Array<Array<ByteArray>> {
-        val stream = ByteBuffer.wrap(data)
-        val tileFlags = Array(4) { Array(64) { ByteArray(64) } }
-
-        stream.skip(5) // header
-
-        for (plane in 0 until 4) {
-            for (x in 0 until 64) {
-                for (y in 0 until 64) {
-                    val flags = stream.get().toInt() and 0xff
-                    if (flags and 0x1 != 0) {
-                        stream.skip(1) // shapeHash
-                        stream.getUnsignedSmart() // overlayId
-                    }
-                    if (flags and 0x2 != 0) tileFlags[plane][x][y] = stream.get()
-                    if (flags and 0x4 != 0) stream.getUnsignedSmart() // underlayId
-                    if (flags and 0x8 != 0) stream.skip(2) // underlayId (short)
-                }
-            }
-        }
-
-        return tileFlags
-    }
-
-    /**
-     * Decode all objects from MAPSV2 objects file into a list.
-     */
-    private fun decodeObjects(data: ByteArray): List<DecodedObject> {
-        val stream = ByteBuffer.wrap(data)
-        val objects = mutableListOf<DecodedObject>()
-        var objectId = -1
-
-        while (true) {
-            val incr = stream.getSmartSizeVar()
-            if (incr == 0) break
-            objectId += incr
-
-            var location = 0
-            while (true) {
-                val incr2 = stream.getUnsignedSmart()
-                if (incr2 == 0) break
-                location += incr2 - 1
-
-                val localX = (location shr 6) and 0x3f
-                val localY = location and 0x3f
-                val plane = location shr 12
-                val objectData = stream.get().toInt() and 0xff
-
-                if (objectData and 0x80 != 0) readFlag0x80Data(stream)
-
-                val shape = ObjectShape.forId(objectData shr 2 and 0x1f)
-                val rotation = objectData and 0x3
-
-                objects.add(DecodedObject(objectId, localX, localY, plane, shape, rotation))
-            }
-        }
-
-        return objects
-    }
-
-    /** Read the 0x80 flag extended data from object stream */
-    private fun readFlag0x80Data(stream: ByteBuffer) {
-        val i = stream.get().toInt()
-        if (i and 0x1 != 0) stream.skip(8)
-        if (i and 0x2 != 0) stream.skip(2)
-        if (i and 0x4 != 0) stream.skip(2)
-        if (i and 0x8 != 0) stream.skip(2)
-        if (i and 0x10 != 0) {
-            stream.skip(2)
-        } else {
-            if (i and 0x20 != 0) stream.skip(2)
-            if (i and 0x40 != 0) stream.skip(2)
-            if (i and 0x80 != 0) stream.skip(2)
-        }
     }
 
     // ── Clear ─────────────────────────────────────────────────────────
@@ -881,8 +772,4 @@ object DynamicRegionCollision {
             println("[DRC] Cleared instance collision data")
         }
     }
-
-    private const val OBJECTS_FILE = 0
-    private const val UNDERWATER_FILE = 1
-    private const val TILES_FILE = 3
 }

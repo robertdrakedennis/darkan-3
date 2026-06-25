@@ -1,8 +1,7 @@
 package com.undercut.game.interfaces
 
-import com.undercut.cache.type.enums.EnumType
-import com.undercut.cache.type.structs.StructType
 import com.undercut.script.api.varps
+import world.gregs.voidps.cache.Cache
 
 private const val GCD_START_TICK_VAR = 4501
 private const val GCD_END_TICK_VAR = 4502
@@ -29,9 +28,9 @@ fun parseAllActionBarAbilities(): Map<Ability, IFSlot> {
             val values = getSlotValues(barNum, key.second)
             if (values.groupId != 0 && values.groupId != 10) {
                 val group = AbilityGroup.byId[values.groupId] ?: return@forEach println("Unknown ability group id: ${values.groupId} at $barNum, ${key.second}")
-                var abilityStructId = EnumType.get(group.enumId)?.values[values.slotId] as? Int ?: return@forEach println("Missing ability enum id: ${group.enumId} at $barNum, ${key.second}")
+                var abilityStructId = Cache.enum(group.enumId)?.values?.get(values.slotId) as? Int ?: return@forEach println("Missing ability enum id: ${group.enumId} at $barNum, ${key.second}")
                 abilityStructId = checkTransformedAbilities(abilityStructId)
-                StructType.get(abilityStructId) ?: return@forEach println("Missing ability struct id: $abilityStructId at $barNum, ${key.second}")
+                Cache.struct(abilityStructId) ?: return@forEach println("Missing ability struct id: $abilityStructId at $barNum, ${key.second}")
                 val slotsMapping = actionbarSlots[barLocNum] ?: return
                 val slot = slotsMapping[key.second] ?: return@forEach println("Unknown ability IFSlot at $barNum, ${key.second}")
                 val ability = Ability.byStructId[abilityStructId] ?: return@forEach println("Unknown ability byStructId id: $abilityStructId, ${key.second}")

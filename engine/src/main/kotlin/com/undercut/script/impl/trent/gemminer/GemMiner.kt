@@ -1,6 +1,5 @@
 package com.undercut.script.impl.trent.gemminer
 
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.game.Skill
 import com.undercut.game.chat.MessageType
 import com.undercut.script.ScriptDescription
@@ -13,7 +12,8 @@ import com.undercut.ui.backend.dsl.ImGuiDsl
 import com.undercut.ui.backend.dsl.scopes.image
 import com.undercut.ui.backend.dsl.scopes.text
 import com.undercut.ui.backend.dsl.scopes.xpProgressBar
-import com.undercut.ui.backend.native.getTexture
+import com.undercut.ui.backend.native.SpriteIds
+import com.undercut.ui.backend.native.spriteTexture
 import com.undercut.util.formatElapsedTime
 import com.undercut.util.getFormattedXpPerHour
 import com.undercut.util.getUnitsPerHour
@@ -37,7 +37,7 @@ class GemMiner : StateMachineScript<GemMiner>() {
 
     override fun render() {
         ImGuiDsl.window("Gem Miner") {
-            image(Sprite.get(Sprite.MINING).getTexture(), 32f, 32f)
+            image(spriteTexture(SpriteIds.MINING), 32f, 32f)
             text("Runtime: ${formatElapsedTime(System.currentTimeMillis(), startTime)}")
             text("XP/hr: ${getFormattedXpPerHour(startingXp, getXp(Skill.MINING), startTime)}")
             xpProgressBar(Skill.MINING)

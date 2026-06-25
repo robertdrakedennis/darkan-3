@@ -1,6 +1,5 @@
 package com.undercut.script.impl.trent
 
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.game.Skill
 import com.undercut.game.chat.MessageType
 import com.undercut.game.nxt.entity.npc.NPC
@@ -13,7 +12,8 @@ import com.undercut.ui.backend.dsl.ImGuiDsl
 import com.undercut.ui.backend.dsl.scopes.image
 import com.undercut.ui.backend.dsl.scopes.text
 import com.undercut.ui.backend.dsl.scopes.xpProgressBar
-import com.undercut.ui.backend.native.getTexture
+import com.undercut.ui.backend.native.SpriteIds
+import com.undercut.ui.backend.native.spriteTexture
 import com.undercut.util.*
 
 @ScriptDescription(
@@ -104,7 +104,7 @@ class AIODivinationWisps : Script() {
 
     override fun render() {
         ImGuiDsl.window("AIO Wisp Gatherer") {
-            image(Sprite.get(Sprite.DIVINATION_HIRES).getTexture(), 32f, 32f)
+            image(spriteTexture(SpriteIds.DIVINATION_HIRES), 32f, 32f)
             text("Runtime: ${formatElapsedTime(System.currentTimeMillis(), startTime)}")
             text("XP/hr: ${getFormattedXpPerHour(startingXp, getXp(Skill.DIVINATION), startTime)}")
             text("Energies/h: ${getUnitsPerHour(energies-startEnergies, startTime)}")

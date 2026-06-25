@@ -43,6 +43,23 @@ data class InventoryDefinition(
         return result
     }
 
+    // --- Engine (InvType) public-surface aliases ---
+
+    /** Engine alias for [length] (inventory capacity). */
+    val size: Int get() = length
+
+    /** Engine view of the default contents as an id -> amount map. */
+    val items: Map<Int, Int>
+        get() {
+            val ids = ids ?: return emptyMap()
+            val amounts = amounts ?: return emptyMap()
+            val map = LinkedHashMap<Int, Int>(ids.size)
+            for (i in ids.indices) {
+                map[ids[i]] = amounts.getOrElse(i) { 0 }
+            }
+            return map
+        }
+
     companion object {
         val EMPTY = InventoryDefinition()
     }

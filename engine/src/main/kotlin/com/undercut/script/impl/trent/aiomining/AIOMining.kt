@@ -18,12 +18,12 @@ import com.undercut.script.event.impl.Chat
 import com.undercut.script.event.impl.ManualDoAction
 import com.undercut.traversal.Traversal
 import com.undercut.traversal.Traversal.Companion.traversal
-import com.undercut.cache.type.sprites.Sprite
 import com.undercut.ui.backend.dsl.ImGuiDsl
 import com.undercut.ui.backend.dsl.scopes.image
 import com.undercut.ui.backend.dsl.scopes.text
 import com.undercut.ui.backend.dsl.scopes.xpProgressBar
-import com.undercut.ui.backend.native.getTexture
+import com.undercut.ui.backend.native.SpriteIds
+import com.undercut.ui.backend.native.spriteTexture
 import com.undercut.util.*
 
 private val rockertunitySpotAnims = intArrayOf(7164, 7165)
@@ -52,7 +52,7 @@ class AIOMining : StateMachineScript<AIOMining>() {
 
     override fun render() {
         ImGuiDsl.window("AIO Mining") {
-            image(Sprite.get(Sprite.MINING).getTexture(), 32f, 32f)
+            image(spriteTexture(SpriteIds.MINING), 32f, 32f)
             text("Runtime: ${formatElapsedTime(System.currentTimeMillis(), startTime)}")
             text("Location: ${if (hasMiningSpot()) miningSpot else if (hasOtherName()) otherName else "None yet. Click a rock."}")
             text("XP/hr: ${getFormattedXpPerHour(startingXp, getXp(Skill.MINING), startTime)}")
