@@ -181,7 +181,7 @@ class JS5Connection(
 
                 if (resp.readSegment(input)) {
                     pending.remove(key)
-                    val container = resp.container!!
+                    val container = JS5Protocol.stripGroupVersionSuffix(resp.index, resp.container!!)
                     val crc = CRC.calculate(container, 0, container.size)
                     val request = sentRequests.find { it.index == resp.index && it.archive == resp.archive }
                     storage.store(resp.index, resp.archive, container, request?.version ?: 0, crc)

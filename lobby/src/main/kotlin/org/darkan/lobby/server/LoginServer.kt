@@ -19,7 +19,6 @@ import org.darkan.core.net.Session
 import org.darkan.core.model.Account
 import org.darkan.core.model.IFEvents
 import org.darkan.core.model.Vars
-import org.darkan.core.formatForProtocol
 import org.darkan.core.mongo.Accounts
 import org.darkan.core.net.login.LoginToken
 import org.darkan.core.net.login.RsaCredentialTailParser
@@ -29,7 +28,7 @@ import org.darkan.core.net.prot.handler.PacketHandlers
 import org.darkan.core.net.session.GameSession
 import org.darkan.lobby.LobbyState
 import org.darkan.lobby.social.SocialGateway
-import world.gregs.voidps.buffer.*
+import world.gregs.voidps.buffer.Cp1252
 import world.gregs.voidps.buffer.read.BufferReader
 import world.gregs.voidps.buffer.write.BufferWriter
 import world.gregs.voidps.cache.secure.RSA
@@ -61,7 +60,7 @@ class LoginServer {
 
         // Step 1: Send exchange data response
         val sessionKey = ByteArray(8).also { random.nextBytes(it) }
-        output.writeByte(ResponseOpcode.JS5_SYNC) // 0 = OK
+        output.writeByte(ResponseOpcode.JS5_SYNC.toByte()) // 0 = OK
         output.writeFully(sessionKey)
         output.flush()
         logTrace("Sent exchange data (9 bytes) to $ip")
@@ -82,7 +81,7 @@ class LoginServer {
 
         if (loginOpcode != RequestOpcode.LOBBY && loginOpcode != RequestOpcode.LOGIN) {
             logError("Unexpected login opcode: $loginOpcode from $ip")
-            output.finish(ResponseOpcode.INVALID_LOGIN_SERVER)
+            output.finishLogin(ResponseOpcode.INVALID_LOGIN_SERVER)
             return
         }
 
@@ -90,7 +89,7 @@ class LoginServer {
 
         if (size <= 0 || size > 5000) {
             logError("Invalid login packet size: $size from $ip")
-            output.finish(ResponseOpcode.COULD_NOT_COMPLETE_LOGIN)
+            output.finishLogin(ResponseOpcode.COULD_NOT_COMPLETE_LOGIN)
             return
         }
 
@@ -116,7 +115,7 @@ class LoginServer {
 
         if (major != EnvVars.majorVersion) {
             logError("Version mismatch: expected ${EnvVars.majorVersion}, got $major from $ip")
-            output.finish(ResponseOpcode.GAME_UPDATE)
+            output.finishLogin(ResponseOpcode.GAME_UPDATE)
             return
         }
 
@@ -126,7 +125,7 @@ class LoginServer {
 
         if (rsaSize <= 0 || rsaSize > 512) {
             logError("Invalid RSA block size: $rsaSize from $ip")
-            output.finish(ResponseOpcode.COULD_NOT_COMPLETE_LOGIN)
+            output.finishLogin(ResponseOpcode.COULD_NOT_COMPLETE_LOGIN)
             return
         }
 
@@ -137,7 +136,7 @@ class LoginServer {
         val magic = decryptedRsa.readUByte().toInt()
         if (magic != 10) {
             logError("RSA magic mismatch: expected 10, got $magic from $ip (bad RSA key?)")
-            output.finish(ResponseOpcode.BAD_SESSION_ID)
+            output.finishLogin(ResponseOpcode.BAD_SESSION_ID)
             return
         }
 
@@ -170,9 +169,9 @@ class LoginServer {
         try {
             val stringUsername = xtea.readUByte().toInt() == 1
             username = if (stringUsername) {
-                xtea.readRSString()
+                xtea.readCp1252String()
             } else {
-                xtea.readLong().toRSString()
+                xtea.readLong().toBase37Name()
             }
             logInfo("Login username: '$username' (string=$stringUsername) from $ip")
 
@@ -180,7 +179,7 @@ class LoginServer {
             logTrace("XTEA remaining ${remaining.size} bytes: ${remaining.take(64).joinToString(" ") { "%02x".format(it) }}")
         } catch (e: Exception) {
             logTrace("XTEA parsing stopped: ${e::class.simpleName}: ${e.message}")
-            output.finish(ResponseOpcode.COULD_NOT_COMPLETE_LOGIN)
+            output.finishLogin(ResponseOpcode.COULD_NOT_COMPLETE_LOGIN)
             return
         }
 
@@ -189,20 +188,20 @@ class LoginServer {
         val account = if (existing != null) {
             if (password.isNotEmpty() && !PasswordHash.verifySuspend(password, existing.passwordHash)) {
                 logInfo("Invalid password for ${existing.username} from $ip (password ${password.length} chars, hash=${existing.passwordHash.take(20)}...)")
-                output.finish(ResponseOpcode.INVALID_CREDENTIALS)
+                output.finishLogin(ResponseOpcode.INVALID_CREDENTIALS)
                 return
             }
             existing
         } else {
             if (password.isEmpty()) {
                 logInfo("New account '$username' with no password from $ip — rejecting")
-                output.finish(ResponseOpcode.INVALID_CREDENTIALS)
+                output.finishLogin(ResponseOpcode.INVALID_CREDENTIALS)
                 return
             }
             logInfo("Creating new account '$username' with password (${password.length} chars) from $ip")
             Accounts.create(
-                username = username.formatForProtocol(),
-                email = "${username.formatForProtocol()}@darkan.local",
+                username = username.toProtocolName(),
+                email = "${username.toProtocolName()}@darkan.local",
                 password = password,
             )
         }
@@ -219,11 +218,19 @@ class LoginServer {
         for (i in outKeys.indices) outKeys[i] += EnvVars.ISAAC_DELTA
         val outCipher = Isaac(outKeys)
 
-        // Send login result: byte 2 (SUCCESS)
-        output.writeByte(ResponseOpcode.SUCCESS)
-
         // Send lobby data length + lobby data
         val lobbyData = buildLobbyData(account)
+        // The length is a single unsigned byte (0..255). If buildLobbyData ever exceeds 255 bytes
+        // the cast would write a wrapped/negative length and silently desync the frame — fail loudly.
+        if (lobbyData.size !in 0..255) {
+            logError("Lobby data too large for single-byte length: ${lobbyData.size} bytes from $ip — aborting login")
+            output.finishLogin(ResponseOpcode.COULD_NOT_COMPLETE_LOGIN)
+            return
+        }
+
+        // Send login result: byte 2 (SUCCESS)
+        output.writeByte(ResponseOpcode.SUCCESS.toByte())
+
         output.writeByte(lobbyData.size.toByte())
         output.writeFully(lobbyData)
         output.flush()
@@ -262,35 +269,32 @@ class LoginServer {
         val buf = BufferWriter(128)
         val nowMs = System.currentTimeMillis()
 
-        buf.writeByte(0)                          // #1 hasTotpUpdate: no
-        buf.writeByte(1)                          // #2 membershipType: 1 = member
-        buf.writeByte(30)                         // #3 membershipDays: 30
-        buf.writeByte(1)                          // #4 emailValidated: yes (bool)
-        buf.writeMedium(0)                        // #5 recoveryDelay: 0 (signed medium)
-        buf.writeByte(account.rights)             // #6 staffModLevel (0=none, 1=mod, 2=admin)
-        buf.writeByte(0)                          // #7 unknownFlag1 (bool)
-        buf.writeByte(0)                          // #8 unknownFlag2 (bool)
-        buf.writeLong(nowMs)                      // #9 membershipTimestamp: Unix millis
-        buf.writeByte(0)                          // #10 timeDaysByte
-        buf.writeInt((nowMs / 1000).toInt())      // #11 timeMillisInt (seconds since epoch)
-        buf.writeByte(0)                          // #12 flagsByte: 0 = NOT quickchat-only
-        buf.writeInt(0)                           // #13 lastLoginIP
-        buf.writeInt(5000)                        // #14 lastLoginDays (5000 = "long ago")
-        buf.writeShort(1)                         // #15 playerIndex
-        buf.writeShort(0)                         // #16 unknown3
-        buf.writeShort(0)                         // #17 unknown4
-        buf.writeInt(0)                           // #18 unknown5
-        buf.writeByte(0)                          // #19 unknown6
-        buf.writeShort(0)                         // #20 unknown7
-        buf.writeShort(0)                         // #21 unknown8
-        buf.writeByte(1)                          // #22 isMembersWorld (bool)
-        // #23 displayName — read mid-block by the client with gStr (FUN_00126e90 = NUL-terminated
-        // CP1252, NO leading length/flag byte) into record +0x68 (§10.3, @0x001cd7c7). MUST be
-        // writeString (CP1252 + single trailing NUL), NOT writePrefixedString. writePrefixedString
-        // prepends an extra 0x00, which gStr reads as an immediate terminator → displayName parses as
-        // empty (consuming 1 byte) → the real name bytes + the ENTIRE world-target tail (host/portA/
-        // portB/sid1/sid2) desync. Same gStr reader and same fix as the world host (#27 below).
-        buf.writeString(account.displayName)      // #23 displayName
+        // 948 prod-shaped lobby player/status prefix through the byte before displayName.
+        buf.writeByte(0)
+        buf.writeByte(0)
+        buf.writeByte(0)
+        buf.writeByte(0)
+        buf.writeMedium(0xFFFAFA)
+        buf.writeByte(account.rights)
+        buf.writeByte(0)
+        buf.writeByte(1)
+        buf.writeLong(0L)
+        buf.writeByte(0x61)
+        buf.writeInt(0x0417A208)
+        buf.writeByte(0)
+        buf.writeInt(0)
+        buf.writeInt(0)
+        buf.writeShort(0)
+        buf.writeShort(0)
+        buf.writeShort(0x22B3)
+        buf.writeInt(0xADA90A4A.toInt())
+        buf.writeByte(3)
+        buf.writeShort(0xD21F)
+        buf.writeShort(0xD21F)
+        buf.writeByte(0)
+        buf.writeByte(0)
+        // FUN_00126e90 is called with param_3=1 here: first byte is a version byte that must be 0.
+        buf.writePrefixedString(account.displayName)
 
         // ── World-connect target tail (docs/protocol/lobby-world-switch-948.md §10.3) ──
         // VERIFIED against rs2client.948-5 LoginStepHandleLoginData @0x001cd360 (LOBBY branch).
@@ -299,18 +303,14 @@ class LoginServer {
         // sid2(u64) at the TAIL of this block, builds a WorldTarget, stages it PENDING at
         // WorldSwitcher+0xa8, and CommitWorldTargetFromLogin promotes it to CURRENT (+0x20) —
         // the slot LoginStepWaitingConnectionOpened reads for the (type-2) world connect.
-        buf.writeByte(0)                          // #24 unknown9
-        buf.writeInt(0)                           // #25 unknown10
+        buf.writeByte(0)
+        buf.writeInt(0x000013D3)
         // #26 worldId — g2 (BE u16). MUST be the real world number, NOT 0xffff: the client maps
         // 0xffff→-1 ("no world") and CommitWorldTargetFromLogin (@0x001acdf0) early-returns on
         // worldId==-1, leaving CURRENT (+0x20) empty so the world connect has no target.
         buf.writeShort(EnvVars.worldId)
-        // #27 serverHostname — host the client opens the world TCP socket to. The client reads it
-        // with gStr (FUN_00126e90 = NUL-terminated CP1252, NO leading length byte), so this MUST be
-        // writeString (CP1252 + NUL), NOT writePrefixedString. writePrefixedString prepends an extra
-        // 0x00, which gStr reads as an immediate terminator → empty host → the real host bytes are
-        // then misparsed as portA/portB and every following field desyncs. (Was writePrefixedString.)
-        buf.writeString(EnvVars.worldHost)
+        // #27 serverHostname — same versioned string reader as displayName.
+        buf.writePrefixedString(EnvVars.worldHost)
         // #28/#29 portA/portB — g2 (BE u16) each. OpenConnection (@0x00b21d70) uses portA when the
         // target's +0x2c select byte is 0; the login-response builder sets +0x2c=1 → portB is used.
         // Send the same world listen port (EnvVars.worldPort, default 43595) in BOTH so the connect
@@ -380,7 +380,25 @@ class LoginServer {
         //   position    = packed parent component hash = (906 << 16) | slot.
         //   componentId = the child interface id placed at that slot.
         // The (slot → child) pairs and ORDER come straight from the capture (== LOBBY_SUB_INTERFACES).
-        for ((slot, childInterfaceId) in LOBBY_SUB_INTERFACES) {
+        for ((slot, childInterfaceId) in LOBBY_SUB_INTERFACES_BEFORE_TIMER) {
+            val position = (LOBBY_INTERFACE_ID shl 16) or (slot and 0xFFFF)
+            session.send(
+                IfSetPosition(
+                    componentId = childInterfaceId,
+                    layer = 1,
+                    position = position,
+                )
+            )
+        }
+
+        // 5b. RUNCLIENTSCRIPT — timer display setup on sub-interface components (from Jagex capture)
+        // Script 7486: sets up countdown timers. int0=timer minutes, int1=component hash.
+        val timerMinutes = ((System.currentTimeMillis() / 60000) + (24 * 365 * 60)).toInt() // ~1 year future
+        session.send(RunClientScript.of(SCRIPT_TIMER_SETUP, timerMinutes,
+            RunClientScript.componentHash(801, 5)))
+        session.send(RunClientScript.of(SCRIPT_TIMER_SETUP, timerMinutes,
+            RunClientScript.componentHash(910, 15)))
+        for ((slot, childInterfaceId) in LOBBY_SUB_INTERFACES_AFTER_TIMER) {
             val position = (LOBBY_INTERFACE_ID shl 16) or (slot and 0xFFFF)
             session.send(
                 IfSetPosition(
@@ -392,32 +410,24 @@ class LoginServer {
         }
         logInfo("Sent IF_SETTOPLEVELINTERFACE($LOBBY_INTERFACE_ID) + ${LOBBY_SUB_INTERFACES.size}x IF_SETPOSITION to ${session.ip}")
 
-        // 5b. RUNCLIENTSCRIPT — timer display setup on sub-interface components (from Jagex capture)
-        // Script 7486: sets up countdown timers. int0=timer minutes, int1=component hash.
-        val timerMinutes = ((System.currentTimeMillis() / 60000) + (24 * 365 * 60)).toInt() // ~1 year future
-        session.send(RunClientScript.of(SCRIPT_TIMER_SETUP, timerMinutes,
-            RunClientScript.componentHash(801, 5)))
-        session.send(RunClientScript.of(SCRIPT_TIMER_SETUP, timerMinutes,
-            RunClientScript.componentHash(910, 15)))
-
         // 6. Post-interface varcs
-        vars.setVarc(VARC_MEMBERSHIP_TIER, 294)
-        vars.setVarc(VARC_MEMBERSHIP_TIMER, 592000)
-        vars.setVarc(VARC_TIMER_1776, 592000)
+        vars.setVarc(VARC_LOBBY_CTA_STATE_A, 0)
+        vars.setVarc(VARC_LOBBY_CTA_STATE_B, 0)
+        vars.setVarc(VARC_LOBBY_TIMER_STATE, 0)
         vars.setVarc(VARC_BONDS_TRADEABLE, 0)
         vars.setVarc(VARC_BONDS_UNTRADEABLE, 0)
-        vars.setVarc(VARC_RUNECOINS, 0)
+        vars.setVarc(VARC_BONDS_TRADEABLE, 0)
+        vars.setVarc(VARC_BONDS_UNTRADEABLE, 0)
 
         // 7. IF_SETEVENTS
         for (comp in LOBBY_SETEVENTS_COMPONENTS) {
             session.send(IfSetEvents(IFEvents(LOBBY_SETEVENTS_INTERFACE, comp, 1, 0, LOBBY_SETEVENTS_SETTINGS)))
         }
+        vars.setVarc(VARC_RUNECOINS, 0)
+        vars.setVarc(VARC_LOBBY_CTA_STATE_B, 0)
+        vars.setVarc(VARC_LOBBY_CTA_STATE_A, 0)
 
-        // 8. RUNCLIENTSCRIPT — interface visibility + retrigger tab 0 (Updates) selection
-        session.send(RunClientScript.of(SCRIPT_LOBBY_SUBIF_VISIBILITY))
-        session.send(RunClientScript.of(SCRIPT_LOBBY_TAB_SWITCH, 0))
-
-        // 8b. Lobby news entries — script 10931 with 9 args:
+        // 8. Lobby news entries — script 10931 with 9 args:
         //   arg0(i)=slot, arg1(i)=spriteId, arg2(i)=category, arg3(i)=-1,
         //   arg4(s)=title, arg5(s)=summary, arg6(s)=urlSlug, arg7(s)=date, arg8(i)=0
         for ((slot, entry) in LOBBY_NEWS.withIndex()) {
@@ -427,11 +437,11 @@ class LoginServer {
         // Final news script — signals end of news entries
         session.send(RunClientScript.of(SCRIPT_LOBBY_NEWS_END))
 
-        // 9. SET_RUN_ENERGY → CHANGE_LOBBY. Capture tail order: ChangeLobby(49), WorldList(216)×5,
-        // then SetReadyFlag(75) LAST — it is the final render trigger, so it must fire after all
-        // interface components are positioned and the worldlist is delivered.
+        // 9. Lobby refresh before social/worldlist.
         session.send(UpdateRunenergy(1))
+        session.send(SetReadyFlag())
         session.send(ChangeLobby())
+        session.send(NoopVarA())
 
         // 10. Social init — friend list (UPDATE_FRIENDLIST op26, sent EMPTY even with no friends
         // so the client marks the tab loaded), ignore list, chat filters, mutual-friend notify.
@@ -444,9 +454,6 @@ class LoginServer {
         // 11. World list — sent near the end (matching Jagex sequence)
         session.send(WorldListPacket(LobbyState.worldList, fullRefresh = true))
 
-        // 12. SET_READY_FLAG — last packet of the init burst; signals the client to render the lobby.
-        session.send(SetReadyFlag())
-
         session.flush()
         logInfo("Sent lobby init packets to ${session.ip}")
     }
@@ -454,20 +461,13 @@ class LoginServer {
     /**
      * Dispatch loop for the lobby session.
      * Reads decoded packets from [session.readChannel] and dispatches to handlers.
-     * Sends periodic keepalives.
      */
     private suspend fun lobbySessionLoop(session: GameSession) {
         var packetCount = 0L
-        var lastKeepaliveSent = System.currentTimeMillis()
-        var rateWindowStart = lastKeepaliveSent
+        var rateWindowStart = System.currentTimeMillis()
         var rateWindowCount = 0
 
         try {
-            // Send initial keepalive
-            session.send(NoTimeout())
-            session.flush()
-            logTrace("Sent initial NOOP to ${session.ip}")
-
             while (!session.disconnected) {
                 val packet = withTimeoutOrNull(KEEPALIVE_INTERVAL_MS) {
                     session.readChannel.receive()
@@ -483,14 +483,6 @@ class LoginServer {
                 session.flush()
 
                 val now = System.currentTimeMillis()
-
-                // Send periodic keepalives — flushed immediately so they aren't delayed
-                // until the next loop iteration.
-                if (now - lastKeepaliveSent > KEEPALIVE_INTERVAL_MS) {
-                    session.send(NoTimeout())
-                    session.flush()
-                    lastKeepaliveSent = now
-                }
 
                 // Windowed rate check (NOT a lifetime cap — a healthy client would trip
                 // a lifetime cap eventually). Disconnect so the socket actually closes.
@@ -532,7 +524,7 @@ class LoginServer {
         private const val LOBBY_INTERFACE_ID = 906
 
         // Sub-interface IDs from live Jagex 947-1 capture (2026-03-23)
-        private val LOBBY_SUB_INTERFACES = listOf(
+        private val LOBBY_SUB_INTERFACES_BEFORE_TIMER = listOf(
             44 to 907,
             45 to 910,
             46 to 909,
@@ -552,9 +544,12 @@ class LoginServer {
             147 to 811,
             51 to 826,
             139 to 801,
+        )
+        private val LOBBY_SUB_INTERFACES_AFTER_TIMER = listOf(
             171 to 1322,
             140 to 814,
         )
+        private val LOBBY_SUB_INTERFACES = LOBBY_SUB_INTERFACES_BEFORE_TIMER + LOBBY_SUB_INTERFACES_AFTER_TIMER
 
         private val DEFAULT_STATS: List<Triple<Int, Int, Int>> = buildList {
             for (i in 0..28) {
@@ -573,20 +568,18 @@ class LoginServer {
         private const val VARC_INBOX_STATE = 1027          // inbox/notification state (-1=none)
         private const val VARC_INBOX_TYPE = 1034           // inbox notification type (-2=none)
         private const val VARC_MUSIC_VOLUME = 1928         // audio volume setting (switch in script 3904/6566)
-        private const val VARC_TIMER_1776 = 1776           // display timer (script 12083)
+        private const val VARC_LOBBY_TIMER_STATE = 1800    // production resets before lobby events
         private const val VARC_NOTIFICATION_COUNT = 2643   // notification counter (shown in UI if 1-4)
         private const val VARC_RENDER_FLAG = 3496          // boolean flag (script 16901)
         private const val VARC_RUNECOINS = 4266            // RuneCoins balance (script 11164)
-        private const val VARC_MEMBERSHIP_TIER = 4787      // membership/premium tier threshold
-        private const val VARC_MEMBERSHIP_TIMER = 4788     // membership notification timer
+        private const val VARC_LOBBY_CTA_STATE_A = 4659    // production resets around lobby CTA setup
+        private const val VARC_LOBBY_CTA_STATE_B = 4660    // production resets around lobby CTA setup
         private const val VARC_BONDS_TRADEABLE = 4968      // tradeable bonds count
         private const val VARC_BONDS_UNTRADEABLE = 4969    // untradeable bonds count
         private const val VARC_NOTIFY_7108 = 7108          // boolean notification flag
 
         // --- Lobby CS2 script IDs ---
         private const val SCRIPT_TIMER_SETUP = 7486        // sets up countdown timer display on a component
-        private const val SCRIPT_LOBBY_SUBIF_VISIBILITY = 10936  // shows/hides sub-interface layers based on children
-        private const val SCRIPT_LOBBY_TAB_SWITCH = 3060       // lobbyscreen_tabswitch(tabIndex) — selects a lobby tab
         private const val SCRIPT_LOBBY_NEWS = 10931             // lobby news entry (9 args: slot, sprite, category, -1, title, summary, slug, date, 0)
         private const val SCRIPT_LOBBY_NEWS_END = 10936         // signals end of news entries (same as subif visibility)
 
@@ -636,4 +629,41 @@ class LoginServer {
 
         // Dump file loaders removed — lobby only needs the named varps above.
     }
+}
+
+private suspend fun ByteWriteChannel.finishLogin(value: Int) {
+    writeByte(value.toByte())
+    flushAndClose()
+}
+
+private fun String.toProtocolName(): String = lowercase().replace(" ", "_")
+
+private fun ByteReadPacket.readCp1252String(): String {
+    var bytes = ByteArray(32)
+    var length = 0
+    while (remaining > 0) {
+        val b = readByte()
+        if (b.toInt() == 0) break
+        if (length == bytes.size) bytes = bytes.copyOf(bytes.size * 2)
+        bytes[length++] = b
+    }
+    return Cp1252.decode(bytes, 0, length)
+}
+
+private val LOGIN_NAME_CHARS = charArrayOf(
+    '_', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+    'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+)
+
+private fun Long.toBase37Name(): String {
+    val result = CharArray(12)
+    var value = this
+    var length = 0
+    while (value != 0L) {
+        val remainder = value % 37L
+        value /= 37L
+        result[11 - length++] = LOGIN_NAME_CHARS[remainder.toInt()]
+    }
+    return String(result, 12 - length, length)
 }

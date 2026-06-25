@@ -49,6 +49,7 @@ open class Session(
 
     @Volatile
     private var state: State = State.CONNECTED
+    private var stopReadLoopWithoutDisconnect = false
 
     fun onDisconnected(block: () -> Unit) {
         disconnect = block
@@ -133,40 +134,20 @@ open class Session(
                     // UnhandledClientProt, and continue.
                     val info = codec.clientProtInfo[opcode]
                     if (info == null) {
-                        // No size metadata at all (e.g. a macOS-only C2S opcode absent from the
-                        // Linux-derived ClientProt table — op156 in docs/protocol/world-ingame-
-                        // transition-948.md §4). Previously this `return`ed, which fell through to
-                        // `finally` and CLOSED the socket → the client saw a dead connection and
-                        // "fell back to login". Per §8.1.5 we MUST NOT close the session on an
-                        // unframable opcode: log it and keep reading.
-                        //
-                        // We cannot reframe the stream without a size, so the byte we just consumed
-                        // (the opcode) is gone and the next read may land mid-packet. To avoid a hot
-                        // spin on a genuinely-garbage/dead stream, bail only after
-                        // MAX_CONSECUTIVE_MISSING_OPCODES misses with no successfully-framed packet
-                        // in between (which strongly implies a real desync, not a lone unknown op).
                         logMissingClientProt(input, decodedOpcode)
-                        consecutiveMissingOpcodes += 1
-                        if (consecutiveMissingOpcodes >= MAX_CONSECUTIVE_MISSING_OPCODES) {
-                            logWarn(
-                                "ClientProt stream desynced: $MAX_CONSECUTIVE_MISSING_OPCODES " +
-                                    "consecutive unframable opcodes (last ${decodedOpcode.describe()}) — closing session"
-                            )
-                            return
-                        }
-                        continue
+                        stopReadLoopWithoutDisconnect = true
+                        return
                     }
-                    consecutiveMissingOpcodes = 0
                     val skipSize = when (info.size) {
                         is ProtSize.Fixed -> info.size.length
                         ProtSize.VarByte -> input.readUByte()
                         ProtSize.VarShort -> input.readUShort()
                     }
                     input.readPacket(skipSize)
+                    logTrace("C2S ${info.name} opcode=$opcode size=${info.size} payload=$skipSize ${decodedOpcode.describe()}")
                     readChannel.send(UnhandledClientProt(opcode, info.name, skipSize))
                     continue
                 }
-                consecutiveMissingOpcodes = 0
                 val size = try {
                     when (clientProt.size) {
                         is ProtSize.Fixed -> clientProt.size.length
@@ -205,6 +186,7 @@ open class Session(
                     logError("Failed to create packet instance for opcode $opcode")
                     continue
                 }
+                logTrace("C2S ${packetData::class.simpleName} opcode=$opcode size=${clientProt.size} payload=$size ${decodedOpcode.describe()}")
                 readChannel.send(packetData)
             }
         } catch (e: Exception) {
@@ -214,7 +196,7 @@ open class Session(
                 throw e
             }
         } finally {
-            if (!disconnected) {
+            if (!disconnected && !stopReadLoopWithoutDisconnect) {
                 disconnected = true
                 state = State.LOST_CONNECTION
                 disconnecting?.invoke()
@@ -292,10 +274,13 @@ open class Session(
                 val payload = encodeToBuffer(serverProt, encoder)
                 val packetLength = payload.size.toInt()
 
-                if (encoder.size == ProtSize.VarByte && packetLength > 255)
-                    logWarn("Packet length exceeds VarByte maximum ($packetLength > 255)")
-                else if (encoder.size == ProtSize.VarShort && packetLength > 65535)
-                    logWarn("Packet length exceeds VarShort maximum ($packetLength > 65535)")
+                if (encoder.size == ProtSize.VarByte && packetLength > 255) {
+                    logWarn("Dropping ${serverProt::class.simpleName}: packet length exceeds VarByte maximum ($packetLength > 255)")
+                    return
+                } else if (encoder.size == ProtSize.VarShort && packetLength > 65535) {
+                    logWarn("Dropping ${serverProt::class.simpleName}: packet length exceeds VarShort maximum ($packetLength > 65535)")
+                    return
+                }
 
                 logTrace("S2C ${serverProt::class.simpleName} opcode=${encoder.opcode} size=${encoder.size} payload=$packetLength")
                 writeOpcode(encoder.opcode, if (noIsaac) null else isaacOut)
@@ -336,14 +321,6 @@ open class Session(
 
     private var inboundOpcodeIndex = 0
 
-    /**
-     * Count of consecutive C2S opcodes read with NO size metadata (unframable). Reset to 0 every
-     * time a packet IS framed (decoded or size-skipped). Guards [readPackets] against a hot spin on
-     * a genuinely desynced/garbage stream while still tolerating lone unknown opcodes without
-     * closing the session (docs/protocol/world-ingame-transition-948.md §8.1.5).
-     */
-    private var consecutiveMissingOpcodes = 0
-
     private suspend fun readOpcode(input: ByteReadChannel): DecodedOpcode {
         // ClientProt opcodes are single-byte; the two-byte smart form is only for outbound ServerProt.
         val wire = input.readUByte()
@@ -360,15 +337,14 @@ open class Session(
     /**
      * Logs an unframable C2S opcode WITHOUT consuming any payload bytes.
      *
-     * The caller [readPackets] now `continue`s (keeps the session alive) instead of closing, so we
-     * must NOT drain the channel here: consuming bytes can only deepen a desync and would discard
-     * data the next read might recover. Only the opcode byte (already read by [readOpcode]) is lost.
-     * We log the opcode plus how many bytes are buffered for post-mortem.
+     * The caller stops the read loop but leaves the session write side open. Without size metadata
+     * there is no safe way to skip the payload; continuing would decode payload bytes as opcodes and
+     * dispatch garbage packets.
      */
     private fun logMissingClientProt(input: ByteReadChannel, decodedOpcode: DecodedOpcode) {
         logError(
             "Missing ClientProt ${decodedOpcode.describe()} " +
-                "available=${input.availableForRead} (session kept alive; not closing)"
+                "available=${input.availableForRead} (C2S reads stopped; session write side kept open)"
         )
     }
 
@@ -385,14 +361,6 @@ open class Session(
     }
 
     companion object {
-        /**
-         * Max consecutive unframable C2S opcodes (no size metadata) tolerated before [readPackets]
-         * gives up and closes. A lone unknown opcode (e.g. a macOS-only C2S op the Linux-derived
-         * table lacks) should NOT kill the session, but a run of them with no successfully-framed
-         * packet in between means the stream is genuinely desynced — closing then is correct.
-         */
-        const val MAX_CONSECUTIVE_MISSING_OPCODES = 16
-
         /**
          * Returns true if the exception represents an expected client disconnect
          * (connection reset, EOF, closed channel) rather than a real error.

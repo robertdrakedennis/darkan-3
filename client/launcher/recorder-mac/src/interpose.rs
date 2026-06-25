@@ -28,11 +28,12 @@
 //!
 //! ## Hot-path discipline
 //!
-//! Each replacement: call the real libc fn, and ONLY if it returned > 0 (I/O) or
-//! succeeded (connect) record the result. The `capture::record_*` fns take the
-//! writer lock once and bail instantly if recording is disabled, so when
-//! `DARKAN_RECORD` is unset the overhead is one uncontended lock + an `is_none`
-//! check per call. No allocation on the hot path.
+//! Each replacement: call the real libc fn, and only record bytes the kernel
+//! accepted for I/O. For `connect`, record the peer before the syscall so
+//! immediate failures still preserve the target address. The `capture::record_*`
+//! fns take the writer lock once and bail instantly if recording is disabled, so
+//! when `DARKAN_RECORD` is unset the overhead is one uncontended lock + an
+//! `is_none` check per call. No allocation on the hot path.
 
 use crate::capture::{self, is_armed, SyscallKind, DIR_IN, DIR_OUT};
 use libc::{c_int, c_void, size_t, sockaddr, socklen_t, ssize_t};
@@ -203,16 +204,10 @@ unsafe extern "C" fn darkan_sendto(
 
 #[no_mangle]
 unsafe extern "C" fn darkan_connect(fd: c_int, addr: *const sockaddr, len: socklen_t) -> c_int {
-    let ret = connect(fd, addr, len);
-    if !is_armed() {
-        return ret;
-    }
-    // EINPROGRESS (non-blocking connect) is a success for capture purposes —
-    // the fd↔peer mapping is established regardless of when it completes.
-    let ok = ret == 0 || (ret < 0 && errno() == libc::EINPROGRESS);
-    if ok && !addr.is_null() {
+    if is_armed() && !addr.is_null() {
         record_peer(fd, addr, len);
     }
+    let ret = connect(fd, addr, len);
     ret
 }
 
@@ -258,11 +253,6 @@ unsafe fn record_peer(fd: c_int, addr: *const sockaddr, len: socklen_t) {
         }
         _ => {}
     }
-}
-
-/// Read `errno` for the current thread (libc stores it thread-locally).
-unsafe fn errno() -> c_int {
-    *libc::__error()
 }
 
 // ---------------------------------------------------------------------------

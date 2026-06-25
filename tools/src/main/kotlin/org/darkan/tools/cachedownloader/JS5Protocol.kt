@@ -30,6 +30,8 @@ object JS5Protocol {
     /** Continuation header: index(1) + hash(4). */
     const val CONTINUATION_HEADER_LEN = 5
 
+    const val VERSION_SUFFIX_LEN = 2
+
     /** Sanity bound for the compressedSize field — anything larger is a desync. */
     const val MAX_COMPRESSED_SIZE = 50_000_000
 
@@ -232,5 +234,22 @@ object JS5Protocol {
         }
 
         return JS5Response(idx, archive, assembler.container!!, wire?.toByteArray())
+    }
+
+    fun stripGroupVersionSuffix(index: Int, container: ByteArray): ByteArray {
+        if (!hasGroupVersionSuffix(index, container)) return container
+        return container.copyOfRange(0, container.size - VERSION_SUFFIX_LEN)
+    }
+
+    fun hasGroupVersionSuffix(index: Int, container: ByteArray): Boolean {
+        if (index == 255 || container.size < 5 + VERSION_SUFFIX_LEN) return false
+        val compression = container[0].toInt() and 0xFF
+        val compressedSize =
+            ((container[1].toInt() and 0xFF) shl 24) or
+                ((container[2].toInt() and 0xFF) shl 16) or
+                ((container[3].toInt() and 0xFF) shl 8) or
+                (container[4].toInt() and 0xFF)
+        val payloadSize = compressedSize + if (compression != 0) 4 else 0
+        return container.size == 5 + payloadSize + VERSION_SUFFIX_LEN
     }
 }

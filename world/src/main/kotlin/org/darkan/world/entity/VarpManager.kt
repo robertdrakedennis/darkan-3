@@ -19,21 +19,15 @@ import org.darkan.core.net.session.GameSession
  *  - **op28 VarpLarge** (4-byte BE) for any other 32-bit value.
  *  - **op147 VarpLong** (8-byte) for values outside the 32-bit signed range.
  *
- * **Seeding (§7.5 fresh-account strategy).** A fresh account has no saved varps. The HUD scripts
- * (8862/16300/671) read varps to populate skills/orbs/settings; a *missing-but-required* var can
- * trip a CS2 error. The safe path is to seed `VarpType.defaultValue` for the cache-valid, HUD-touched
- * ids. Reading `VarpType` defs requires the cache library (`world.gregs.voidps`), which this module
- * must NOT modify; so seeding goes through the [VarpDefaults] seam (default = no-op / empty). Until
- * `cache-library-engineer` provides a real `VarpType` defaults provider, [seedDefaults] is a no-op
- * and the live baseline stays minimal (safe: PlayerInfo has no varp gate — §2.4).
+ * **Seeding.** Fresh local accounts do not have persisted saved vars yet. The world bootstrap seeds
+ * cache-valid first-light defaults through the [VarpDefaults] seam, then emits them between
+ * `ResetClientVarcache` and the first GPI.
  *
  * **⚠ CRITICAL (§2.4 HARD HAZARD).** Only emit ids the client's cache defines as a `VarpType` — an
  * unknown id NULL-derefs `GetVarType` → SIGSEGV. [set] does NOT validate ids against the cache
  * (no cache access here); callers must only set cache-valid ids. The [VarpDefaults] seam, once
  * cache-backed, is validated-by-construction (it enumerates real `VarpType` ids).
  *
- * **UNWIRED for first light.** The live op75-alone burst (`WorldServer.sendVarpBaseline`) stays empty.
- * Wire this in only after op75 validates — see [flush]'s wiring note.
  */
 class VarpManager {
 
@@ -67,9 +61,8 @@ class VarpManager {
     fun dirtyCount(): Int = dirty.size
 
     /**
-     * Seed defaults for the cache-valid, HUD-touched varp ids via the [defaults] seam (§7.5). Each
-     * seeded id is `set` (and thus dirtied) only if not already present. Default seam = empty, so
-     * this is a no-op until `cache-library-engineer` provides a real `VarpType` defaults provider.
+     * Seed defaults for cache-valid varp ids via the [defaults] seam. Each seeded id is `set` only
+     * if not already present, so persisted account vars can override these later.
      */
     fun seedDefaults(defaults: VarpDefaults = VarpDefaults.None) {
         for ((id, value) in defaults.hudDefaults()) {
@@ -81,11 +74,7 @@ class VarpManager {
      * Emit a packet for every dirty varp, then clear the dirty set. Chooses op61/op28/op147 by
      * value magnitude (see class doc). Returns the packets emitted (also useful for tests).
      *
-     * Wiring (post-op75 validation), in `WorldServer.sendVarpBaseline` (currently an intentional
-     * no-op):
-     *
-     *     // WIRE: call after op75 validates — emit the seeded/saved varp baseline between op5 and
-     *     // the first GPI. player.varps.seedDefaults(cacheBackedDefaults); player.varps.flush(session)
+     * `WorldServer.sendVarpBaseline` calls this after `ResetClientVarcache`, before the first GPI.
      */
     suspend fun flush(session: GameSession): List<ServerProt> {
         if (dirty.isEmpty()) return emptyList()
@@ -115,20 +104,12 @@ class VarpManager {
 }
 
 /**
- * Seam for `VarpType.defaultValue` seeding (§7.5). The world module cannot read cache defs (that is
- * `world.gregs.voidps`, owned by `cache-library-engineer`); this interface lets the world request
- * "the default values for the HUD-critical, cache-valid varp ids" without depending on the cache.
- *
- * **FLAGGED for `cache-library-engineer`:** provide a cache-backed implementation that enumerates the
- * `VarpType` table (interface config index), returning `(id, defaultValue)` for the low-id varps the
- * world-entry CS2 (8862/16300/671) reads — validated-by-construction so it can never contain a stale
- * id (§2.4). Until then [None] returns nothing and the baseline stays empty.
+ * Seam for first-light varp seeding. Implementations must only return cache-valid ids.
  */
 interface VarpDefaults {
-    /** `(varpId, defaultValue)` for the HUD-critical, cache-valid varp ids. */
+    /** `(varpId, defaultValue)` for cache-valid varp ids. */
     fun hudDefaults(): Map<Int, Long>
 
-    /** No-op default: no seeding (safe — PlayerInfo has no varp gate, §2.4). */
     object None : VarpDefaults {
         override fun hudDefaults(): Map<Int, Long> = emptyMap()
     }

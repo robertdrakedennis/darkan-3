@@ -1,6 +1,10 @@
 package org.darkan.world.entity
 
 import org.darkan.core.model.Account
+import org.darkan.core.net.prot.update.AppearanceSlot
+import org.darkan.core.net.prot.update.BodyPartSlot
+import org.darkan.core.net.prot.update.PlayerAppearance
+import org.darkan.core.net.prot.update.PlayerAppearanceEncoder
 
 /**
  * Player appearance state. Encoder in B6 reads these fields and writes the binary
@@ -34,4 +38,20 @@ class Appearance(account: Account) {
      * whenever any field above is mutated; the next encode pass will regenerate the block.
      */
     var cachedBytes: ByteArray? = null
+
+    fun ensureCachedBytes(): ByteArray = cachedBytes ?: rebuildCachedBytes()
+
+    fun rebuildCachedBytes(): ByteArray {
+        val slots = BodyPartSlot.entries.mapIndexed { index, _ ->
+            val itemId = if (index < equipment.size) equipment[index] else -1
+            if (itemId >= 0) AppearanceSlot.Item(itemId) else AppearanceSlot.Kit(index)
+        }
+        val model = PlayerAppearance(
+            gender = gender,
+            slots = slots,
+            colours = colours.copyOf(),
+            coloursPresent = true,
+        )
+        return PlayerAppearanceEncoder.encode(model).also { cachedBytes = it }
+    }
 }

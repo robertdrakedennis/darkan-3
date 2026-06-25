@@ -24,7 +24,7 @@ class Rev948ClientCodecTest {
     }
 
     private fun hexBytes(hex: String): ByteArray =
-        hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        hex.filterNot(Char::isWhitespace).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 
     @Test
     fun `MAP_BUILD_COMPLETE op107 decodes as concrete zero-payload packet`() {
@@ -44,6 +44,10 @@ class Rev948ClientCodecTest {
 
     @Test
     fun `macOS 948-5 live client packets stay framed`() {
+        assertEquals(10, codec.clientProtSize(174))
+        assertEquals("UNKNOWN_174", codec.clientProtName(174))
+        assertEquals(ProtSize.Fixed(10), codec.clientProtInfo[174]?.size)
+
         assertEquals(70, codec.clientProtSize(218))
         assertEquals("MacOsLobbyHandoff", codec.clientProtName(218))
         assertEquals(ProtSize.Fixed(70), codec.clientProtInfo[218]?.size)
@@ -152,6 +156,11 @@ class Rev948ClientCodecTest {
         assertEquals(1, codec.serverProtSize(157))
         assertEquals("SceneFlag", codec.serverProtName(157))
         assertContentEquals(byteArrayOf(0x00), encodeBody(SceneFlag(0)))
+
+        assertEquals(120, codec.serverProts[CamSmoothReset::class]?.opcode)
+        assertEquals(0, codec.serverProtSize(120))
+        assertEquals("CamSmoothReset", codec.serverProtName(120))
+        assertContentEquals(byteArrayOf(), encodeBody(CamSmoothReset()))
     }
 
     @Test
@@ -175,6 +184,11 @@ class Rev948ClientCodecTest {
         assertEquals(0, codec.serverProtSize(190))
         assertEquals("ClearPendingUpdates", codec.serverProtName(190))
         assertContentEquals(byteArrayOf(), encodeBody(ClearPendingUpdates()))
+
+        assertEquals(67, codec.serverProts[ClanChannelFull::class]?.opcode)
+        assertEquals(ProtSize.VarShort, codec.serverProtInfo[67]?.size)
+        assertEquals("ClanChannelFull", codec.serverProtName(67))
+        assertContentEquals(byteArrayOf(), encodeBody(ClanChannelFull(main = true)))
 
         assertEquals(45, codec.serverProts[SetMultiwayState::class]?.opcode)
         assertEquals(1, codec.serverProtSize(45))
@@ -202,6 +216,8 @@ class Rev948ClientCodecTest {
             token.toByteArray(Charsets.ISO_8859_1) + byteArrayOf(0x00),
             encodeBody(HashedWorldToken(token)),
         )
+
+        assertEquals(null, codec.serverProts[NoTimeout::class])
 
         val midiEntry = codec.serverProts[MidiSong::class] ?: error("missing MidiSong")
         val midiPayload = byteArrayOf(0x7E, 0x8C.toByte(), 0xE3.toByte(), 0x00, 0x00)
@@ -276,10 +292,41 @@ class Rev948ClientCodecTest {
             ),
         )
 
+        assertEquals(77, codec.serverProts[CamUpdate::class]?.opcode)
+        assertEquals(-2, codec.serverProtSize(77))
+        assertEquals("CamUpdate", codec.serverProtName(77))
+        assertContentEquals(
+            hexBytes(
+                """
+                81 7f ff
+                42 c8 00 00 42 c8 00 00 42 c8 00 00
+                42 c8 00 00 42 c8 00 00 42 c8 00 00
+                7f 80 00 00 7f 80 00 00 7f 80 00 00
+                7f 80 00 00 7f 80 00 00 7f 80 00 00
+                42 48 00 00 46 1c 40 00
+                3f c9 0f db 3f c9 0f db
+                00 00 00 05 00
+                03 00
+                00 00 3f 80 00 00
+                01
+                3f 80 00 00 3f 80 00 00 3f 80 00 00
+                3f 80 00 00 3f 80 00 00 3f 80 00 00
+                3f 8c cc cd 3f 8c cc cd
+                3d 4c cc cd 3d 4c cc cd
+                """,
+            ),
+            encodeBody(CamUpdate.firstLight()),
+        )
+
         assertEquals(130, codec.serverProts[UpdateIgnoreListRaw::class]?.opcode)
         assertEquals(-1, codec.serverProtSize(130))
         assertEquals("UpdateIgnoreListRaw", codec.serverProtName(130))
         assertContentEquals(ByteArray(10), encodeBody(UpdateIgnoreListRaw()))
+
+        assertEquals(162, codec.serverProts[TriggerOnDialogAbort::class]?.opcode)
+        assertEquals(0, codec.serverProtSize(162))
+        assertEquals("TriggerOnDialogAbort", codec.serverProtName(162))
+        assertContentEquals(byteArrayOf(), encodeBody(TriggerOnDialogAbort()))
 
         assertEquals(209, codec.serverProts[NpcInfoThunk::class]?.opcode)
         assertEquals(-2, codec.serverProtSize(209))
@@ -293,6 +340,26 @@ class Rev948ClientCodecTest {
                     payload = byteArrayOf(0x00, 0x01, 0x02),
                 ),
             ),
+        )
+    }
+
+    @Test
+    fun `REBUILD_NORMAL op199 encodes first-light scene grid`() {
+        assertEquals(199, codec.serverProts[RebuildRegion::class]?.opcode)
+        assertEquals(-2, codec.serverProtSize(199))
+        assertEquals("RebuildRegion", codec.serverProtName(199))
+        assertContentEquals(
+            hexBytes(
+                """
+                04
+                00 00 00 04 00 01 00 00 00 01
+                00 00 00 01 01 00 00 00 00 03 00 00 00 01 00 00 00 02 00 00 00 04 00
+                01 00 00 00 00 01 00 00 00 00 01 00 00 00 00
+                00 00 00 02 00 04 00 00 00 16 00 00 00 0f 00 00 00 11 00 00 00 0b
+                00 00 00 03 00 04 00 00 00 24 00 00 00 1f 00 00 00 21 00 00 00 23
+                """,
+            ),
+            encodeBody(RebuildRegion.firstLight()),
         )
     }
 }

@@ -4,12 +4,14 @@ import io.ktor.utils.io.*
 import kotlinx.coroutines.runBlocking
 import org.darkan.core.model.IFEvents
 import org.darkan.core.net.prot.IfSetEvents
+import org.darkan.core.net.prot.IfSetHide
 import org.darkan.core.net.prot.IfSetPosition
 import org.darkan.core.net.prot.IfSetTopLevelInterface
 import org.darkan.core.net.prot.RunClientScript
 import org.darkan.core.net.prot.ServerProt
 import org.darkan.core.net.prot.revision.rev948.register948
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -36,17 +38,16 @@ class GameHudTest {
     }
 
     @Test
-    fun `component map is the root-1477 placement table (54 table rows)`() {
-        // The §7.2 table has 54 rows (18 × 3). The doc PROSE says "56 placements" — a doc-internal
-        // table-vs-prose mismatch (flagged for the RE agent); the table is taken as authoritative.
-        assertEquals(54, GameHud.COMPONENT_MAP.size, "the §7.2 1477 child map has 54 table rows")
+    fun `component map is the root-1477 production placement sequence`() {
+        assertEquals(55, GameHud.COMPONENT_MAP.size, "prod 1477 child placement sequence has 55 rows")
         // Spot-check the documented anchors.
         assertEquals(1482, GameHud.COMPONENT_MAP.first { it.slot == 31 }.child, "slot 31 ← 1482")
         assertEquals(1473, GameHud.COMPONENT_MAP.first { it.slot == 103 }.child, "slot 103 ← 1473 (inventory)")
         assertEquals(1847, GameHud.COMPONENT_MAP.first { it.slot == 911 }.child, "slot 911 ← 1847 (last row)")
         assertEquals(464, GameHud.COMPONENT_MAP.first { it.slot == 471 }.child, "slot 471 ← 464")
-        // Slots must be unique (each 1477 component hosts one child).
-        assertEquals(54, GameHud.COMPONENT_MAP.map { it.slot }.toSet().size, "slots are unique")
+        assertEquals(53, GameHud.COMPONENT_MAP.map { it.slot }.toSet().size, "prod repeats active tab slots 95 and 96")
+        assertEquals(2, GameHud.COMPONENT_MAP.count { it == HudComponent(95, 1465) })
+        assertEquals(2, GameHud.COMPONENT_MAP.count { it == HudComponent(96, 1919) })
     }
 
     @Test
@@ -113,20 +114,22 @@ class GameHudTest {
     }
 
     @Test
-    fun `op110 HUD scripts are 16300 and 671 once plus 8862 x22 with the doc arg lists`() {
-        // §7.3 tab arg list: 22 (arg1, tab) pairs, exact order.
+    fun `op110 HUD scripts use production tab enabled arg order`() {
         assertEquals(22, GameHud.HUD_TAB_ARGS.size, "8862 runs 22 times")
-        assertEquals(1 to 0, GameHud.HUD_TAB_ARGS.first(), "first tab arg = (1, 0)")
-        assertEquals(0 to 1025, GameHud.HUD_TAB_ARGS.last(), "last tab arg = (0, 1025)")
-        // (0, 12), (0, 30), (0, 45), (0, 46) are the documented disabled tabs.
-        assertTrue(0 to 12 in GameHud.HUD_TAB_ARGS)
-        assertTrue(0 to 30 in GameHud.HUD_TAB_ARGS)
-        assertTrue(0 to 45 in GameHud.HUD_TAB_ARGS)
-        assertTrue(0 to 46 in GameHud.HUD_TAB_ARGS)
+        assertEquals(54, GameHud.POST_OPEN_SCRIPTS.size, "post-open script bootstrap fills out prod's 79 script calls")
+        assertEquals(0 to 1, GameHud.HUD_TAB_ARGS.first(), "first tab arg = (0, 1)")
+        assertEquals(1025 to 0, GameHud.HUD_TAB_ARGS.last(), "last tab arg = (1025, 0)")
+        assertEquals(11145, GameHud.POST_OPEN_SCRIPTS.first().scriptId)
+        assertEquals(18954, GameHud.POST_OPEN_SCRIPTS.last().scriptId)
+        assertTrue(12 to 0 in GameHud.HUD_TAB_ARGS)
+        assertTrue(30 to 0 in GameHud.HUD_TAB_ARGS)
+        assertTrue(45 to 0 in GameHud.HUD_TAB_ARGS)
+        assertTrue(46 to 0 in GameHud.HUD_TAB_ARGS)
 
-        // Encode one 8862 call and confirm the script id round-trips through the op110 encoder.
-        val script = RunClientScript.of(GameHud.SCRIPT_HUD_TAB, 1, 5)
+        val script = RunClientScript.of(GameHud.SCRIPT_HUD_TAB, 0, 1)
         val body = encodeBody(script)
+        assertEquals(0, body[3].toInt())
+        assertEquals(1, body[6].toInt())
         // Trailing 4 bytes = scriptId (BE u32) in the existing op110 codec.
         val sid = ((body[body.size - 4].toInt() and 0xFF) shl 24) or
             ((body[body.size - 3].toInt() and 0xFF) shl 16) or
@@ -149,5 +152,17 @@ class GameHudTest {
         val toSlot = (body[6].toInt() and 0xFF) or ((body[7].toInt() and 0xFF) shl 8)
         assertEquals(0, fromSlot)
         assertEquals(27, toSlot)
+    }
+
+    @Test
+    fun `op91 IF_SETHIDE uses production false and true flags`() {
+        assertContentEquals(
+            byteArrayOf(0x80.toByte(), 0x00, 0x05, 0x05, 0x89.toByte()),
+            encodeBody(IfSetHide(componentHash = GameHud.componentHash(1417, 5), hide = false)),
+        )
+        assertContentEquals(
+            byteArrayOf(0x81.toByte(), 0x00, 0x47, 0x02, 0x8D.toByte()),
+            encodeBody(IfSetHide(componentHash = GameHud.componentHash(653, 71), hide = true)),
+        )
     }
 }

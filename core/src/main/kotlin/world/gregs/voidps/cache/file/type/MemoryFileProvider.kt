@@ -18,7 +18,8 @@ class MemoryFileProvider(cache: Cache) : FileProvider {
         sectors[255] = index255
         index255[255] = cache.versionTable
         for (index in cache.indices()) {
-            val archives = arrayOfNulls<ByteArray>(cache.lastArchiveId(index) + 1)
+            val last = cache.lastArchiveId(index)
+            val archives = arrayOfNulls<ByteArray>(last + 1)
             sectors[index] = archives
             for (archive in cache.archives(index)) {
                 archives[archive] = cache.sector(index, archive) ?: continue

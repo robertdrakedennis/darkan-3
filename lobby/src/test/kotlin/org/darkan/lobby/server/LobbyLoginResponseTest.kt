@@ -14,7 +14,7 @@ import kotlin.test.assertTrue
  * parses, in order:
  *
  *     worldId  g2   (BE u16; 0xffff → -1 = "no world")
- *     host     gStr (NUL-terminated CP1252, FUN_00126e90 — NO leading length byte)
+ *     host     gjStr (version byte 0, NUL-terminated CP1252, FUN_00126e90 param_3=1)
  *     portA    g2   (BE u16)
  *     portB    g2   (BE u16)
  *     sid1     u64  (BE)
@@ -25,11 +25,10 @@ import kotlin.test.assertTrue
  * (type-2) connect reads via LoginStepWaitingConnectionOpened → OpenConnection("host:port"). This
  * is the entire cold-lobby "Play Now" connect mechanism — op212/op213 are NOT involved (§10).
  *
- * THE REGRESSION THIS PINS: the host MUST be encoded with writeString (CP1252 + NUL, no leading
- * byte). The prior code used writePrefixedString, which prepends an extra 0x00 — gStr reads that
- * leading 0x00 as an immediate terminator (empty host) and then misparses the real host bytes as
- * portA/portB, desyncing the whole tail. A leading 0x00 before the host bytes is the bug; this test
- * fails if it ever comes back.
+ * THE REGRESSION THIS PINS: displayName and host are versioned strings. FUN_00126e90 is called with
+ * param_3=1, so it consumes one leading byte and requires that byte to be 0 before reading the
+ * NUL-terminated CP1252 string. If the first byte is the first text char, the parser returns an empty
+ * string, advances one byte, and desyncs the rest of the login-data block.
  *
  * The expected world-target values come from EnvVars (the same source the encoder reads), so the
  * test stays correct under any .env override. sid1/sid2 (the compact LoginToken) are nondeterministic
@@ -40,15 +39,35 @@ class LobbyLoginResponseTest {
 
     private fun u16be(v: Int): ByteArray = byteArrayOf((v ushr 8).toByte(), v.toByte())
 
-    /** gStr / writeString: CP1252 bytes + a single NUL terminator, NO leading length byte. */
-    private fun gstr(s: String): ByteArray = s.toByteArray(Charsets.ISO_8859_1) + 0x00.toByte()
+    /** gjStr: version byte 0, CP1252 bytes, trailing NUL. */
+    private fun gjstr(s: String): ByteArray = byteArrayOf(0) + s.toByteArray(Charsets.ISO_8859_1) + 0x00.toByte()
 
     private fun hex(b: ByteArray) = b.joinToString(" ") { "%02x".format(it) }
+
+    private val prodPrefixBeforeDisplay = byteArrayOf(
+        0x00, 0x00, 0x00, 0x00,
+        0xff.toByte(), 0xfa.toByte(), 0xfa.toByte(),
+        0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x61, 0x04, 0x17, 0xa2.toByte(), 0x08,
+        0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x22, 0xb3.toByte(),
+        0xad.toByte(), 0xa9.toByte(), 0x0a, 0x4a,
+        0x03,
+        0xd2.toByte(), 0x1f,
+        0xd2.toByte(), 0x1f,
+        0x00, 0x00,
+    )
 
     /** The world-connect target slice the client parses (worldId, host, portA, portB) — pre-sid. */
     private fun expectedWorldTarget(): ByteArray =
         u16be(EnvVars.worldId) +
-            gstr(EnvVars.worldHost) +
+            gjstr(EnvVars.worldHost) +
             u16be(EnvVars.worldPort) +   // portA
             u16be(EnvVars.worldPort)     // portB
 
@@ -66,75 +85,66 @@ class LobbyLoginResponseTest {
         val actualSlice = block.copyOfRange(expectedStart, expectedStart + target.size)
         assertEquals(
             hex(target), hex(actualSlice),
-            "world-target tail (worldId, host[gStr, no leading byte], portA, portB) must match §10.3 " +
+            "world-target tail (worldId, host[gjStr], portA, portB) must match §10.3 " +
                 "and sit immediately before the 16 session-token bytes",
         )
     }
 
     @Test
-    fun `host is NUL-terminated with NO leading length byte (writePrefixedString regression guard)`() {
+    fun `host is versioned gjStr with leading zero byte`() {
         val block = LoginServer().buildLobbyData(Account(username = "tester", displayName = "Tester"))
 
-        // Right after the BE u16 worldId the first host byte must be the first CP1252 char of the
-        // host — NOT a 0x00 (which is what writePrefixedString would emit, and what gStr would read
-        // as an empty string).
         val hostBytes = EnvVars.worldHost.toByteArray(Charsets.ISO_8859_1)
         assertTrue(hostBytes.isNotEmpty(), "test assumes a non-empty world host")
 
         val target = expectedWorldTarget()
         val expectedStart = block.size - 16 - target.size
         val worldIdLen = 2
-        val firstHostByte = block[expectedStart + worldIdLen]
+        assertEquals(0x00.toByte(), block[expectedStart + worldIdLen], "host gjStr version byte must be 0")
+        assertEquals(hostBytes[0], block[expectedStart + worldIdLen + 1], "host text must follow version byte")
+    }
+
+    @Test
+    fun `displayName is encoded with gjStr`() {
+        val displayName = "Tester"
+        val block = LoginServer().buildLobbyData(Account(username = "tester", displayName = displayName))
+
+        //   [ ...body..., displayName(gjStr), #24=00, #25=00 00 00 00, <world-target>, <16 token bytes> ]
+        val target = expectedWorldTarget()
+        val tailFixedBytes = 1 + 4 // byte + int before the world-target tail
+        val displayNameEnd = block.size - 16 - target.size - tailFixedBytes // exclusive; == index of #24
+        val expectedName = gjstr(displayName)
+        val displayNameStart = displayNameEnd - expectedName.size
+        assertTrue(displayNameStart >= 1, "block too short to contain displayName + tail")
         assertEquals(
-            hostBytes[0], firstHostByte,
-            "host must start immediately after worldId with its first CP1252 byte (0x%02x), not a leading 0x00"
-                .format(hostBytes[0]),
+            prodPrefixBeforeDisplay.size, displayNameStart,
+            "displayName must start at the prod-observed 948 lobby offset",
+        )
+
+        assertEquals(0x00.toByte(), block[displayNameStart], "displayName gjStr version byte must be 0")
+        assertEquals('T'.code.toByte(), block[displayNameStart + 1], "displayName text must follow version byte")
+
+        val actualName = block.copyOfRange(displayNameStart, displayNameEnd)
+        assertEquals(
+            hex(expectedName), hex(actualName),
+            "displayName must be gjStr-encoded per §10.3",
+        )
+        // Byte immediately before displayName is part of the prod-observed status prefix, not a string prefix.
+        assertEquals(
+            0x00.toByte(), block[displayNameStart - 1],
+            "byte before displayName must be prod status data, not a leading string prefix",
         )
     }
 
     @Test
-    fun `displayName is encoded with gStr (no leading 0x00) and a single trailing NUL`() {
-        // §10.3: the client reads EXACTLY TWO gStr strings in the lobby login-data block — the
-        // displayName (record +0x68, @0x001cd7c7) and the world host (local_88, @0x001cd878) — both
-        // via FUN_00126e90 (NUL-terminated CP1252, NO leading length/flag byte). displayName MUST be
-        // writeString, NOT writePrefixedString: a leading 0x00 is read by gStr as an immediate
-        // terminator → empty displayName → the real name bytes and the entire world-target tail
-        // desync. This mirrors the host guard below for the OTHER gStr field.
-        val displayName = "Tester"
-        val block = LoginServer().buildLobbyData(Account(username = "tester", displayName = displayName))
+    fun `lobby login response keeps prod-shaped prefix before displayName`() {
+        val block = LoginServer().buildLobbyData(Account(username = "tester", displayName = "Tester"))
 
-        // displayName is the only variable-length field in the player/account body. It sits right
-        // after field #22 isMembersWorld (a single 0x01 byte) and is followed by the fixed
-        // #24 unknown9 (0x00) + #25 unknown10 (0x00000000) bytes that precede the world-target tail.
-        // Locate it relative to the world-target tail (which itself precedes the 16 token bytes):
-        //   [ ...body..., displayName(gStr), #24=00, #25=00 00 00 00, <world-target>, <16 token bytes> ]
-        val target = expectedWorldTarget()
-        val tailFixedBytes = 1 + 4 // #24 unknown9 (byte) + #25 unknown10 (int)
-        val displayNameEnd = block.size - 16 - target.size - tailFixedBytes // exclusive; == index of #24
-        val expectedName = gstr(displayName) // CP1252 + single trailing NUL — NO leading byte
-        val displayNameStart = displayNameEnd - expectedName.size
-        assertTrue(displayNameStart >= 1, "block too short to contain displayName + tail")
+        val actualPrefix = block.copyOfRange(0, prodPrefixBeforeDisplay.size)
 
-        // The first displayName byte must be the first CP1252 char ('T'), NOT a leading 0x00 (which
-        // is exactly what writePrefixedString would emit and what regresses the whole tail).
-        val firstNameByte = block[displayNameStart]
         assertEquals(
-            expectedName[0], firstNameByte,
-            "displayName must start with its first CP1252 byte (0x%02x), not a leading 0x00 (the writePrefixedString regression)"
-                .format(expectedName[0]),
-        )
-
-        // And the full field must round-trip as CP1252 + a single trailing NUL.
-        val actualName = block.copyOfRange(displayNameStart, displayNameEnd)
-        assertEquals(
-            hex(expectedName), hex(actualName),
-            "displayName must be gStr-encoded (CP1252 + single trailing NUL, no leading byte) per §10.3",
-        )
-        // Belt-and-braces: the byte immediately before displayName is #22 isMembersWorld = 0x01,
-        // confirming there is no stray 0x00 padding ahead of the name.
-        assertEquals(
-            0x01.toByte(), block[displayNameStart - 1],
-            "byte before displayName must be #22 isMembersWorld=0x01, i.e. no leading 0x00 prefix on the name",
+            hex(prodPrefixBeforeDisplay), hex(actualPrefix),
+            "lobby login prefix before displayName must match prod 948 shape",
         )
     }
 

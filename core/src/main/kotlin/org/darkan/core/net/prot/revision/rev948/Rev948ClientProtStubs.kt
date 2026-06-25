@@ -177,6 +177,7 @@ internal fun Codec.registerRev948ClientProtStubs() {
     c(127, "IF_BUTTON1", 8)                           // CONFIRMED — beta 0x00a394d0 / 948 IfButtonXInner 0x002978d0, CS2-table opt1 slot 0x01365920->ProtEntry 0x015d36c0 (xref-verified) / capture op127 size8 (interface click). 8B click: interfaceHash intLittle + slotId uShortAddLittle + itemId uShortAdd. Decoder in Rev948ClientCodecs.
     c(128, "UNKNOWN_128", -2)                         // CONF:NONE — UNBOUND (RegisterAll only)
     c(129, "UNKNOWN_129", -1)                         // CONF:NONE — fn SendOpLocCS2 @ 0x0033e140 (entry 0x015d36a0); no official OPLOC*_CS2 enum
+    c(174, "UNKNOWN_174", 10)                         // LIVE: macOS 948-5 lobby packet. Production C2S stream decodes clean only at fixed 10, then NO_TIMEOUT, WORLDLIST_FETCH, IF_BUTTON1 Play Now.
     c(203, "UNKNOWN_203", -2)                         // LIVE: post-world macOS 948-5 client sync packet; keep framed while reverse engineering exact sender.
     c(218, "UNKNOWN_218", 70)                         // LIVE: macOS 948-5 lobby handoff tail packet. Production session-20260622-152729-production-isaac decodes clean only at fixed 70; Linux 948-5 RegisterAll has no op218 entry.
     c(240, "UNKNOWN_240", 7)                          // LIVE: macOS 948-5 post-world-login wrapper; payload is 0x5e + op52 display-info body in production session-20260622-152729-production-isaac. Linux 948-5 RegisterAll has no op240 entry.

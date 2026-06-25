@@ -144,30 +144,16 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
             call.respondText("Not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
             return
         }
-        // HTTP JS5 responses must end with a 2-byte big-endian version suffix.
-        // The client computes CRC over (responseBody.length - 2) and verifies against the archive index.
-        //
-        // Some archives were downloaded via HTTP from Jagex, so the stored blob already
-        // contains the 2-byte suffix. Detect this by checking blob size vs container header.
         val version = call.request.queryParameters["v"]?.toIntOrNull() ?: 0
-        val alreadyHasSuffix = blobHasVersionSuffix(data)
-        val response = if (alreadyHasSuffix) {
-            data // serve as-is — suffix already present
-        } else {
-            val buf = ByteArray(data.size + 2)
-            System.arraycopy(data, 0, buf, 0, data.size)
-            buf[data.size] = ((version shr 8) and 0xFF).toByte()
-            buf[data.size + 1] = (version and 0xFF).toByte()
-            buf
-        }
+        val response = data
         // DIAGNOSTIC (JS5 stall): INFO-level so successful HTTP content serves are visible
         // at the default TRACE/FINER log level during a pilot run.
-        logInfo("JS5 HTTP: a=$archive g=$group v=$version -> ${response.size} bytes (container=${data.size}, suffix=${if (alreadyHasSuffix) "stored" else "appended"})")
+        logInfo("JS5 HTTP: a=$archive g=$group v=$version -> ${response.size} bytes (container=${data.size}, suffix=raw)")
         call.respondBytes(response, ContentType.Application.OctetStream)
     }
 
     private fun generateJavConfig(): String = buildString {
-        val host = "localhost"
+        val host = EnvVars.configPublicHost
         val lobbyPort = EnvVars.lobbyPort
 
         fun line(s: String) { append(s); append("\n") }
@@ -250,7 +236,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=3=$host")                                    // lobby host
         line("param=4=0")
         line("param=5=0")
-        line("param=6=300")                                     // world ID (MAP_WORLD() reads this)
+        line("param=6=${EnvVars.worldId}")
         line("param=7=0")
         line("param=8=false")
         line("param=10=${EnvVars.loginServerToken}")              // login server token
@@ -289,8 +275,8 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=38=1200")
         line("param=39=false")
         line("param=40=http://$host:${EnvVars.configHttpPort}")   // content server URL
-        // Game ports — client uses these for JS5 (TCP) and world connections in Jagex's
-        // architecture. Local split-port world login is steered by SWITCH_WORLD from lobby.
+        // Game ports for JS5/lobby bootstrap. The local world socket target is carried in the
+        // lobby login-response world-target tail.
         line("param=41=$lobbyPort")                               // game port 1 (JS5 lives here)
         line("param=42=$lobbyPort")                               // game port 2 (was SSL 443)
         line("param=43=$lobbyPort")                               // game port 3
@@ -325,26 +311,6 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
             val rawCrc: Long
         ) {
             val exists: Boolean = source.exists()
-        }
-
-        /**
-         * Check if a cached JS5 blob already contains a 2-byte version suffix.
-         *
-         * Container format: [1B type][4B compressedSize BE][compressedData][if compressed: 4B decompressedSize]
-         * Expected container size = 5 + compressedSize + (if type != 0: 4 else 0)
-         * If the blob is exactly 2 bytes longer than that, it already has a version suffix
-         * (from being downloaded via HTTP from Jagex).
-         */
-        private fun blobHasVersionSuffix(data: ByteArray): Boolean {
-            if (data.size < 5) return false
-            val compressedSize = ((data[1].toInt() and 0xFF) shl 24) or
-                    ((data[2].toInt() and 0xFF) shl 16) or
-                    ((data[3].toInt() and 0xFF) shl 8) or
-                    (data[4].toInt() and 0xFF)
-            val type = data[0].toInt() and 0xFF
-            val headerSize = if (type != 0) 9 else 5  // compressed types have 4-byte decompressed size
-            val expectedContainerSize = headerSize + compressedSize
-            return data.size == expectedContainerSize + 2
         }
 
         private fun loadClientBinaryPayload(path: String): ClientBinaryPayload {

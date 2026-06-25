@@ -26,4 +26,5 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    workingDir = rootProject.projectDir
 }

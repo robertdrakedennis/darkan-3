@@ -123,6 +123,7 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
     serverProt<DestroyZoneData>(opcode = 55, size = 0)
     serverProt<NoopVarA>(opcode = 128, size = 0)
     serverProt<ClearPendingUpdates>(opcode = 190, size = 0)
+    serverProt<TriggerOnDialogAbort>(opcode = 162, size = 0)
 
     // ANTI_CHEAT_CHALLENGE behavior at op 174. The 948-5 symbol is the handler name
     // `HandleAntiCheatChallenge`.
@@ -149,6 +150,8 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
     serverProt<SceneFlag>(opcode = 157, size = 1) { out ->
         out.writeByte((-value) and 0xFF)
     }
+
+    serverProt<CamSmoothReset>(opcode = 120, size = 0)
 
     serverProt<SetMultiwayState>(opcode = 45, size = 1) { out ->
         out.writeByte(state)
@@ -179,7 +182,9 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
 
     serverProt<PlayerInfoDecode>(opcode = 104, size = 14) { out ->
         out.writeByte(((slot and 0x7) shl 5) or (mode and 0x1F))
-        out.writeFully(payload)
+        repeat(13) {
+            out.writeByte(0)
+        }
     }
 
     serverProt<CutsceneData>(opcode = 119, size = 35) { out ->
@@ -194,6 +199,19 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
         out.writeInt(secondaryInt)
         out.writeLong(secondaryLong)
         out.writeInt(skipLength)
+    }
+
+    serverProt<CamUpdate>(opcode = 77, size = ProtSize.VarShort) { out ->
+        var flags = 0
+        if (byteA0) flags = flags or 0x01
+        if (modeA8 != null) flags = flags or 0x08
+        if (modeC0 != null) flags = flags or 0x10
+        if (extended != null) flags = flags or 0x80
+
+        out.writeByte(flags)
+        modeA8?.let { out.writeByte(it) }
+        modeC0?.let { out.writeByte(it) }
+        extended?.let { out.writeCameraUpdateExtended(it) }
     }
 
     serverProt<UpdateIgnoreListRaw>(opcode = 130, size = ProtSize.VarByte) { out ->
@@ -249,13 +267,8 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
                 if (world.highlighted) flags = flags or 0x10
                 out.writeInt(flags)
 
-                if (world.activity.isEmpty()) {
-                    out.writeSmart(0)
-                } else {
-                    out.writeSmart(1)
-                    out.writeJagString(world.activity)
-                }
-                out.writeJagString(world.hostname)
+                out.writeSmart(0)
+                out.writeJagString(world.activity.ifEmpty { "-" })
                 out.writeJagString(world.hostname)
             }
 
@@ -267,6 +280,7 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
         }
 
         // 5. Player count section
+        // Each entry is [smart worldId-delta][u16 count].
         for (world in worlds) {
             out.writeSmart(world.number - minWorldId)
             out.writeShort(if (world.offline) -1 else world.playersOnline)
@@ -305,4 +319,65 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
     //   at ops 10, 28, 47, 48, 51, 61, 64, 69 have wire-format differences from 947-3
     //   (endianness, byte transforms, field order all changed). See Rev948ServerCodecsVariable.kt
     //   for tentative registrations.
+}
+
+private suspend fun ByteWriteChannel.writeCameraUpdateExtended(update: CamUpdateExtended) {
+    var flags = 0
+    if (update.vector138 != null) flags = flags or 0x0001
+    if (update.vector150 != null) flags = flags or 0x0002
+    if (update.vector168 != null) flags = flags or 0x0004
+    if (update.vector180 != null) flags = flags or 0x0008
+    if (update.pair1e8 != null) flags = flags or 0x0010
+    if (update.pair1dc != null) flags = flags or 0x0020
+    if (update.byteA4 != null) flags = flags or 0x0040
+    if (update.ignored80 != null) flags = flags or 0x0080
+    if (update.flagsFcFd != null) flags = flags or 0x0100
+    if (update.scriptedCommandCount != null) flags = flags or 0x0200
+    if (update.pair118 != null) flags = flags or 0x0400
+    if (update.byte100 != null) flags = flags or 0x0800
+    if (update.envelope198 != null) flags = flags or 0x1000
+    if (update.scalar108 != null) flags = flags or 0x2000
+    if (update.scalar110 != null) flags = flags or 0x4000
+
+    writeShort(flags)
+    update.vector138?.let { writeCameraVector(it) }
+    update.vector150?.let { writeCameraVector(it) }
+    update.vector168?.let { writeCameraVector(it) }
+    update.vector180?.let { writeCameraVector(it) }
+    update.pair1e8?.let { writeCameraPair(it) }
+    update.pair1dc?.let { writeCameraPair(it) }
+    update.byteA4?.let { writeByte(it) }
+    update.ignored80?.let { writeInt(it) }
+    update.flagsFcFd?.let {
+        writeByte((if (it.first) 1 else 0) or (if (it.second) 2 else 0))
+    }
+    update.scriptedCommandCount?.let { writeByte(it) }
+    update.pair118?.let {
+        writeShort(it.id)
+        writeCameraFloat(it.value)
+    }
+    update.byte100?.let { writeByte(it) }
+    update.envelope198?.let {
+        writeCameraVector(it.first)
+        writeCameraVector(it.second)
+        writeCameraFloat(it.firstScalar)
+        writeCameraFloat(it.secondScalar)
+    }
+    update.scalar108?.let { writeCameraFloat(it) }
+    update.scalar110?.let { writeCameraFloat(it) }
+}
+
+private suspend fun ByteWriteChannel.writeCameraVector(value: CamVector3) {
+    writeCameraFloat(value.x)
+    writeCameraFloat(value.y)
+    writeCameraFloat(value.z)
+}
+
+private suspend fun ByteWriteChannel.writeCameraPair(value: CamFloatPair) {
+    writeCameraFloat(value.first)
+    writeCameraFloat(value.second)
+}
+
+private suspend fun ByteWriteChannel.writeCameraFloat(value: Float) {
+    writeInt(value.toRawBits())
 }

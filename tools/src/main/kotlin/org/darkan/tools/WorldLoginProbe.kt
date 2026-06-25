@@ -8,10 +8,13 @@ import org.darkan.core.net.prot.revision.rev948.register948
 import world.gregs.voidps.buffer.write.BufferWriter
 import world.gregs.voidps.cache.secure.RSA
 import world.gregs.voidps.cache.secure.Xtea
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.math.BigInteger
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
+import java.util.TreeMap
 import kotlin.system.exitProcess
 
 /**
@@ -30,7 +33,7 @@ import kotlin.system.exitProcess
  *     XTEA tail] in the exact layout WorldServer.initWorldLogin parses.
  *  3. RESULT: server replies status byte 2 (SUCCESS).
  *  3b. THREE-PART RESPONSE (the §9 fix): the world client parses a fixed pre-ISAAC stream after
- *     SUCCESS — Part A server-client-var block `[u16 len][u8 ackFlag][u16 ids...]`, Part B players
+ *     SUCCESS — Part A server-client-var block `[u16 len][u8 ackFlag][typed entries...]`, Part B players
  *     byte `02`, Part C `[u8 len][00 leadFlag][WorldLoginDetails body][u16 reserved][u32 time]
  *     [u64 sid1][u64 sid2]`. Asserts Part A is raw length-prefixed data, not a framed server packet,
  *     Part B == 2, and Part C decodes field-for-field with a correct 1-byte length prefix.
@@ -60,6 +63,13 @@ private fun fail(msg: String): Nothing {
     exitProcess(1)
 }
 
+private fun u16be(value: Int): ByteArray = byteArrayOf((value ushr 8).toByte(), value.toByte())
+
+private fun jstr(value: String): ByteArray = value.toByteArray(Charsets.ISO_8859_1) + 0x00.toByte()
+
+private fun hexBytes(hex: String): ByteArray =
+    hex.filterNot(Char::isWhitespace).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
 /** Read exactly [n] bytes or fail (the burst is a continuous stream — never under-read). */
 private fun readN(input: InputStream, n: Int, what: String): ByteArray {
     val b = ByteArray(n)
@@ -70,6 +80,69 @@ private fun readN(input: InputStream, n: Int, what: String): ByteArray {
         r += k
     }
     return b
+}
+
+private fun tryReadN(input: InputStream, n: Int): ByteArray? {
+    val b = ByteArray(n)
+    var r = 0
+    while (r < n) {
+        val k = try {
+            input.read(b, r, n - r)
+        } catch (_: SocketTimeoutException) {
+            return null
+        }
+        if (k < 0) return null
+        r += k
+    }
+    return b
+}
+
+private fun dumpRemainingStream(input: InputStream, codec: Codec, isaacOut: Isaac, maxPackets: Int, maxBodyBytes: Int) {
+    val counts = TreeMap<Int, Int>()
+    val firstPackets = mutableListOf<String>()
+    var packets = 0
+    while (packets < maxPackets) {
+        val rawOp1 = tryReadN(input, 1) ?: break
+        val dec1 = ((rawOp1[0].toInt() and 0xFF) - isaacOut.nextInt()) and 0xFF
+        val opcode = if (dec1 < 128) {
+            dec1
+        } else {
+            val rawOp2 = tryReadN(input, 1) ?: break
+            val dec2 = ((rawOp2[0].toInt() and 0xFF) - isaacOut.nextInt()) and 0xFF
+            (dec1 - 128) * 256 + dec2
+        }
+        val sizeMode = codec.serverProtSize(opcode)
+        val len = when {
+            sizeMode >= 0 -> sizeMode
+            sizeMode == -1 -> tryReadN(input, 1)?.get(0)?.toInt()?.and(0xFF) ?: break
+            sizeMode == -2 -> {
+                val bytes = tryReadN(input, 2) ?: break
+                ((bytes[0].toInt() and 0xFF) shl 8) or (bytes[1].toInt() and 0xFF)
+            }
+            else -> {
+                println("[DUMP STOP] opcode=$opcode has unknown size mode $sizeMode after $packets packet(s)")
+                break
+            }
+        }
+        if (len > maxBodyBytes) {
+            println("[DUMP STOP] op=$opcode ${codec.serverProtName(opcode)} len=$len exceeds maxBodyBytes=$maxBodyBytes after $packets packet(s)")
+            break
+        }
+        val body = tryReadN(input, len) ?: break
+        counts[opcode] = (counts[opcode] ?: 0) + 1
+        if (firstPackets.size < 240) {
+            firstPackets += "#${packets + 1} op=$opcode ${codec.serverProtName(opcode)} len=$len body=${hex(body, minOf(24, body.size))}"
+        }
+        packets++
+    }
+
+    println("[DUMP] walked $packets additional packet(s)")
+    println("[DUMP] first packets:")
+    for (line in firstPackets) println("[DUMP]   $line")
+    println("[DUMP] counts:")
+    for ((opcode, count) in counts) {
+        println("[DUMP]   op=$opcode ${codec.serverProtName(opcode)} count=$count")
+    }
 }
 
 /**
@@ -88,6 +161,16 @@ private fun decodePackedCoord(word: Int): DecodedCoord {
 private val MODULUS = BigInteger(EnvVars.worldRsaModulus)
 private val PUBLIC_EXP = BigInteger.valueOf(65537L) // client encrypts with the PUBLIC exponent
 private val ISAAC_KEYS = intArrayOf(0x11111111, 0x22222222, 0x33333333, 0x44444444)
+
+private fun encodeClientPackets(seeds: IntArray, vararg packets: Pair<Int, ByteArray>): ByteArray {
+    val cipher = Isaac(seeds.copyOf())
+    val out = ByteArrayOutputStream()
+    for ((opcode, payload) in packets) {
+        out.write((opcode + cipher.nextInt()) and 0xFF)
+        out.write(payload)
+    }
+    return out.toByteArray()
+}
 
 /**
  * Lobby-login preamble (opcode 19) — the REAL flow creates the account on first lobby login. This
@@ -134,8 +217,35 @@ private fun lobbyLoginToCreateAccount(host: String, lobbyPort: Int, username: St
 
         val result = input.read()
         if (result != 2) fail("LOBBY RESULT: expected SUCCESS(2), got $result — lobby login/account-create failed")
-        println("[PROBE OK]   Lobby login SUCCESS(2) — account '$username' now exists")
-        // Don't bother reading the full lobby init burst; we have what we need (the account).
+        val lobbyDataLen = input.read()
+        if (lobbyDataLen <= 0) fail("LOBBY RESULT: invalid lobby login-data len=$lobbyDataLen")
+        val lobbyData = readN(input, lobbyDataLen, "Lobby login-data block")
+        val target = u16be(EnvVars.worldId) +
+            jstr(EnvVars.worldHost) +
+            u16be(EnvVars.worldPort) +
+            u16be(EnvVars.worldPort)
+        val targetStart = lobbyData.size - 16 - target.size
+        if (targetStart < 0) {
+            fail("LOBBY TARGET: login-data block too short for world target + tokens: len=${lobbyData.size}")
+        }
+        val actualTarget = lobbyData.copyOfRange(targetStart, targetStart + target.size)
+        if (!actualTarget.contentEquals(target)) {
+            fail("LOBBY TARGET: expected world target ${hex(target)} at login-data offset $targetStart, got ${hex(actualTarget)} " +
+                "(block=${hex(lobbyData)})")
+        }
+        println("[PROBE OK]   Lobby login SUCCESS(2) — account '$username' now exists; " +
+            "login-data len=$lobbyDataLen targetOffset=$targetStart target world=${EnvVars.worldId} host=${EnvVars.worldHost}:${EnvVars.worldPort}")
+
+        out.write(encodeClientPackets(
+            ISAAC_KEYS,
+            174 to hexBytes("0000000574FFFFFFFF10"),
+            51 to byteArrayOf(),
+            54 to hexBytes("27B8926D"),
+            127 to hexBytes("51008A037FFFFF7F"),
+        ))
+        out.flush()
+        Thread.sleep(250)
+        println("[PROBE OK]   Lobby Play Now C2S sequence sent: op174, op51, op54, op127(906/81)")
     }
 }
 
@@ -150,6 +260,11 @@ fun main(args: Array<String>) {
     val username = System.getProperty("probeUser") ?: args.getOrNull(2) ?: "probe${System.currentTimeMillis()}"
     val lobbyPort = (System.getProperty("lobbyPort") ?: EnvVars.lobbyPort.toString()).toInt()
     val password = System.getProperty("probePass") ?: "probepass123"
+    val dumpStream = System.getProperty("dumpStream") == "true"
+    val dumpReady = System.getProperty("dumpReady") == "true"
+    val dumpMaxPackets = (System.getProperty("dumpMaxPackets") ?: "4000").toInt()
+    val dumpTimeoutMillis = (System.getProperty("dumpTimeoutMillis") ?: "1500").toInt()
+    val dumpMaxBodyBytes = (System.getProperty("dumpMaxBodyBytes") ?: "8192").toInt()
 
     println("WorldLoginProbe → world $host:$port as '$username' (lobby $host:$lobbyPort)")
 
@@ -273,7 +388,7 @@ fun main(args: Array<String>) {
         // In WORLD mode the client routes result byte 2 to its server-client-var state (step 0xfa),
         // NOT to HandleLoginData like the lobby. So after SUCCESS the server sends, pre-ISAAC and
         // UN-framed (no smart opcode, no per-packet length other than the explicit prefixes below):
-        //   Part A: [u16 BE varcLen][u8 ackFlag][varc entries…]
+        //   Part A: [u16 BE varcLen][u8 ackFlag][typed server-client-var entries…]
         //   Part B: [u8 playersByte == 2]
         //   Part C: [u8 loginDataLen][u8 leadFlag == 0][WorldLoginDetails body][u16 reserved][u32 time][u64 sid1][u64 sid2]
         //
@@ -297,17 +412,8 @@ fun main(args: Array<String>) {
                 "loops back to step 0xfa and reads the NEXT bytes as another server-client-var length → desync (§9.2). " +
                 "lenBytes=${hex(partALenBytes)} body=${hex(partABody, 64)}")
         }
-        if ((varcBlockLen - 1) % 2 != 0) {
-            fail("PART A: ${varcBlockLen - 1} bytes remain after ackFlag, expected an even number of u16 ids. " +
-                "lenBytes=${hex(partALenBytes)} body=${hex(partABody, 64)}")
-        }
-        val serverClientVarIds = IntArray((varcBlockLen - 1) / 2) { i ->
-            val o = 1 + i * 2
-            ((partABody[o].toInt() and 0xFF) shl 8) or (partABody[o + 1].toInt() and 0xFF)
-        }
-        val firstServerClientVarIds = serverClientVarIds.take(12).joinToString(prefix = "[", postfix = "]")
         println("[PROBE OK]   Step 3b PART A: server-client-var block len=$varcBlockLen ackFlag=0x01 " +
-            "ids=${serverClientVarIds.size} firstIds=$firstServerClientVarIds")
+            "entryBytes=${varcBlockLen - 1}")
 
         // PART B — players byte; the client requires == 2 (step 0x82) to advance to the login-data block.
         val playersByte = readN(input, 1, "Part B (players byte)")[0].toInt() and 0xFF
@@ -503,6 +609,84 @@ fun main(args: Array<String>) {
         }
         println("[PROBE OK]   Step 4 ASSERT: build-area bounds contain spawn region ($spawnRegionX,$spawnRegionZ), " +
             "localCentre=($localCentreX,$localCentreZ), scene window fits ${widthZones}x${heightZones} zone grid.")
+
+        // --- Step 5: READY TAIL — walk the post-op81 burst until SET_READY_FLAG and require the
+        // production reset/rebuild tail packets that gate the handoff out of black-screen loading.
+        sock.soTimeout = 2000
+        val readyCounts = TreeMap<Int, Int>()
+        val readyFirstPackets = mutableListOf<String>()
+        var readyPackets = 0
+        var sawReady = false
+        while (!sawReady && readyPackets < 4000) {
+            val rawOp1 = tryReadN(input, 1)
+                ?: fail("READY walk: timed out before SET_READY_FLAG after $readyPackets packet(s); counts=$readyCounts")
+            val dec1 = ((rawOp1[0].toInt() and 0xFF) - isaacOut.nextInt()) and 0xFF
+            val opcode = if (dec1 < 128) {
+                dec1
+            } else {
+                val rawOp2 = tryReadN(input, 1)
+                    ?: fail("READY walk: stream ended in two-byte opcode after $readyPackets packet(s); counts=$readyCounts")
+                val dec2 = ((rawOp2[0].toInt() and 0xFF) - isaacOut.nextInt()) and 0xFF
+                (dec1 - 128) * 256 + dec2
+            }
+            val sizeMode = codec.serverProtSize(opcode)
+            val len = when {
+                sizeMode >= 0 -> sizeMode
+                sizeMode == -1 -> tryReadN(input, 1)?.get(0)?.toInt()?.and(0xFF)
+                    ?: fail("READY walk: missing varByte length for op=$opcode after $readyPackets packet(s)")
+                sizeMode == -2 -> {
+                    val h = tryReadN(input, 2)
+                        ?: fail("READY walk: missing varShort length for op=$opcode after $readyPackets packet(s)")
+                    ((h[0].toInt() and 0xFF) shl 8) or (h[1].toInt() and 0xFF)
+                }
+                else -> fail("READY walk: op=$opcode (${codec.serverProtName(opcode)}) has unknown size mode $sizeMode after $readyPackets packet(s)")
+            }
+            if (len > dumpMaxBodyBytes) {
+                fail("READY walk: op=$opcode (${codec.serverProtName(opcode)}) len=$len exceeds maxBodyBytes=$dumpMaxBodyBytes after $readyPackets packet(s)")
+            }
+            val pktBody = tryReadN(input, len)
+                ?: fail("READY walk: missing body for op=$opcode len=$len after $readyPackets packet(s)")
+            readyPackets++
+            readyCounts[opcode] = (readyCounts[opcode] ?: 0) + 1
+            if (readyFirstPackets.size < 80) {
+                readyFirstPackets += "#$readyPackets op=$opcode ${codec.serverProtName(opcode)} len=$len body=${hex(pktBody, minOf(24, pktBody.size))}"
+            }
+            sawReady = opcode == 75
+        }
+        if (!sawReady) {
+            fail("READY walk: SET_READY_FLAG not seen within $readyPackets packet(s); counts=$readyCounts")
+        }
+        fun requireReadyOpcode(opcode: Int, name: String) {
+            if ((readyCounts[opcode] ?: 0) == 0) {
+                fail("READY walk: missing $name (op=$opcode) before SET_READY_FLAG. First packets:\n" +
+                    readyFirstPackets.joinToString("\n"))
+            }
+        }
+        requireReadyOpcode(162, "TriggerOnDialogAbort")
+        requireReadyOpcode(190, "ClearPendingUpdates")
+        requireReadyOpcode(199, "RebuildRegion")
+        requireReadyOpcode(77, "CamUpdate")
+        requireReadyOpcode(52, "NpcInfo")
+        requireReadyOpcode(85, "UpdateInvFull")
+        if ((readyCounts[85] ?: 0) < 7) {
+            fail("READY walk: saw ${readyCounts[85]} UpdateInvFull packet(s), expected at least 7 first-light inventory baselines.")
+        }
+        println("[PROBE OK]   Step 5 READY: walked $readyPackets packet(s) to SET_READY_FLAG; " +
+            "required tail present: op162=${readyCounts[162]} op190=${readyCounts[190]} op199=${readyCounts[199]} " +
+            "op77=${readyCounts[77]} op52=${readyCounts[52]} op85=${readyCounts[85]}.")
+        if (dumpReady) {
+            println("[READY DUMP] first packets:")
+            for (line in readyFirstPackets) println("[READY DUMP]   $line")
+            println("[READY DUMP] counts:")
+            for ((opcode, count) in readyCounts) {
+                println("[READY DUMP]   op=$opcode ${codec.serverProtName(opcode)} count=$count")
+            }
+        }
+
+        if (dumpStream) {
+            sock.soTimeout = dumpTimeoutMillis
+            dumpRemainingStream(input, codec, isaacOut, dumpMaxPackets, dumpMaxBodyBytes)
+        }
     }
 
     println("\n[PROBE PASS] World-login handshake completed end-to-end: 9-byte INIT, GAMELOGIN accepted, " +

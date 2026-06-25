@@ -9,12 +9,16 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.darkan.core.Logger.logError
 import org.darkan.core.Logger.logInfo
+import org.darkan.core.Logger.logWarn
+import org.darkan.core.net.prot.AntiCheatChallenge
 import org.darkan.world.net.NpcInfoBuilder
 import org.darkan.world.net.PlayerInfoBuilder
 import org.darkan.world.net.ZoneBundleBuilder
+import org.darkan.world.entity.Player
 import org.darkan.world.world.Npcs
 import org.darkan.world.world.Players
 import org.darkan.world.world.Zones
+import java.security.SecureRandom
 
 /**
  * Game tick loop driving per-player PLAYER_INFO / NPC_INFO / zone-bundle dispatch.
@@ -37,8 +41,11 @@ import org.darkan.world.world.Zones
 object WorldTick {
     /** Canonical RuneScape tick interval in milliseconds. */
     private const val TICK_INTERVAL_MS = 600L
+    private const val ANTI_CHEAT_INTERVAL_MS = 6_000L
+    private const val ANTI_CHEAT_TIMEOUT_MS = 20_000L
 
     private val tickScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val antiCheatRandom = SecureRandom()
 
     @Volatile
     private var running = false
@@ -90,9 +97,13 @@ object WorldTick {
      * player's session, then clear all pending state.
      */
     private fun runTick() {
+        val now = System.currentTimeMillis()
         Players.forEach { player ->
+            if (!player.readyForTick) return@forEach
             try {
                 val viewport = player.viewport
+
+                queueAntiCheatChallenge(player, now)
 
                 // Zone bundle goes FIRST so the client has the zone-relative state set
                 // up before PLAYER_INFO / NPC_INFO position deltas reference it.
@@ -101,14 +112,8 @@ object WorldTick {
                     player.session.queuePacket(packet)
                 }
 
-                // PLAYER_INFO and NPC_INFO use the init form on the first tick after
-                // login (when the viewport's `firstTick` flag is still set) and the
-                // per-tick incremental form thereafter. The init form is responsible
-                // for clearing `firstTick`.
                 val playerInfo = PlayerInfoBuilder.buildIfNeeded(player)
-                if (playerInfo != null) {
-                    player.session.queuePacket(playerInfo)
-                }
+                if (playerInfo != null) player.session.queuePacket(playerInfo)
                 if (viewport.visibleNpcs.isNotEmpty()) {
                     player.session.queuePacket(NpcInfoBuilder.build(player))
                 }
@@ -121,6 +126,7 @@ object WorldTick {
         // delivery depended on the client's ~1/s keepalive triggering the session loop's
         // post-receive flush — adding up to a second of latency to every sync packet.
         Players.forEach { player ->
+            if (!player.readyForTick) return@forEach
             try {
                 player.session.flushBlocking()
             } catch (e: Exception) {
@@ -131,11 +137,29 @@ object WorldTick {
         // Clear all per-tick pending state AFTER every viewer has been built — global
         // flags like Npc.spawned are read by all viewers' builders during the tick, so
         // they must only be reset here, never inside a per-viewer build.
-        Players.forEach { it.pendingUpdates.clear() }
+        Players.forEach {
+            if (it.readyForTick) it.pendingUpdates.clear()
+        }
         Npcs.forEach {
             it.pendingUpdates.clear()
             it.spawned = false
         }
         Zones.clear()
+    }
+
+    private fun queueAntiCheatChallenge(player: Player, nowMs: Long) {
+        val session = player.session
+        if (session.isAntiCheatChallengeTimedOut(nowMs, ANTI_CHEAT_TIMEOUT_MS)) {
+            logWarn("Anti-cheat challenge timed out for ${player.account.username}@${session.ip}")
+            return
+        }
+        if (!session.canIssueAntiCheatChallenge(nowMs, ANTI_CHEAT_INTERVAL_MS)) return
+
+        val challenge = AntiCheatChallenge(
+            challengeA = antiCheatRandom.nextInt(),
+            challengeB = antiCheatRandom.nextInt(),
+        )
+        session.markAntiCheatChallengePending(challenge, nowMs)
+        session.queuePacket(challenge)
     }
 }

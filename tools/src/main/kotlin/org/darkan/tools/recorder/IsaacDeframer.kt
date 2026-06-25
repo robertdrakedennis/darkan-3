@@ -3,6 +3,8 @@ package org.darkan.tools.recorder
 import org.darkan.core.EnvVars
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.prot.Codec
+import world.gregs.voidps.cache.Cache
+import world.gregs.voidps.cache.config.decoder.ClientVariableParameterDecoder
 
 /**
  * ISAAC post-login deframer for one lobby/world [Connection]. Ports the proven
@@ -59,8 +61,7 @@ class IsaacDeframer(
         run {
             val raw = conn.c2s
             val structuralOffset = parseC2SPrelude(raw, conn, emit)
-            // C2S engagement begins right after the login block; the override is
-            // S2C-centric so we don't apply it here (C2S boundary is structural).
+            // C2S engagement is structural; the override is S2C-centric so we don't apply it here.
             val offset = structuralOffset
             if (offset in 0..raw.size) {
                 val seed = rawSeeds.copyOf() // C2S = raw
@@ -136,6 +137,7 @@ class IsaacDeframer(
         if (serverClientVarBlockLen > 0) {
             val ackFlag = raw[pos].toInt() and 0xFF
             emit(loginEvt(conn, "S2C", "server_client_var_ack", mapOf("flag" to ackFlag)))
+            parseServerClientVarEntries(raw, pos, serverClientVarEnd, conn, emit)
         }
         pos = serverClientVarEnd
 
@@ -148,6 +150,60 @@ class IsaacDeframer(
         emit(loginEvt(conn, "S2C", "world_login_data_len", mapOf("len" to loginDataLen)))
         pos += loginDataLen
         return pos.coerceAtMost(raw.size)
+    }
+
+    private fun parseServerClientVarEntries(
+        raw: ByteArray,
+        start: Int,
+        end: Int,
+        conn: Connection,
+        emit: (String) -> Unit,
+    ) {
+        var pos = start + 1
+        var index = 0
+        while (pos < end) {
+            val entryStart = pos
+            if (pos + 2 > end) {
+                emit(serverClientVarError(conn, index, entryStart, "truncated id"))
+                return
+            }
+            val id = ((raw[pos].toInt() and 0xFF) shl 8) or (raw[pos + 1].toInt() and 0xFF)
+            pos += 2
+            val type = clientVarType(id)
+            when (type) {
+                's' -> {
+                    val valueStart = pos
+                    while (pos < end && raw[pos].toInt() != 0) pos++
+                    if (pos >= end) {
+                        emit(serverClientVarError(conn, index, entryStart, "unterminated string id=$id"))
+                        return
+                    }
+                    val value = String(raw, valueStart, pos - valueStart, Charsets.ISO_8859_1)
+                    pos++
+                    emit(serverClientVarEntry(conn, index, entryStart, id, "string", value, pos - entryStart))
+                }
+                'l' -> {
+                    if (pos + 8 > end) {
+                        emit(serverClientVarError(conn, index, entryStart, "truncated long id=$id"))
+                        return
+                    }
+                    val value = beLong(raw, pos)
+                    pos += 8
+                    emit(serverClientVarEntry(conn, index, entryStart, id, "long", value, pos - entryStart))
+                }
+                else -> {
+                    if (pos + 4 > end) {
+                        emit(serverClientVarError(conn, index, entryStart, "truncated int id=$id type=${type?.code ?: 0}"))
+                        return
+                    }
+                    val value = beInt(raw, pos)
+                    pos += 4
+                    emit(serverClientVarEntry(conn, index, entryStart, id, "int", value, pos - entryStart))
+                }
+            }
+            index++
+        }
+        emit(loginEvt(conn, "S2C", "server_client_var_entries", mapOf("count" to index)))
     }
 
     /**
@@ -164,6 +220,11 @@ class IsaacDeframer(
         val blockSize = ((raw[pos].toInt() and 0xFF) shl 8) or (raw[pos + 1].toInt() and 0xFF); pos += 2
         emit(loginEvt(conn, "C2S", "login_packet", mapOf("opcode" to loginOpcode, "block_size" to blockSize)))
         pos += blockSize
+        if (conn.role == Role.WORLD && pos < raw.size) {
+            val hasExtra = raw[pos].toInt() and 0xFF
+            emit(loginEvt(conn, "C2S", "world_login_has_extra", mapOf("value" to hasExtra)))
+            pos++
+        }
         return pos.coerceAtMost(raw.size)
     }
 
@@ -383,14 +444,58 @@ class IsaacDeframer(
         return Json.obj(*base.entries.map { it.key to it.value }.toTypedArray())
     }
 
+    private fun serverClientVarEntry(
+        conn: Connection,
+        index: Int,
+        atByte: Int,
+        id: Int,
+        type: String,
+        value: Any,
+        encodedSize: Int,
+    ): String = Json.obj(
+        "record" to "server_client_var_entry",
+        "dir" to "S2C",
+        "fd" to conn.fd,
+        "conn" to conn.role.name.lowercase(),
+        "index" to index,
+        "id" to id,
+        "type" to type,
+        "value" to value,
+        "encoded_size" to encodedSize,
+        "at_byte" to atByte,
+    )
+
+    private fun serverClientVarError(conn: Connection, index: Int, atByte: Int, reason: String): String = Json.obj(
+        "record" to "server_client_var_decode_error",
+        "dir" to "S2C",
+        "fd" to conn.fd,
+        "conn" to conn.role.name.lowercase(),
+        "index" to index,
+        "at_byte" to atByte,
+        "reason" to reason,
+    )
+
+    private fun beInt(b: ByteArray, off: Int): Int =
+        ((b[off].toInt() and 0xFF) shl 24) or
+            ((b[off + 1].toInt() and 0xFF) shl 16) or
+            ((b[off + 2].toInt() and 0xFF) shl 8) or
+            (b[off + 3].toInt() and 0xFF)
+
     private fun beLong(b: ByteArray, off: Int): Long {
         var v = 0L
         for (i in 0 until 8) v = (v shl 8) or (b[off + i].toLong() and 0xFF)
         return v
     }
 
+    private fun clientVarType(id: Int): Char? =
+        clientVariableDefinitions.getOrNull(id)?.aChar3210
+
     companion object {
         private const val SERVER_PROT_COUNT = 218
         private const val CLIENT_PROT_COUNT = 256
+
+        private val clientVariableDefinitions by lazy {
+            ClientVariableParameterDecoder().load(Cache.get())
+        }
     }
 }

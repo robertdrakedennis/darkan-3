@@ -14,12 +14,26 @@ import org.darkan.core.Logger.logTrace
 import org.darkan.core.Logger.logWarn
 import world.gregs.voidps.buffer.*
 import world.gregs.voidps.cache.file.FileProvider
+import java.io.EOFException
+import java.util.concurrent.atomic.AtomicInteger
 
 data class JS5Request(val index: Int, val group: Int, val urgent: Boolean, val priority: Int, val ref: Long)
 
 sealed interface JS5QueueItem {
     data class FileRequest(val request: JS5Request) : JS5QueueItem
     data class XorKeyUpdate(val key: Int) : JS5QueueItem
+}
+
+private class JS5ConnectionStats {
+    val requests = AtomicInteger()
+    val urgent = AtomicInteger()
+    val prefetch = AtomicInteger()
+    val served = AtomicInteger()
+    val misses = AtomicInteger()
+    @Volatile var lastIndex = -1
+    @Volatile var lastGroup = -1
+    @Volatile var lastPriority = -1
+    @Volatile var lastUrgent = false
 }
 
 class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
@@ -92,14 +106,26 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
         // blocked urgent requests sitting behind it in the TCP stream. Requests are tiny
         // (a few dozen bytes each), so an unbounded in-memory queue is safe.
         val prefetchChannel = Channel<JS5QueueItem>(Channel.UNLIMITED)
+        val stats = JS5ConnectionStats()
 
-        coroutineScope {
-            val readerJob = launch { reader(input, urgentChannel, prefetchChannel, ip) }
-            val writerJob = launch { writer(output, urgentChannel, prefetchChannel, ip) }
+        try {
+            coroutineScope {
+                val readerJob = launch { reader(input, urgentChannel, prefetchChannel, ip, stats) }
+                val writerJob = launch { writer(output, urgentChannel, prefetchChannel, ip, stats) }
 
-            // When either coroutine finishes (normally or exceptionally), cancel the other
-            readerJob.invokeOnCompletion { writerJob.cancel() }
-            writerJob.invokeOnCompletion { readerJob.cancel() }
+                readerJob.invokeOnCompletion { cause ->
+                    if (cause != null) {
+                        writerJob.cancel()
+                    }
+                }
+                writerJob.invokeOnCompletion { readerJob.cancel() }
+            }
+        } finally {
+            logInfo(
+                "JS5 session ended for $ip: requests=${stats.requests.get()} urgent=${stats.urgent.get()} prefetch=${stats.prefetch.get()} " +
+                    "served=${stats.served.get()} misses=${stats.misses.get()} last=${stats.lastIndex}/${stats.lastGroup} " +
+                    "pri=${stats.lastPriority} ${if (stats.lastUrgent) "urgent" else "prefetch"}"
+            )
         }
     }
 
@@ -107,7 +133,8 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
         input: ByteReadChannel,
         urgentChannel: Channel<JS5QueueItem>,
         prefetchChannel: Channel<JS5QueueItem>,
-        ip: String
+        ip: String,
+        stats: JS5ConnectionStats
     ) {
         var requestCount = 0
         var lastRequestTime = System.currentTimeMillis()
@@ -137,9 +164,16 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
                         val index = input.readByte().toInt() and 0xFF
                         val group = input.readInt()
                         input.readInt() // padding
-                        // DIAGNOSTIC (JS5 stall): INFO-level so post-master-index content requests
-                        // on the persistent TCP socket are visible without enabling FINEST.
-                        logInfo("JS5 request: index=$index group=$group opcode=$opcode (${if (urgent) "urgent" else "prefetch"} pri=$priority) from $ip")
+                        stats.requests.incrementAndGet()
+                        if (urgent) stats.urgent.incrementAndGet() else stats.prefetch.incrementAndGet()
+                        stats.lastIndex = index
+                        stats.lastGroup = group
+                        stats.lastPriority = priority
+                        stats.lastUrgent = urgent
+                        if (requestCount <= 20 || requestCount % 1000 == 0) {
+                            logInfo("JS5 processed $requestCount requests from $ip (latest index=$index group=$group ${if (urgent) "urgent" else "prefetch"} pri=$priority)")
+                        }
+                        logFinest("JS5 request: index=$index group=$group opcode=$opcode (${if (urgent) "urgent" else "prefetch"} pri=$priority) from $ip")
                         val ref = (index.toLong() shl 32) or (group.toLong() and 0xFFFFFFFFL)
                         val request = JS5Request(index, group, urgent, priority, ref)
                         val item = JS5QueueItem.FileRequest(request)
@@ -187,6 +221,10 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
                     }
                 }
             }
+        } catch (e: EOFException) {
+            logFinest("JS5 input closed from $ip")
+        } catch (e: ClosedReadChannelException) {
+            logFinest("JS5 input closed from $ip")
         } finally {
             urgentChannel.close()
             prefetchChannel.close()
@@ -197,7 +235,8 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
         output: ByteWriteChannel,
         urgentChannel: Channel<JS5QueueItem>,
         prefetchChannel: Channel<JS5QueueItem>,
-        ip: String
+        ip: String,
+        stats: JS5ConnectionStats
     ) {
         var xorKey = 0
 
@@ -205,13 +244,13 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
             // Drain all available urgent items first
             while (true) {
                 val item = urgentChannel.tryReceive().getOrNull() ?: break
-                xorKey = processItem(item, output, xorKey, ip)
+                xorKey = processItem(item, output, xorKey, ip, stats)
             }
 
             // Try a prefetch item
             val prefetchItem = prefetchChannel.tryReceive().getOrNull()
             if (prefetchItem != null) {
-                xorKey = processItem(prefetchItem, output, xorKey, ip)
+                xorKey = processItem(prefetchItem, output, xorKey, ip, stats)
                 continue
             }
 
@@ -229,11 +268,11 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
                 // Both channels closed
                 return
             }
-            xorKey = processItem(item, output, xorKey, ip)
+            xorKey = processItem(item, output, xorKey, ip, stats)
         }
     }
 
-    private suspend fun processItem(item: JS5QueueItem, output: ByteWriteChannel, xorKey: Int, ip: String): Int {
+    private suspend fun processItem(item: JS5QueueItem, output: ByteWriteChannel, xorKey: Int, ip: String, stats: JS5ConnectionStats): Int {
         return when (item) {
             is JS5QueueItem.XorKeyUpdate -> {
                 item.key
@@ -242,7 +281,10 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
                 val req = item.request
                 val ok = provider.serve(output, req.ref, prefetch = !req.urgent, xorKey = xorKey)
                 if (!ok) {
+                    stats.misses.incrementAndGet()
                     logWarn("JS5 miss: index=${req.index} group=${req.group} from $ip")
+                } else {
+                    stats.served.incrementAndGet()
                 }
                 xorKey
             }

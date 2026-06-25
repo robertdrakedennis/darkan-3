@@ -11,7 +11,7 @@ class WorldlistFetchHandler : PacketHandler<Session, RequestWorldList> {
     override suspend fun handle(player: Session, packet: RequestWorldList) {
         val wl = LobbyState.worldList
         val needsRefresh = packet.worldlistVersion != wl.revision
-        logInfo("WORLDLIST_FETCH from ${player.ip}: clientRev=${packet.worldlistVersion}, serverRev=${wl.revision}, fullRefresh=$needsRefresh")
-        player.send(WorldListPacket(wl, fullRefresh = needsRefresh))
+        logInfo("WORLDLIST_FETCH from ${player.ip}: clientRev=${packet.worldlistVersion}, serverRev=${wl.revision}, stale=$needsRefresh")
+        player.send(WorldListPacket(wl, fullRefresh = true))
     }
 }

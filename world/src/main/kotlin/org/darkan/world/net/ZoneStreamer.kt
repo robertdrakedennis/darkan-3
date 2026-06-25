@@ -18,8 +18,7 @@ import org.darkan.world.world.Viewport
  * zone packets. With **no** zone stream the graph stays empty, the phase never advances, and the
  * client black-screens after world login while emitting **zero** C2S. (op81 builds the world +
  * positions the camera and JS5/cache are healthy — both settled; the scene stream was the missing
- * piece.) Production streams **616 op78 + 64 op76 before the client sends a single byte back**, and
- * op5 SceneGraphReport's payload grows as the zones register.
+ * piece.) Latest production streams **606 op78** before the HUD root commit.
  *
  * ## Scene window + base origin (empirically derived; byte-exact vs the production capture)
  *
@@ -45,12 +44,7 @@ object ZoneStreamer {
     /** Half-extent of the render scene in zones: a `2*RADIUS+1` = 13-zone (104-tile) square. */
     const val SCENE_RADIUS_ZONES: Int = 6
 
-    /**
-     * Scene planes streamed (0–3). Production streams level 0 as a full 13×13 (169 zones) and the
-     * upper levels only for content-bearing zones (167/153/127); we stream all four planes fully —
-     * a harmless superset, since op78 is a bare zone registration (no map data; the terrain is
-     * client-fetched from the local cache) and the client renders nothing for an empty upper floor.
-     */
+    /** Scene planes streamed (0–3). */
     const val SCENE_PLANES: Int = 4
 
     /**
@@ -71,15 +65,52 @@ object ZoneStreamer {
         for (level in 0 until SCENE_PLANES) {
             for (zoneX in (centreZoneX - SCENE_RADIUS_ZONES)..(centreZoneX + SCENE_RADIUS_ZONES)) {
                 for (zoneZ in (centreZoneZ - SCENE_RADIUS_ZONES)..(centreZoneZ + SCENE_RADIUS_ZONES)) {
-                    session.send(
-                        UpdateZoneFullFollowsV2(
-                            level = level,
-                            zoneX = zoneX - baseZoneX,
-                            zoneY = zoneZ - baseZoneZ,
+                    val localX = zoneX - baseZoneX
+                    val localY = zoneZ - baseZoneZ
+                    if (shouldStream(level, localX - 16, localY - 16)) {
+                        session.send(
+                            UpdateZoneFullFollowsV2(
+                                level = level,
+                                zoneX = localX,
+                                zoneY = localY,
+                            )
                         )
-                    )
+                        for (packet in FirstLightSceneBootstrap.packets(level, localX, localY)) {
+                            session.send(packet)
+                        }
+                    }
                 }
             }
         }
     }
+
+    internal fun shouldStream(level: Int, relativeX: Int, relativeY: Int): Boolean = when (level) {
+        0, 1 -> true
+        2 -> (relativeX to relativeY) !in LEVEL_2_OMIT
+        3 -> (relativeX to relativeY) !in LEVEL_3_OMIT
+        else -> false
+    }
+
+    private val LEVEL_2_OMIT = setOf(
+        -6 to -2,
+        -5 to -2, -5 to -1, -5 to 0, -5 to 1, -5 to 3, -5 to 4,
+        -4 to -3, -4 to -2, -4 to -1, -4 to 0, -4 to 1, -4 to 6,
+        3 to 5, 3 to 6,
+        4 to 5, 4 to 6,
+        5 to 5, 5 to 6,
+    )
+
+    private val LEVEL_3_OMIT = setOf(
+        -6 to -2, -6 to 1, -6 to 2, -6 to 3, -6 to 4,
+        -5 to -2, -5 to -1, -5 to 0, -5 to 1, -5 to 2, -5 to 3, -5 to 4,
+        -4 to -3, -4 to -2, -4 to -1, -4 to 0, -4 to 1, -4 to 6,
+        -2 to 1, -2 to 4,
+        -1 to 1, -1 to 4,
+        0 to -3, 0 to 1, 0 to 3, 0 to 4,
+        1 to 3, 1 to 4,
+        2 to 1, 2 to 3, 2 to 4,
+        3 to 0, 3 to 1, 3 to 3, 3 to 4, 3 to 5, 3 to 6,
+        4 to 0, 4 to 1, 4 to 3, 4 to 4, 4 to 5, 4 to 6,
+        5 to -2, 5 to -1, 5 to 0, 5 to 1, 5 to 2, 5 to 3, 5 to 4, 5 to 6,
+    )
 }

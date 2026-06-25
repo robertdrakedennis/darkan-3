@@ -177,6 +177,12 @@ object PlayerInfoBuilder {
         return if (hasTickUpdate(player)) build(player) else null
     }
 
+    fun buildWorldEntrySync(player: Player): PlayerInfo {
+        player.appearance.ensureCachedBytes()
+        player.viewport.firstTick = false
+        return build(player)
+    }
+
     /**
      * Per-tick incremental form. Per A4 §"4A — Pass Structure" the bit-packed body has four
      * passes, filtering each list by the `+0x27` (active) flag:
@@ -280,18 +286,49 @@ object PlayerInfoBuilder {
         activeFilter: Boolean,
         flaggedForExtInfo: MutableList<Int>,
     ) {
+        var skipRun = 0
         for (slot in indices) {
-            val target = Players.get(slot) ?: continue
-            val matches = if (activeFilter) target.active else !target.active
+            val target = Players.get(slot)
+            val matches = target?.let { if (activeFilter) it.active else !it.active } ?: activeFilter
             if (!matches) continue
 
-            val needsUpdate = needsAnyUpdate(viewer, target)
+            val needsUpdate = target != null && needsAnyUpdate(viewer, target)
             if (needsUpdate) {
+                writeStationarySkipRun(out, skipRun)
+                skipRun = 0
                 out.writeBits(1, 1)
                 encodeLowResPosition(out, target, flaggedForExtInfo)
             } else {
-                out.writeBits(1, 0)
-                out.writeBits(2, 0)
+                skipRun++
+            }
+        }
+        writeStationarySkipRun(out, skipRun)
+    }
+
+    private fun writeStationarySkipRun(out: BufferWriter, count: Int) {
+        var remaining = count
+        while (remaining > 0) {
+            val following = minOf(remaining - 1, 2047)
+            out.writeBits(1, 0)
+            writeStationarySkipCount(out, following)
+            remaining -= following + 1
+        }
+    }
+
+    private fun writeStationarySkipCount(out: BufferWriter, count: Int) {
+        when {
+            count == 0 -> out.writeBits(2, 0)
+            count < 32 -> {
+                out.writeBits(2, 1)
+                out.writeBits(5, count)
+            }
+            count < 256 -> {
+                out.writeBits(2, 2)
+                out.writeBits(8, count)
+            }
+            else -> {
+                out.writeBits(2, 3)
+                out.writeBits(11, count)
             }
         }
     }
@@ -350,7 +387,7 @@ object PlayerInfoBuilder {
      *    (mask 0x01), byte 1 bit 6 (mask 0x40), byte 2 bit 2 (mask 0x04).
      *  * Per-flag block in fixed processing order (ascending [PlayerUpdateMaskKey.order]).
      *    Encoders dispatched via [PlayerUpdateMaskEncoder] (registered in
-     *    `Rev947ServerCodecsUpdateMasks.kt`).
+     *    `Rev948ServerCodecsUpdateMasks.kt`).
      *
      * For the local player's first-tick render we synthesise an APPEARANCE block from
      * [Player.appearance.cachedBytes] (built once at Player creation) and include it in the

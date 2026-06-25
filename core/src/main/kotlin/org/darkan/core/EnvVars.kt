@@ -36,6 +36,9 @@ object EnvVars {
     val minorVersion: Int = dotenv.get("MINOR_VERSION", "1").toInt()
     val cacheThreadUsage: Double = dotenv.get("CACHE_THREAD_USAGE", "1.0").toDouble()
     val configHttpPort: Int = dotenv.get("CONFIG_HTTP_PORT", "8829").toInt()
+    // Host advertised to the client in jav_config (codebase/param URLs, lobby host param).
+    // Default is localhost so local-dev behavior is unchanged.
+    val configPublicHost: String = dotenv.get("CONFIG_PUBLIC_HOST", "localhost")
     val clientBinaryPath: String = dotenv.get("CLIENT_BINARY_PATH", "./data/client/rs2client")
     val logLevel: String = dotenv.get("LOG_LEVEL", "TRACE")
     val packetQueueCapacity: Int = dotenv.get("PACKET_QUEUE_CAPACITY", "100").toInt()
@@ -75,7 +78,7 @@ object EnvVars {
     val worldLoginTokenTtlMs: Long = dotenv.get("WORLD_LOGIN_TOKEN_TTL_MS", "1800000").toLong()  // 30 minutes
 
     // World server identity (used by world module to register with lobby)
-    val worldId: Int = dotenv.get("WORLD_ID", "300").toInt()
+    val worldId: Int = dotenv.get("WORLD_ID", "34").toInt()
     val worldName: String = dotenv.get("WORLD_NAME", "Darkan")
     val worldHost: String = dotenv.get("WORLD_HOST", "localhost")
     val worldPublicHost: String = dotenv.get("WORLD_PUBLIC_HOST", worldHost)
@@ -83,7 +86,7 @@ object EnvVars {
     val worldMembers: Boolean = dotenv.get("WORLD_MEMBERS", "true").toBooleanStrict()
     val worldQuickChat: Boolean = dotenv.get("WORLD_QUICKCHAT", "false").toBooleanStrict()
     val worldPvp: Boolean = dotenv.get("WORLD_PVP", "false").toBooleanStrict()
-    val worldLootShare: Boolean = dotenv.get("WORLD_LOOTSHARE", "true").toBooleanStrict()
+    val worldLootShare: Boolean = dotenv.get("WORLD_LOOTSHARE", "false").toBooleanStrict()
     val worldCountry: String = dotenv.get("WORLD_COUNTRY", "USA")
     val worldHighlighted: Boolean = dotenv.get("WORLD_HIGHLIGHTED", "false").toBooleanStrict()
 

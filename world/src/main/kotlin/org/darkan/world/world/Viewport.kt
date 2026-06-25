@@ -80,4 +80,14 @@ class Viewport(val owner: Player) {
 
     /** First-tick init flag — must send the init-form PlayerInfo with 18-bit region hashes. */
     var firstTick: Boolean = true
+
+    fun resetAfterGpiPrefix(localIndex: Int) {
+        require(localIndex in 1 until cachedApprHashes.size)
+        highResIndices.clear()
+        highResIndices.add(localIndex)
+        lowResIndices.clear()
+        for (slot in 1 until cachedApprHashes.size) {
+            if (slot != localIndex) lowResIndices.add(slot)
+        }
+    }
 }

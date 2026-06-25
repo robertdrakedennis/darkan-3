@@ -12,6 +12,7 @@ import world.gregs.voidps.type.Tile
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -59,7 +60,7 @@ class PlayerInfoBuilderInitTest {
         )
         val player = Player(index = 0, account = account, session = session)
         allocatedIndex = Players.allocate(player) { idx -> player.index = idx }
-        player.viewport.highResIndices[0] = allocatedIndex
+        player.viewport.resetAfterGpiPrefix(allocatedIndex)
         player.tile = spawn
         return player
     }
@@ -91,20 +92,13 @@ class PlayerInfoBuilderInitTest {
         assertEquals(centreZoneX, Tile.x(tileId) shr 3, "GPI tile zone X == op81 centre zone X")
         assertEquals(centreZoneZ, Tile.y(tileId) shr 3, "GPI tile zone Z == op81 centre zone Z")
 
-        // No appearance blob exists on a fresh account → hasExtInfo=0 and no ext-info blocks
-        // (we never fabricate the undocumented appearance payload). firstTick flag is set.
-        assertEquals(0, hasExtInfo, "no appearance blob → hasExtInfo must be 0 (no fabricated payload)")
-        assertTrue(info.extendedInfo.isEmpty(), "no ext-info blocks emitted without a real appearance")
+        assertEquals(1, hasExtInfo, "fresh account has a default appearance payload")
+        assertEquals(1, info.extendedInfo.size, "default appearance emits one ext-info block")
         assertTrue(info.firstTick, "buildInit marks PlayerInfo.firstTick = true")
     }
 
     @Test
-    fun `tick-1 emits no op22 once firstTick is cleared (Shape B GPI suppression)`() {
-        // docs/protocol/world-ingame-transition-948.md §8 task #4 / §7: under Shape B, op81's prefix
-        // IS the world-entry GPI, so WorldServer clears viewport.firstTick at login. The first
-        // WorldTick must then emit NO standalone op22 (a second init would double-GPI the already-
-        // placed list). This proves buildIfNeeded() — the exact call WorldTick makes — returns null
-        // for a fresh player once firstTick is cleared, i.e. tick 1 sends no PlayerInfo.
+    fun `tick-1 emits per-tick appearance sync once firstTick is cleared`() {
         val player = newPlayer(Tile(3200, 3200, 0))
 
         // Sanity: with firstTick still set (the un-suppressed default), tick 1 WOULD emit an init op22.
@@ -112,14 +106,26 @@ class PlayerInfoBuilderInitTest {
         val withInit = PlayerInfoBuilder.buildIfNeeded(player)
         assertNotNull(withInit, "with firstTick set, buildIfNeeded returns the GPI init (would be op22)")
 
-        // buildInit cleared firstTick; re-clear defensively to model WorldServer's explicit
-        // suppression, then confirm a fresh player produces NO further PlayerInfo on the next tick.
+        player.viewport.cachedApprHashes[player.index] = null
         player.viewport.firstTick = false
-        val suppressed = PlayerInfoBuilder.buildIfNeeded(player)
-        assertNull(
-            suppressed,
-            "with firstTick cleared and no pending updates/appearance, tick-1 emits no op22",
-        )
+        val sync = PlayerInfoBuilder.buildIfNeeded(player)
+        assertNotNull(sync, "with firstTick cleared, undelivered appearance emits per-tick op22")
+        assertEquals(1, sync.extendedInfo.size)
+
+        val afterAppearance = PlayerInfoBuilder.buildIfNeeded(player)
+        assertNull(afterAppearance, "after appearance delivery, no-op tick emits no PlayerInfo")
+    }
+
+    @Test
+    fun `world-entry sync starts with production local appearance shape`() {
+        val player = newPlayer(Tile(3200, 3200, 0))
+
+        val info = PlayerInfoBuilder.buildWorldEntrySync(player)
+
+        assertContentEquals(byteArrayOf(0xC7.toByte(), 0xFF.toByte(), 0x40), info.bitBlock)
+        assertEquals(1, info.extendedInfo.size)
+        assertTrue(!info.firstTick)
+        assertTrue(!player.viewport.firstTick)
     }
 
     @Test

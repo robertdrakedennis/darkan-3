@@ -17,12 +17,15 @@ class GameSession(
 ) : Session(write, isaacIn, isaacOut, ip, codec) {
     var pendingAntiCheatChallenge: AntiCheatChallenge? = null
         private set
+    var lobbyWorldSwitchSent: Boolean = false
 
     private var pendingAntiCheatChallengeSentAtMs: Long = 0L
+    private var lastAntiCheatChallengeSentAtMs: Long = System.currentTimeMillis()
 
     fun markAntiCheatChallengePending(challenge: AntiCheatChallenge, sentAtMs: Long) {
         pendingAntiCheatChallenge = challenge
         pendingAntiCheatChallengeSentAtMs = sentAtMs
+        lastAntiCheatChallengeSentAtMs = sentAtMs
     }
 
     fun clearAntiCheatChallenge() {
@@ -32,4 +35,8 @@ class GameSession(
 
     fun isAntiCheatChallengeTimedOut(nowMs: Long, timeoutMs: Long): Boolean =
         pendingAntiCheatChallenge != null && nowMs - pendingAntiCheatChallengeSentAtMs > timeoutMs
+
+    fun canIssueAntiCheatChallenge(nowMs: Long, intervalMs: Long): Boolean =
+        pendingAntiCheatChallenge == null &&
+            nowMs - lastAntiCheatChallengeSentAtMs >= intervalMs
 }

@@ -179,6 +179,11 @@ fun main() {
         val configRaw = readJS5Response(input)
         println("  Raw container size: ${configRaw.size} bytes")
         println("  First 20 bytes: ${configRaw.copyOfRange(0, minOf(20, configRaw.size)).toHex()}")
+        if (!JS5Protocol.hasGroupVersionSuffix(2, configRaw)) {
+            pass("Config response is a bare JS5 container")
+        } else {
+            fail("Config response includes a 2-byte group version suffix")
+        }
         val configHeaderReader = BufferReader(configRaw)
         val configCompression = configHeaderReader.readUnsignedByte()
         val configCompressedSize = configHeaderReader.readInt()

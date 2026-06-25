@@ -101,17 +101,18 @@ internal fun Codec.registerRev948ServerCodecsZone() {
     // Standalone sub-packet encoders (presumed byte-equivalent to 947-3)
     // -----------------------------------------------------------------------
 
-    // LOC_ADD (op 90 in 948, was op 79). Wire: g1_neg packedCoord; g4_alt1 locId; g1 shapeFlags.
+    // LOC_ADD (op 90 in 948, was op 79). Wire: g1 packedCoord; g4_alt1 locId; g1 shapeFlags-128.
     serverProt<LocAdd>(opcode = 90, size = ProtSize.VarByte) { out ->
-        out.writeByteInverse(packedCoord)
+        out.writeByte(packedCoord)
         out.writeIntLittle(locId)
-        out.writeByte(shapeFlags)
+        out.writeByte(shapeFlags - 128)
+        extra?.let { out.writeByte(it) }
     }
 
-    // LOC_DEL (op 16, 2B). Wire: g1s shapeFlags_signed; g1_sub128 packedCoord.
+    // LOC_DEL (op 16, 2B). Wire: g1(-128-shapeFlags); g1_neg packedCoord.
     serverProt<LocDel>(opcode = 16, size = 2) { out ->
-        out.writeByte(shapeFlags)
-        out.writeByteInverse(packedCoord + 128)
+        out.writeByte(-128 - shapeFlags)
+        out.writeByteInverse(packedCoord)
     }
 
     // LOC_CUSTOMISE (op 50, varByte). Opaque payload.
@@ -144,13 +145,12 @@ internal fun Codec.registerRev948ServerCodecsZone() {
         out.writeByte(packedCoordAndShape)
     }
 
-    // OBJ_ADD (op 46, 5B). Wire: g1 objIdHi; g1+128 objIdLo; g1 countHi; g1 countLo; g1 packedCoord.
+    // OBJ_ADD (op 46, 5B). Wire: g1 packedCoord; g2 objId; g1 countHi; g1 countLo-128.
     serverProt<ObjAdd>(opcode = 46, size = 5) { out ->
-        out.writeByte(objIdHi)
-        out.writeByteAdd(objIdLo)
-        out.writeByte(countHi)
-        out.writeByte(countLo)
         out.writeByte(packedCoord)
+        out.writeShort(objId)
+        out.writeByte(count ushr 8)
+        out.writeByte((count and 0xFF) - 128)
     }
 
     // OBJ_DEL (op 107, 3B). Wire: g1_neg packedCoord; g1+128 objIdLo; g1 objIdHi.

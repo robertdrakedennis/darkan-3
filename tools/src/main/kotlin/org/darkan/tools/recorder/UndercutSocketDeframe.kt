@@ -465,6 +465,7 @@ private object PcapSocketEventExtractor {
         val key: Key,
         val epochMs: Long,
         val direction: String,
+        val seq: Long,
         val payload: ByteArray,
     )
 
@@ -489,7 +490,8 @@ private object PcapSocketEventExtractor {
 
         val events = ArrayList<UndercutSocketEvent>()
         var syntheticLine = SYNTHETIC_LINE_BASE
-        for ((key, connPackets) in grouped) {
+        for ((key, rawConnPackets) in grouped) {
+            val connPackets = reassembleConnection(rawConnPackets)
             if (!keepConnection(key, connPackets, opts)) continue
             val first = connPackets.first()
             val last = connPackets.last()
@@ -576,6 +578,8 @@ private object PcapSocketEventExtractor {
             "-e",
             "tcp.dstport",
             "-e",
+            "tcp.seq_raw",
+            "-e",
             "tcp.payload",
         )
         val process = ProcessBuilder(command)
@@ -589,21 +593,47 @@ private object PcapSocketEventExtractor {
         return packets
     }
 
+    private fun reassembleConnection(packets: List<Packet>): List<Packet> {
+        val client = reassembleDirection(packets.filter { it.direction == "C" })
+        val server = reassembleDirection(packets.filter { it.direction == "S" })
+        return client + server
+    }
+
+    private fun reassembleDirection(packets: List<Packet>): List<Packet> {
+        val result = ArrayList<Packet>()
+        var nextSeq: Long? = null
+        for (packet in packets.sortedWith(compareBy({ it.seq }, { it.epochMs }))) {
+            val expected = nextSeq
+            val payloadStart = packet.seq
+            val payloadEnd = payloadStart + packet.payload.size
+            if (expected == null || payloadEnd > expected) {
+                val overlap = if (expected == null) 0 else (expected - payloadStart).coerceAtLeast(0).toInt()
+                val payload = if (overlap == 0) packet.payload else packet.payload.copyOfRange(overlap, packet.payload.size)
+                if (payload.isNotEmpty()) {
+                    result.add(packet.copy(payload = payload, seq = payloadStart + overlap))
+                }
+                nextSeq = payloadEnd
+            }
+        }
+        return result
+    }
+
     private fun parseTsharkRow(line: String, opts: UndercutSocketDeframeOptions): Packet? {
         val fields = line.split('|')
-        if (fields.size < 6) return null
+        if (fields.size < 7) return null
         val epochMs = ((fields[0].toDoubleOrNull() ?: return null) * 1000.0).toLong()
         val src = fields[1]
         val srcPort = fields[2].toIntOrNull() ?: return null
         val dst = fields[3]
         val dstPort = fields[4].toIntOrNull() ?: return null
-        val payload = decodeHex(fields[5]).takeIf { it.isNotEmpty() } ?: return null
+        val seq = fields[5].toLongOrNull() ?: return null
+        val payload = decodeHex(fields[6]).takeIf { it.isNotEmpty() } ?: return null
 
         val srcIsLocal = srcPort >= 49152 && dstPort in opts.pcapPorts
         val dstIsLocal = dstPort >= 49152 && srcPort in opts.pcapPorts
         return when {
-            srcIsLocal -> Packet(Key(src, srcPort, dst, dstPort), epochMs, "C", payload)
-            dstIsLocal -> Packet(Key(dst, dstPort, src, srcPort), epochMs, "S", payload)
+            srcIsLocal -> Packet(Key(src, srcPort, dst, dstPort), epochMs, "C", seq, payload)
+            dstIsLocal -> Packet(Key(dst, dstPort, src, srcPort), epochMs, "S", seq, payload)
             else -> null
         }
     }

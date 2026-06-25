@@ -19,7 +19,7 @@ import world.gregs.voidps.buffer.*
  *  - 947-3 op 188 (REBUILD_WORLDENTITY) → **948 op 186** — handler @ 0x000efd80
  *    (0xff-terminator loop pattern confirmed).
  *
- * Body encoding is unchanged vs `Rev947ServerCodecsRebuild.kt` — only the opcode numbers differ.
+ * Body encoding is unchanged from the prior revision — only the opcode numbers differ.
  */
 internal fun Codec.registerRev948ServerCodecsRebuild() {
     // REBUILD_NORMAL_SIMPLE (op 81 in 948, was op 90 in 947-3) — the world-login scene build.
@@ -72,16 +72,41 @@ internal fun Codec.registerRev948ServerCodecsRebuild() {
         out.writeInt(packedCoordB)               // +14 NE-corner packed coord (BE)
     }
 
-    // REBUILD_REGION (op 199 in 948, was op 172 in 947-3) — multi-scene grid for INSTANCED regions.
-    // Opaque payload until a structured API is needed. Note: 948 stub names call this REBUILD_NORMAL
-    // but the Kotlin data class keeps the structural name RebuildRegion.
+    // REBUILD_REGION (op 199 in 948, was op 172 in 947-3) — multi-scene grid form.
+    // 948 stub names call this REBUILD_NORMAL, but the Kotlin data class keeps the structural name.
     serverProt<RebuildRegion>(opcode = 199, size = ProtSize.VarShort) { out ->
-        out.writeFully(payload)
+        out.writeByte(scenes.size)
+        for (scene in scenes) {
+            out.writeRebuildRegionScene(scene)
+        }
     }
 
     // REBUILD_WORLDENTITY (op 186 in 948, was op 188 in 947-3) — triple-nested -1-terminated XTEA stream.
     // Opaque payload until a structured API is needed; minimum 1-byte form is `0xFF`.
     serverProt<RebuildWorldEntity>(opcode = 186, size = ProtSize.VarShort) { out ->
         out.writeFully(payload)
+    }
+}
+
+private suspend fun ByteWriteChannel.writeRebuildRegionScene(scene: RebuildRegionScene) {
+    writeInt(scene.sceneId)
+    writeByte(scene.primaryIds.size)
+    for (id in scene.primaryIds) {
+        writeInt(id)
+    }
+    writeByte(scene.secondaryIds.size)
+    for (id in scene.secondaryIds) {
+        writeInt(id)
+    }
+    for (rowIndex in scene.primaryIds.indices) {
+        writeByte(scene.primaryMetadata[rowIndex])
+        for (value in scene.matrix[rowIndex]) {
+            if (value == null) {
+                writeByte(0)
+            } else {
+                writeByte(1)
+                writeInt(value)
+            }
+        }
     }
 }

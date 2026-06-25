@@ -8,7 +8,6 @@ package org.darkan.core.net.prot.update
  * for header use, displacing the 947-3 data slots). To keep revision-specific tables out of
  * shared code, each revision provides its own table of `PlayerUpdateMaskKey` instances:
  *
- *  * `rev947/Rev947PlayerUpdateMaskKey.kt` — the 947-3 layout (was the old global enum).
  *  * `rev948/Rev948PlayerUpdateMaskKey.kt` — the 948 layout, per the Phase 1 delta doc.
  *
  * `PlayerUpdateMaskEncoder` is keyed by this interface (not by enum identity), so encoders

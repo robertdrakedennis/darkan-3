@@ -129,7 +129,14 @@ tasks.register<JavaExec>("worldLoginProbe") {
     workingDir = rootProject.projectDir
     providers.gradleProperty("worldHost").orNull?.let { systemProperty("worldHost", it) }
     providers.gradleProperty("worldPort").orNull?.let { systemProperty("worldPort", it) }
+    providers.gradleProperty("lobbyPort").orNull?.let { systemProperty("lobbyPort", it) }
     providers.gradleProperty("probeUser").orNull?.let { systemProperty("probeUser", it) }
+    providers.gradleProperty("probePass").orNull?.let { systemProperty("probePass", it) }
+    providers.gradleProperty("dumpStream").orNull?.let { systemProperty("dumpStream", it) }
+    providers.gradleProperty("dumpReady").orNull?.let { systemProperty("dumpReady", it) }
+    providers.gradleProperty("dumpMaxPackets").orNull?.let { systemProperty("dumpMaxPackets", it) }
+    providers.gradleProperty("dumpTimeoutMillis").orNull?.let { systemProperty("dumpTimeoutMillis", it) }
+    providers.gradleProperty("dumpMaxBodyBytes").orNull?.let { systemProperty("dumpMaxBodyBytes", it) }
 }
 
 // The capture gates need the (gitignored) capture/ directory. On machines without capture

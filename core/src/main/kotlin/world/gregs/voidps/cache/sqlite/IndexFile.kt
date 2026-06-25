@@ -25,6 +25,7 @@ class IndexFile(path: Path) : Closeable {
     private val connection: Connection = DriverManager.getConnection("jdbc:sqlite:$path")
     private val getRawStatement: PreparedStatement
     private val getLengthStatement: PreparedStatement
+    private val getVersionStatement: PreparedStatement
 
     /** Ref table bytes cached after first load - read once at startup, served many times. */
     private var refTable: ByteArray? = null
@@ -41,6 +42,7 @@ class IndexFile(path: Path) : Closeable {
             ).use { it.executeUpdate() }
             getRawStatement = connection.prepareStatement("SELECT DATA FROM cache WHERE KEY = ?")
             getLengthStatement = connection.prepareStatement("SELECT LENGTH(DATA) FROM cache WHERE KEY = ?")
+            getVersionStatement = connection.prepareStatement("SELECT VERSION FROM cache WHERE KEY = ?")
         } catch (e: SQLException) {
             try {
                 connection.close()
@@ -82,6 +84,17 @@ class IndexFile(path: Path) : Closeable {
         }
     }
 
+    fun getVersion(id: Int): Int? = synchronized(lock) {
+        try {
+            getVersionStatement.setInt(1, id)
+            getVersionStatement.executeQuery().use { result ->
+                if (result.next()) result.getInt(1) else null
+            }
+        } catch (e: SQLException) {
+            null
+        }
+    }
+
     fun getRawTable(): ByteArray? = synchronized(lock) {
         val cached = refTable
         if (cached != null) {
@@ -98,6 +111,18 @@ class IndexFile(path: Path) : Closeable {
         }
         refTable = data
         data
+    }
+
+    fun getRawTableVersion(): Int? = synchronized(lock) {
+        try {
+            connection.prepareStatement("SELECT VERSION FROM cache_index WHERE KEY = 1").use { stmt ->
+                stmt.executeQuery().use { result ->
+                    if (result.next()) result.getInt(1) else null
+                }
+            }
+        } catch (e: SQLException) {
+            null
+        }
     }
 
     fun getMaxArchive(): Int = synchronized(lock) {
@@ -234,6 +259,7 @@ class IndexFile(path: Path) : Closeable {
         try {
             getRawStatement.close()
             getLengthStatement.close()
+            getVersionStatement.close()
             connection.close()
         } catch (e: SQLException) {
             logError("Failed to close index file", e)

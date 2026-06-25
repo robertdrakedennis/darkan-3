@@ -2,7 +2,7 @@ package org.darkan.core.net.prot.update
 
 /**
  * Process-global registry of the currently-active set of well-known mask keys for the loaded
- * revision. Set once during codec registration (see `Rev947Codec` / `Rev948Codec`).
+ * revision. Set once during codec registration (see `Rev948Codec`).
  *
  * This exists because a handful of world-side builders need to refer to specific mask blocks
  * by NAME (e.g., "the APPEARANCE block") rather than by enum identity — and those names

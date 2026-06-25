@@ -8,7 +8,6 @@ package org.darkan.core.net.prot.update
  * substantially shuffled vs 947-3). To keep revision-specific tables out of shared code, each
  * revision provides its own table of `NpcUpdateMaskKey` instances:
  *
- *  * `rev947/Rev947NpcUpdateMaskKey.kt` — the 947-3 layout (was the old global enum).
  *  * `rev948/Rev948NpcUpdateMaskKey.kt` — the 948 layout, per the Phase 1 delta doc.
  *
  * `NpcUpdateMaskEncoder` is keyed by this interface so encoders from any revision can register

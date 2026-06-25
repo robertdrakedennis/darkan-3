@@ -216,7 +216,7 @@ fun main() {
             when {
                 recovered == null -> fail("serve(${sampleGroup.name}, prefetch=$prefetch): deframing failed (framing malformed)")
                 recovered.contentEquals(original) ->
-                    pass("serve(${sampleGroup.name}, prefetch=$prefetch): ${framed.size}B framed -> recovered container == cache.sector(5,${sampleGroup.groupId}) byte-for-byte")
+                    pass("serve(${sampleGroup.name}, prefetch=$prefetch): ${framed.size}B framed -> recovered container matches cache.sector(5,${sampleGroup.groupId})")
                 else ->
                     fail("serve(${sampleGroup.name}, prefetch=$prefetch): recovered ${recovered.size}B != original ${original.size}B")
             }
@@ -267,7 +267,7 @@ fun main() {
             if (wirePayload <= BLOCK_SIZE) {
                 info("largest group (index $pickIndex group $gid, ${blob.size}B) still fits one block — continuation path not exercised, but it is identical code to the verified single-block path")
             } else if (recovered != null && recovered.contentEquals(blob)) {
-                pass("multi-block continuation framing: index $pickIndex group $gid (${blob.size}B container, $blocks blocks, ${framed.size}B framed) round-trips byte-for-byte")
+                pass("multi-block continuation framing: index $pickIndex group $gid (${blob.size}B container, $blocks blocks, ${framed.size}B framed) round-trips")
             } else {
                 fail("multi-block continuation framing FAILED for index $pickIndex group $gid")
             }
@@ -341,7 +341,7 @@ private fun serveToBytes(provider: FileProvider, ref: Long, prefetch: Boolean): 
 /**
  * Reverse the NXT block framing: strip the 10-byte response header and every 5-byte
  * continuation header at each 102,400-byte block boundary, validating each header's
- * archive/group fields. Returns the recovered raw container (== cache.sector bytes),
+ * archive/group fields. Returns the recovered response body,
  * or null if framing is malformed.
  */
 private fun deframe(framed: ByteArray, expectedIndex: Int, expectedGroup: Int, prefetch: Boolean): ByteArray? {

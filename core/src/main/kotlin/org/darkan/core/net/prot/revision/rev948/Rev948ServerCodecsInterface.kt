@@ -163,7 +163,7 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
     // IF_SETHIDE (op 91, 5B). 948 wire (handler 0x00193fc0): byte hideFlag (==0x81 → hidden);
     //   componentHash = g4_alt2. CHANGED from 947-3 (was g4_alt1).
     serverProt<IfSetHide>(opcode = 91, size = 5) { out ->
-        out.writeByte(if (hide) 0x81 else 0x00)
+        out.writeByte(if (hide) 0x81 else 0x80)
         out.writeIntMiddle(componentHash)
     }
 

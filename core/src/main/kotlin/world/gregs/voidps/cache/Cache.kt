@@ -24,6 +24,8 @@ interface Cache {
      */
     fun sectorSize(index: Int, archive: Int): Int = sector(index, archive)?.size ?: -1
 
+    fun sectorVersion(index: Int, archive: Int): Int = 0
+
     fun archives(index: Int): IntArray
 
     fun archiveCount(index: Int): Int

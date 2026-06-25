@@ -31,16 +31,18 @@ class Player(
     /** Per-player visibility state — high-res / low-res index lists, cached appearance hashes, build area center. */
     val viewport: Viewport = Viewport(this)
 
-    /**
-     * Per-player varp state + dirty-flush emitter (op28/op61/op147). Staged for the post-op75 HUD
-     * var baseline (docs/protocol/world-entry-render-948.md §2.4/§7.5). UNWIRED — the live first-light
-     * burst sends no varps; see [VarpManager.flush]'s wiring note.
-     */
     val varps: VarpManager = VarpManager()
+
+    @Volatile
+    var readyForTick: Boolean = false
 
     /** PLAYER_INFO "active" bit — true if this player was moving or had updates the previous tick. */
     var active: Boolean = true
 
     /** PLAYER_INFO "stationary" bit — true once the player has been idle long enough to qualify for the stationary cohort. */
     var stationary: Boolean = false
+
+    init {
+        appearance.ensureCachedBytes()
+    }
 }

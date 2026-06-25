@@ -8,6 +8,7 @@ import org.darkan.core.net.prot.revision.rev948.register948
 import org.darkan.core.worldlist.Country
 import org.darkan.core.worldlist.World
 import org.darkan.core.worldlist.WorldList
+import org.darkan.core.worldlist.WorldList.Companion.REV948_PROD_WORLDLIST_REVISION
 import world.gregs.voidps.buffer.read.BufferReader
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -35,9 +36,9 @@ class Rev948WorldListCodecTest {
     private fun worldList(): WorldList {
         val worldList = WorldList(300)
         val world = World(
-            number = 300,
+            number = 34,
             hostname = "localhost",
-            activity = "Darkan",
+            activity = "-",
             country = Country.USA,
             members = true,
         )
@@ -57,19 +58,18 @@ class Rev948WorldListCodecTest {
         assertEquals(1, reader.readSmart())
         assertEquals(Country.USA.id, reader.readSmart())
         assertEquals("Usa", readJagString(reader))
-        assertEquals(300, reader.readSmart())
-        assertEquals(300, reader.readSmart())
+        assertEquals(34, reader.readSmart())
+        assertEquals(34, reader.readSmart())
         assertEquals(1, reader.readSmart())
         assertEquals(0, reader.readSmart())
         assertEquals(0, reader.readUnsignedByte())
-        assertEquals(1, reader.readInt())
-        assertEquals(1, reader.readSmart())
-        assertEquals("Darkan", readJagString(reader))
-        assertEquals("localhost", readJagString(reader))
-        assertEquals("localhost", readJagString(reader))
-        assertEquals(11, reader.readInt())
+        assertEquals(1, reader.readInt())             // world flags
         assertEquals(0, reader.readSmart())
-        assertEquals(42, reader.readUnsignedShort())
+        assertEquals("-", readJagString(reader))
+        assertEquals("localhost", readJagString(reader))
+        assertEquals(REV948_PROD_WORLDLIST_REVISION, reader.readInt())
+        assertEquals(0, reader.readSmart())           // worldId-delta
+        assertEquals(42, reader.readUnsignedShort())  // then count
         assertEquals(0, reader.remaining)
     }
 
@@ -81,9 +81,9 @@ class Rev948WorldListCodecTest {
         assertEquals(1, reader.readUnsignedByte())
         assertEquals(2, reader.readUnsignedByte())
         assertEquals(0, reader.readUnsignedByte())
-        assertEquals(11, reader.readInt())
-        assertEquals(0, reader.readSmart())
-        assertEquals(42, reader.readUnsignedShort())
+        assertEquals(REV948_PROD_WORLDLIST_REVISION, reader.readInt())
+        assertEquals(0, reader.readSmart())           // worldId-delta
+        assertEquals(42, reader.readUnsignedShort())  // then count
         assertEquals(0, reader.remaining)
     }
 }

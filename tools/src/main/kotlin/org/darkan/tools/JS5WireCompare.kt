@@ -3,6 +3,7 @@ package org.darkan.tools
 import org.darkan.tools.cachedownloader.JS5Protocol
 import org.darkan.tools.util.JavConfig
 import org.darkan.tools.util.toHex
+import org.darkan.core.EnvVars
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.net.Socket
@@ -15,17 +16,21 @@ import java.net.Socket
  */
 
 // Files to compare — archive/group pairs that the client requests early
-private val FILES_TO_COMPARE = listOf(
-    255 to 255,   // master index
-    255 to 2,     // archive index 2
-    255 to 28,    // archive index 28
-    28 to 1,      // first group file the client requests
-    28 to 2,
-    59 to 1,
-    62 to 1,
+private val DEFAULT_FILES_TO_COMPARE = listOf(
+    255 to 27,
+    27 to 0,
+    27 to 1,
 )
 
-fun main() {
+fun main(args: Array<String>) {
+    val filesToCompare = args.getOrNull(0)
+        ?.split(",")
+        ?.mapNotNull { it.toFilePairOrNull() }
+        ?.takeIf { it.isNotEmpty() }
+        ?: DEFAULT_FILES_TO_COMPARE
+    val localPort = args.getOrNull(1)?.toIntOrNull() ?: 43596
+    val livePort = args.getOrNull(2)?.toIntOrNull() ?: 43594
+
     // Fetch live config
     println("=".repeat(70))
     println("Fetching live jav_config.ws...")
@@ -44,9 +49,9 @@ fun main() {
 
     // Connect to local server
     println("\n${"=".repeat(70)}")
-    println("Connecting to LOCAL server (localhost:43594)...")
+    println("Connecting to LOCAL server (localhost:$localPort)...")
     val localResults = try {
-        captureFiles("localhost", 43594, 948, 1, "ev9+VAp5/tMKeNR/7MOuH6lKWS+rGkHK", FILES_TO_COMPARE)
+        captureFiles("localhost", localPort, EnvVars.majorVersion, EnvVars.minorVersion, EnvVars.js5ServerToken, filesToCompare)
     } catch (e: Exception) {
         println("ERROR connecting to local: ${e.message}")
         emptyMap()
@@ -55,9 +60,9 @@ fun main() {
     // Connect to live server
     val liveResults = if (liveHost != null && liveToken != null) {
         println("\n${"=".repeat(70)}")
-        println("Connecting to LIVE server ($liveHost:43594)...")
+        println("Connecting to LIVE server ($liveHost:$livePort)...")
         try {
-            captureFiles(liveHost, 43594, liveMajor, liveMinor, liveToken, FILES_TO_COMPARE)
+            captureFiles(liveHost, livePort, liveMajor, liveMinor, liveToken, filesToCompare)
         } catch (e: Exception) {
             println("ERROR connecting to live: ${e.message}")
             emptyMap()
@@ -121,6 +126,14 @@ fun main() {
             println("  LIVE: not available")
         }
     }
+}
+
+private fun String.toFilePairOrNull(): Pair<Int, Int>? {
+    val parts = split("/")
+    if (parts.size != 2) return null
+    val index = parts[0].toIntOrNull() ?: return null
+    val group = parts[1].toIntOrNull() ?: return null
+    return index to group
 }
 
 data class CapturedFile(val wire: ByteArray, val container: ByteArray)

@@ -59,7 +59,6 @@ internal fun Codec.registerRev948ServerCodecsSocial() {
     // CLANCHANNEL_FULL (op 67, varShort) — was op 28 in 947-3.
     serverProt<ClanChannelFull>(opcode = 67, size = ProtSize.VarShort) { out ->
         if (clanName == null || chatters == null) {
-            out.writeByte(0xFF)
             return@serverProt
         }
         out.writeByte(if (main) 0 else 1)

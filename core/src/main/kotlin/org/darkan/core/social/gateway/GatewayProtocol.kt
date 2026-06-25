@@ -116,7 +116,7 @@ data class GatewayWorldInfo(
     val members: Boolean = true,
     val quickChat: Boolean = false,
     val pvp: Boolean = false,
-    val lootShare: Boolean = true,
+    val lootShare: Boolean = false,
     val country: String = "USA",
     val highlighted: Boolean = false,
 ) {
@@ -125,7 +125,7 @@ data class GatewayWorldInfo(
         number = worldId,
         hostname = publicHost,
         port = port,
-        activity = activity.ifEmpty { worldName },
+        activity = activity.ifEmpty { "-" },
         country = Country.valueOf(country),
         quickchat = quickChat,
         lootShare = lootShare,

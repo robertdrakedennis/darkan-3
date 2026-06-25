@@ -127,7 +127,7 @@ object NpcInfoBuilder {
         bitOut.stopBitAccess()
 
         // Phase 3: per-NPC ext-info blocks. Each NPC's bytes are wrapped by a 2-byte BE length
-        // header by the Rev947 codec (NOT here — we emit raw block bytes; the codec prefixes).
+        // header by the codec (NOT here — we emit raw block bytes; the codec prefixes).
         val extendedInfo = ArrayList<ByteArray>(flaggedForExtInfo.size)
         for (slot in flaggedForExtInfo) {
             val npc = Npcs.get(slot) ?: continue
@@ -143,7 +143,7 @@ object NpcInfoBuilder {
      * byte 3 bit 0 (mask 0x01).
      *
      * Per-flag blocks are emitted in [NpcUpdateMaskKey.order] ascending order via
-     * [NpcUpdateMaskEncoder] (registered in `Rev947ServerCodecsUpdateMasks.kt`).
+     * [NpcUpdateMaskEncoder] (registered in `Rev948ServerCodecsUpdateMasks.kt`).
      */
     private fun encodeExtendedInfoBlock(pending: PendingUpdates): ByteArray {
         val extOut = BufferWriter(256)

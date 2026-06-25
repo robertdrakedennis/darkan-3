@@ -3,7 +3,7 @@
 # Usage: ./run-client-mac.sh
 #
 # macOS analogue of run-client.sh (Linux). Emulates the launcher's custom mode:
-# - Sets working directory / HOME to ~/.darkan3-mac
+# - Sets working directory / HOME to the local mac client install root
 # - Creates preferences.cfg there
 # - Applies the DYLD_INSERT_LIBRARIES patcher (libdarkan_patcher.dylib)
 # - Spawns RuneScape.app's executable directly (NOT via `open`/LaunchServices,
@@ -37,7 +37,13 @@ CLIENT_BINARY="${CLIENT_BINARY:-/Users/robert/darkan-3/macos/Jagex/launcher/rs2c
 # The adhoc-signed x86_64 patcher dylib produced by patcher-mac/build-mac.sh.
 PATCHER_DYLIB="${PATCHER_DYLIB:-$PROJECT_DIR/client/launcher/patcher-mac/target/x86_64-apple-darwin/release/libdarkan_patcher.dylib}"
 
-DARKAN_DIR="${DARKAN_DIR:-$HOME/.darkan3-mac}"
+if [[ -z "${DARKAN_DIR:-}" ]]; then
+    if [[ "$MAC_CLIENT_MODE" == "wrapper" ]]; then
+        DARKAN_DIR="$(cd "$(dirname "$WRAPPER_BINARY")/../../.." && pwd)"
+    else
+        DARKAN_DIR="$(cd "$(dirname "$CLIENT_BINARY")/../.." && pwd)"
+    fi
+fi
 
 # Optional recorder dylib — set DARKAN_RECORD=1 to also insert the socket recorder
 # (alongside the patcher) and capture client I/O to $RECORD_DIR. Default off.
@@ -141,6 +147,7 @@ DARKAN_HTTP_PORT=${DARKAN_HTTP_PORT:-<unset>} DARKAN_PROXY_MODE=${DARKAN_PROXY_M
 #
 # We pass through the DARKAN_* vars only if they are set, so an unset modulus
 # leaves the patcher a no-op (live mode), matching the launcher's gating.
+set +e
 env \
     HOME="$DARKAN_DIR" \
     DYLD_INSERT_LIBRARIES="$INSERT_LIBS" \
@@ -150,9 +157,10 @@ env \
     ${DARKAN_JS5_RSA_MODULUS:+DARKAN_JS5_RSA_MODULUS="$DARKAN_JS5_RSA_MODULUS"} \
     ${DARKAN_HTTP_PORT:+DARKAN_HTTP_PORT="$DARKAN_HTTP_PORT"} \
     ${DARKAN_PROXY_MODE:+DARKAN_PROXY_MODE="$DARKAN_PROXY_MODE"} \
-    "$TARGET_BINARY" "${TARGET_ARGS[@]}" 2>&1 || true
+    "$TARGET_BINARY" "${TARGET_ARGS[@]}" 2>&1
+EC=$?
+set -e
 
-EC=${PIPESTATUS[0]:-$?}
 if [[ $EC -gt 128 ]]; then
     echo "Client killed by signal $((EC - 128))"
 elif [[ $EC -ne 0 ]]; then

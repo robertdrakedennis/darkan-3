@@ -2,36 +2,62 @@ package org.darkan.lobby.server.packet
 
 import io.ktor.utils.io.*
 import kotlinx.coroutines.runBlocking
+import org.darkan.core.EnvVars
 import org.darkan.core.net.Isaac
 import org.darkan.core.net.prot.Codec
 import org.darkan.core.net.prot.IfButton
+import org.darkan.core.net.prot.MacOsLobbyHandoff
 import org.darkan.core.net.prot.revision.rev948.register948
+import org.darkan.core.worldlist.Country
+import org.darkan.core.worldlist.World
+import org.darkan.lobby.LobbyState
 import org.darkan.core.net.session.GameSession
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Dispatch + wire test for the lobby "Play Now" trigger.
+ * Dispatch + wire test for lobby interface clicks.
  *
  * This drives the REAL [GameSession.send] path — any handler packets would be ISAAC-framed onto a
  * channel exactly as on the wire, then we de-ISAAC the opcode stream (mirroring the out cipher) to
- * assert which ServerProt opcodes were emitted. So it proves dispatch AND the 948 framing together.
+ * assert which ServerProt opcodes were emitted.
  */
 class IfButtonHandlerTest {
 
     companion object {
         private val CODEC: Codec = register948()
-        // Known ISAAC seed so the test can mirror the out cipher and decode the opcode stream.
         private val SEED = intArrayOf(1, 2, 3, 4)
     }
 
     private val handler = IfButtonHandler()
+    private val handoffHandler = MacOsLobbyHandoffHandler()
 
     private fun click(interfaceId: Int, componentId: Int) =
         IfButton(buttonId = 1, interfaceHash = (interfaceId shl 16) or componentId, slotId = -1, itemId = -1)
 
+    private fun emittedOpcodes(packet: IfButton): List<Int> =
+        emittedOpcodes { session -> handler.handle(session, packet) }
+
+    private fun emittedOpcodes(packet: MacOsLobbyHandoff): List<Int> =
+        emittedOpcodes { session -> handoffHandler.handle(session, packet) }
+
+    private fun emittedOpcodes(first: IfButton, second: MacOsLobbyHandoff): List<Int> =
+        emittedOpcodes { session ->
+            handler.handle(session, first)
+            handoffHandler.handle(session, second)
+        }
+
     /** Run the handler against a fresh session and return the ServerProt opcodes it emitted, in order. */
-    private fun emittedOpcodes(packet: IfButton): List<Int> = runBlocking {
+    private fun emittedOpcodes(handle: suspend (GameSession) -> Unit): List<Int> = runBlocking {
+        LobbyState.worldList.put(
+            World(
+                number = EnvVars.worldId,
+                hostname = EnvVars.worldPublicHost,
+                port = EnvVars.worldPort,
+                country = Country.USA,
+            )
+        )
         val channel = ByteChannel(autoFlush = true)
         val session = GameSession(
             write = channel,
@@ -41,7 +67,7 @@ class IfButtonHandlerTest {
             codec = CODEC,
             username = "tester",
         )
-        handler.handle(session, packet)
+        handle(session)
         session.flush()
 
         // Drain whatever is buffered without blocking, then de-ISAAC the opcode stream.
@@ -73,9 +99,24 @@ class IfButtonHandlerTest {
     }
 
     @Test
-    fun `Play Now click 906-81 does NOT emit server world switch`() {
-        assertTrue(emittedOpcodes(click(906, 81)).isEmpty(),
-            "906/81 must stay client-driven so the lobby joining overlay remains intact")
+    fun `Play Now click 906-81 emits server world switch`() {
+        assertEquals(listOf(213), emittedOpcodes(click(906, 81)))
+    }
+
+    @Test
+    fun `Mac handoff Play Now click 906-81 emits server world switch`() {
+        assertEquals(listOf(213), emittedOpcodes(MacOsLobbyHandoff(click(906, 81))))
+    }
+
+    @Test
+    fun `Mac handoff after raw Play Now emits one server switch`() {
+        assertEquals(listOf(213), emittedOpcodes(click(906, 81), MacOsLobbyHandoff(click(906, 81))))
+    }
+
+    @Test
+    fun `Mac handoff without Play Now click does NOT switch worlds`() {
+        assertTrue(emittedOpcodes(MacOsLobbyHandoff(null)).isEmpty(),
+            "handoff packets without an embedded Play Now click must not switch")
     }
 
     @Test

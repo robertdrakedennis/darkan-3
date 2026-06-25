@@ -108,7 +108,7 @@ class VarpManagerTest {
     fun `seedDefaults with the None seam is a no-op`() {
         val v = VarpManager()
         v.seedDefaults(VarpDefaults.None)
-        assertEquals(0, v.dirtyCount(), "None seam seeds nothing (live baseline stays minimal)")
+        assertEquals(0, v.dirtyCount(), "None seam seeds nothing")
     }
 
     @Test

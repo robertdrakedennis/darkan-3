@@ -72,6 +72,15 @@ class SQLiteCache private constructor(
         return indexFiles[index]?.getLength(archive) ?: -1
     }
 
+    override fun sectorVersion(index: Int, archive: Int): Int {
+        if (index == 255) {
+            if (archive >= indexFiles.size) return 0
+            return indexFiles[archive]?.getRawTableVersion() ?: 0
+        }
+        if (index >= indexFiles.size) return 0
+        return indexFiles[index]?.getVersion(archive) ?: 0
+    }
+
     override fun indexCount() = _indices.size
 
     override fun indices() = _indices
