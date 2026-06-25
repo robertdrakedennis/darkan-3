@@ -157,13 +157,54 @@ class Codec {
         return constructor.callBy(args)
     }
 
-    /** Register opcode metadata (name + size) without an encoder. For proxy/debug framing. */
+    /**
+     * Register the canonical official (UPPER_SNAKE) display name + size metadata for a server
+     * opcode. Unlike a naive `putIfAbsent`, the canonical NAME wins over an encoder's class-name
+     * (which is PascalCase) so [serverProtName] reports a consistent UPPER_SNAKE name for EVERY
+     * opcode regardless of whether it has an encoder.
+     *
+     * The encoder/decoder + its authoritative size stay registered in [serverProts] (that is the
+     * codec invariant — encoders win for the CODEC); only the DISPLAYED name+size metadata here is
+     * reconciled:
+     *  - The encoder's size (when one already registered an entry) is authoritative and preserved.
+     *  - If [name] is the placeholder `UNKNOWN_<op>` AND an encoder already registered a (PascalCase)
+     *    name, fall back to [pascalToScreamingSnake] of that name so the result is STILL UPPER_SNAKE
+     *    rather than PascalCase.
+     */
     internal fun serverProtStub(opcode: Int, name: String, size: ProtSize) {
-        serverProtInfo.putIfAbsent(opcode, ProtInfo(name, size))
+        val existing = serverProtInfo[opcode]
+        val resolvedSize = existing?.size ?: size
+        val resolvedName = resolveDisplayName(opcode, name, existing?.name)
+        serverProtInfo[opcode] = ProtInfo(resolvedName, resolvedSize)
     }
 
     internal fun serverProtStub(opcode: Int, name: String, size: Int) {
-        serverProtInfo.putIfAbsent(opcode, ProtInfo(name, ProtSize.Fixed(size)))
+        serverProtStub(opcode, name, ProtSize.Fixed(size))
+    }
+
+    /** Client-side analogue of [serverProtStub] — canonical name wins, decoder's size is preserved. */
+    internal fun clientProtStub(opcode: Int, name: String, size: ProtSize) {
+        val existing = clientProtInfo[opcode]
+        val resolvedSize = existing?.size ?: size
+        val resolvedName = resolveDisplayName(opcode, name, existing?.name)
+        clientProtInfo[opcode] = ProtInfo(resolvedName, resolvedSize)
+    }
+
+    internal fun clientProtStub(opcode: Int, name: String, size: Int) {
+        clientProtStub(opcode, name, ProtSize.Fixed(size))
+    }
+
+    /**
+     * Pick the display name for an opcode. The canonical official [stubName] wins, EXCEPT when it is
+     * the placeholder `UNKNOWN_<op>` and an encoder/decoder already supplied a real (PascalCase)
+     * [existingName] — in that case fall back to [pascalToScreamingSnake] of the existing name so the
+     * displayed name is always UPPER_SNAKE, never the raw PascalCase class name.
+     */
+    private fun resolveDisplayName(opcode: Int, stubName: String, existingName: String?): String {
+        if (stubName == "UNKNOWN_$opcode" && existingName != null) {
+            return pascalToScreamingSnake(existingName)
+        }
+        return stubName
     }
 
     /** Get the size (as int: fixed=N, varByte=-1, varShort=-2) for a server opcode. */
@@ -179,6 +220,34 @@ class Codec {
     fun clientProtName(opcode: Int): String = clientProtInfo[opcode]?.name ?: "UNKNOWN_$opcode"
 
     companion object {
+        /**
+         * Convert a PascalCase / camelCase identifier (e.g. an encoder class `simpleName` like
+         * `VarpSmall`, `IfSetText`, `MessagePublicSend`) to SCREAMING_SNAKE_CASE
+         * (`VARP_SMALL`, `IF_SET_TEXT`, `MESSAGE_PUBLIC_SEND`). Used as the display-name fallback so
+         * an opcode that has an encoder but no canonical official name still prints UPPER_SNAKE.
+         *
+         * Runs of digits are kept attached to the preceding word (`IfSet2DAngle` -> `IF_SET2D_ANGLE`).
+         */
+        fun pascalToScreamingSnake(name: String): String {
+            if (name.isEmpty()) return name
+            val out = StringBuilder(name.length + 8)
+            for (i in name.indices) {
+                val c = name[i]
+                if (c.isUpperCase() && i > 0) {
+                    val prev = name[i - 1]
+                    // Insert a separator at a lower->upper boundary, or at the end of an
+                    // acronym run (e.g. "HTTPImage" -> "HTTP_IMAGE": split before the last
+                    // upper that is followed by a lower).
+                    val nextIsLower = i + 1 < name.length && name[i + 1].isLowerCase()
+                    if (!prev.isUpperCase() || nextIsLower) {
+                        out.append('_')
+                    }
+                }
+                out.append(c.uppercaseChar())
+            }
+            return out.toString()
+        }
+
         private val codecs = mutableMapOf<Int, Codec>()
 
         fun register(revision: Int, init: Codec.() -> Unit): Codec {

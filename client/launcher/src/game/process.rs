@@ -8,6 +8,23 @@ pub struct LaunchParams<'a> {
     pub display_name: &'a str,
 }
 
+/// Environment variables controlling the runtime patcher. Only applied when the
+/// patcher shared library / injector is actually located (see `build_*_command`).
+#[derive(Default, Clone, Copy)]
+pub struct PatchEnv<'a> {
+    /// Hex-encoded login RSA modulus (param=99 from jav_config.ws). When
+    /// `Some`, the patcher replaces the client's embedded login public key.
+    /// Also gates whether the patcher library is loaded at all.
+    pub rsa_modulus: Option<&'a str>,
+    /// Hex-encoded JS5 RSA modulus (param=100 from jav_config.ws). When
+    /// `Some`, the patcher replaces the client's embedded JS5 master-index key.
+    pub js5_modulus: Option<&'a str>,
+    /// Override port for the client's hardcoded HTTP content port 80. Derived
+    /// from the config-server URL's explicit port (e.g. 8829 for
+    /// `http://localhost:8829/jav_config.ws`).
+    pub http_port: Option<u16>,
+}
+
 /// Launch the RS3 client binary
 ///
 /// If `rsa_modulus` is provided (hex-encoded 1024-bit modulus), the patcher
@@ -30,12 +47,12 @@ pub fn launch_rs3(
     params: Option<&LaunchParams>,
     data_dir: &Path,
     custom_command: Option<&str>,
-    rsa_modulus: Option<&str>,
+    patch: PatchEnv<'_>,
     working_dir: Option<&Path>,
 ) -> Result<u32> {
     let binary_str = binary.to_string_lossy().to_string();
     let data_dir_str = data_dir.to_string_lossy().to_string();
-    let needs_patcher = rsa_modulus.is_some();
+    let needs_patcher = patch.rsa_modulus.is_some();
 
     // Decide on the program + args to run. On a normal launch we run the
     // target binary directly with `--configURI <uri>`. A custom_command
@@ -58,15 +75,15 @@ pub fn launch_rs3(
     // (LD_PRELOAD + DARKAN_* on Linux when the .so is found, DARKAN_* always
     // on Windows when the injector is found — preserves historical gating).
     #[cfg(windows)]
-    let mut cmd = build_windows_command(&target_argv, needs_patcher, rsa_modulus);
+    let mut cmd = build_windows_command(&target_argv, needs_patcher, &patch);
     #[cfg(target_os = "macos")]
-    let mut cmd = build_macos_command(&target_argv, binary, needs_patcher, rsa_modulus);
+    let mut cmd = build_macos_command(&target_argv, binary, needs_patcher, &patch);
     #[cfg(all(unix, not(target_os = "macos")))]
-    let mut cmd = build_unix_command(&target_argv, binary, needs_patcher, rsa_modulus);
+    let mut cmd = build_unix_command(&target_argv, binary, needs_patcher, &patch);
     #[cfg(not(any(windows, unix)))]
     let mut cmd = {
         let _ = needs_patcher;
-        let _ = rsa_modulus;
+        let _ = patch;
         let mut c = Command::new(&target_argv[0]);
         for a in &target_argv[1..] {
             c.arg(a);
@@ -92,6 +109,13 @@ pub fn launch_rs3(
     #[cfg(unix)]
     {
         cmd.env("HOME", &data_dir_str);
+        // Export the resolved NXT cache dir from the SAME mode-selected data_dir
+        // as HOME, so it propagates rs3linux -> rs2client -> the injected
+        // Undercut engine, which treats RS_CACHE_DIR as the authoritative cache
+        // location. This guarantees the engine reads the exact cache the client
+        // just wrote, in both live and custom modes, with no path guessing.
+        let cache_dir = crate::config::cache_dir(data_dir);
+        cmd.env("RS_CACHE_DIR", &cache_dir);
         cmd.env("SDL_VIDEODRIVER", "x11");
         cmd.env("SDL_VIDEO_X11_WMCLASS", "RuneScape");
         cmd.env(
@@ -103,6 +127,34 @@ pub fn launch_rs3(
     let _ = data_dir_str;
 
     cmd.stdin(Stdio::null());
+
+    // Redirect the client's stdout + stderr to a persistent append-mode log so
+    // that LD_PRELOAD/patcher diagnostics survive a GUI launch. Best-effort:
+    // fall back to inheriting the launcher's streams if the file can't be opened
+    // (read-only data dir, permission error, etc.).
+    let log_path = data_dir.join("launcher-client.log");
+    match std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+        Ok(out_file) => match out_file.try_clone() {
+            Ok(err_file) => {
+                cmd.stdout(Stdio::from(out_file));
+                cmd.stderr(Stdio::from(err_file));
+            }
+            Err(e) => {
+                log::warn!(
+                    "Could not dup client log handle for {}: {}. Inheriting launcher streams.",
+                    log_path.display(),
+                    e
+                );
+            }
+        },
+        Err(e) => {
+            log::warn!(
+                "Could not open client log {}: {}. Inheriting launcher streams.",
+                log_path.display(),
+                e
+            );
+        }
+    }
 
     let child = cmd.spawn().context("Failed to spawn RS3 process")?;
     let pid = child.id();
@@ -124,7 +176,7 @@ fn build_unix_command(
     target_argv: &[String],
     binary: &Path,
     needs_patcher: bool,
-    rsa_modulus: Option<&str>,
+    patch: &PatchEnv<'_>,
 ) -> Command {
     let mut cmd = Command::new(&target_argv[0]);
     for arg in &target_argv[1..] {
@@ -134,8 +186,14 @@ fn build_unix_command(
         if let Some(patcher_path) = find_patcher_library(binary) {
             log::info!("Setting LD_PRELOAD to {}", patcher_path.display());
             cmd.env("LD_PRELOAD", &patcher_path);
-            if let Some(modulus) = rsa_modulus {
+            if let Some(modulus) = patch.rsa_modulus {
                 cmd.env("DARKAN_RSA_MODULUS", modulus);
+            }
+            if let Some(js5) = patch.js5_modulus {
+                cmd.env("DARKAN_JS5_RSA_MODULUS", js5);
+            }
+            if let Some(port) = patch.http_port {
+                cmd.env("DARKAN_HTTP_PORT", port.to_string());
             }
         } else {
             log::warn!(
@@ -167,7 +225,7 @@ fn build_macos_command(
     target_argv: &[String],
     binary: &Path,
     needs_patcher: bool,
-    rsa_modulus: Option<&str>,
+    patch: &PatchEnv<'_>,
 ) -> Command {
     let mut cmd = Command::new(&target_argv[0]);
     for arg in &target_argv[1..] {
@@ -181,8 +239,14 @@ fn build_macos_command(
             );
             cmd.env("DYLD_INSERT_LIBRARIES", &patcher_path);
             cmd.env("DYLD_FORCE_FLAT_NAMESPACE", "1");
-            if let Some(modulus) = rsa_modulus {
+            if let Some(modulus) = patch.rsa_modulus {
                 cmd.env("DARKAN_RSA_MODULUS", modulus);
+            }
+            if let Some(js5) = patch.js5_modulus {
+                cmd.env("DARKAN_JS5_RSA_MODULUS", js5);
+            }
+            if let Some(port) = patch.http_port {
+                cmd.env("DARKAN_HTTP_PORT", port.to_string());
             }
         } else {
             log::warn!(
@@ -206,7 +270,7 @@ fn build_macos_command(
 fn build_windows_command(
     target_argv: &[String],
     needs_patcher: bool,
-    rsa_modulus: Option<&str>,
+    patch: &PatchEnv<'_>,
 ) -> Command {
     if needs_patcher {
         if let Some(injector) = find_injector_exe() {
@@ -234,8 +298,14 @@ fn build_windows_command(
             // suspended target by CreateProcessW's default env block. The DLL
             // is no-op without DARKAN_RSA_MODULUS, so omitting it = unpatched
             // run from the DLL's perspective even if injection succeeded.
-            if let Some(modulus) = rsa_modulus {
+            if let Some(modulus) = patch.rsa_modulus {
                 cmd.env("DARKAN_RSA_MODULUS", modulus);
+            }
+            if let Some(js5) = patch.js5_modulus {
+                cmd.env("DARKAN_JS5_RSA_MODULUS", js5);
+            }
+            if let Some(port) = patch.http_port {
+                cmd.env("DARKAN_HTTP_PORT", port.to_string());
             }
             return cmd;
         } else {
@@ -317,6 +387,21 @@ pub fn launcher_binary_name() -> &'static str {
 /// `find_patcher_dll`, which is a diagnostic affordance only. The Windows
 /// runtime patcher is loaded by `darkan_injector.exe`, which performs its own
 /// independent DLL search at injection time.
+/// Canonicalize a located patcher path to an absolute path.
+///
+/// The returned path is set as `LD_PRELOAD` (Linux) / `DYLD_INSERT_LIBRARIES`
+/// (macOS) on the spawned client, whose working directory is the mode-selected
+/// data dir — NOT the launcher's CWD. A relative hit (notably the CWD-relative
+/// `data/client/<os>/` slot) would be resolved by `ld.so` against the child's
+/// CWD, fail to open, and be silently ignored — leaving the client unpatched and
+/// causing rs3linux to reject our binary with "Error saving file". Falls back to
+/// the original path if canonicalization fails (the caller already verified it
+/// exists).
+#[cfg(unix)]
+fn absolutize_patcher_path(p: std::path::PathBuf) -> std::path::PathBuf {
+    std::fs::canonicalize(&p).unwrap_or(p)
+}
+
 #[cfg(unix)]
 pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> {
     let lib_name = patcher_lib_name();
@@ -328,7 +413,7 @@ pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> 
         .join(host_os_dir())
         .join(lib_name);
     if os_slot.exists() {
-        return Some(os_slot);
+        return Some(absolutize_patcher_path(os_slot));
     }
 
     // Next to the launcher executable
@@ -336,7 +421,7 @@ pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> 
         if let Some(parent) = exe.parent() {
             let candidate = parent.join(lib_name);
             if candidate.exists() {
-                return Some(candidate);
+                return Some(absolutize_patcher_path(candidate));
             }
         }
     }
@@ -345,7 +430,7 @@ pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> 
     if let Some(parent) = client_binary.parent() {
         let candidate = parent.join(lib_name);
         if candidate.exists() {
-            return Some(candidate);
+            return Some(absolutize_patcher_path(candidate));
         }
     }
 
@@ -353,7 +438,7 @@ pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> 
     if let Ok(home) = std::env::var("HOME") {
         let candidate = std::path::PathBuf::from(home).join("darkan-3").join(lib_name);
         if candidate.exists() {
-            return Some(candidate);
+            return Some(absolutize_patcher_path(candidate));
         }
     }
 
@@ -375,7 +460,7 @@ pub fn find_patcher_library(client_binary: &Path) -> Option<std::path::PathBuf> 
                 .join("release")
                 .join(lib_name);
             if candidate.exists() {
-                return Some(candidate);
+                return Some(absolutize_patcher_path(candidate));
             }
         }
     }

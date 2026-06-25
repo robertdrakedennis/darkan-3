@@ -101,20 +101,21 @@ object WorldTick {
                     player.session.queuePacket(packet)
                 }
 
-                // PLAYER_INFO and NPC_INFO use the init form on the first tick after
-                // login (when the viewport's `firstTick` flag is still set) and the
-                // per-tick incremental form thereafter. The init form is responsible
-                // for clearing `firstTick`.
-                val playerInfo = if (viewport.firstTick) {
-                    PlayerInfoBuilder.buildInit(player)
-                } else {
-                    PlayerInfoBuilder.build(player)
-                }
-                val npcInfo = if (playerInfo.firstTick) {
+                // PLAYER_INFO (op 22) always uses the single 4-pass build form — there is no
+                // bulk-seed init form (the 948 handler has no such path). The local player is
+                // placed in-world via an absolute teleport in its high-res entry, driven by
+                // `Player.teleporting` (set on world entry / teleport, cleared by the encoder).
+                //
+                // NPC_INFO still has a first-tick bootstrap, so we read `firstTick` directly and
+                // clear it after the first tick (PlayerInfoBuilder no longer owns that flag).
+                val firstTick = viewport.firstTick
+                val playerInfo = PlayerInfoBuilder.build(player)
+                val npcInfo = if (firstTick) {
                     NpcInfoBuilder.buildInit(player)
                 } else {
                     NpcInfoBuilder.build(player)
                 }
+                if (firstTick) viewport.firstTick = false
 
                 player.session.queuePacket(playerInfo)
                 player.session.queuePacket(npcInfo)

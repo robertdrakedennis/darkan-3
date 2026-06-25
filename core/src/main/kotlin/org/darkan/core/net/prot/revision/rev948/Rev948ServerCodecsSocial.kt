@@ -59,8 +59,11 @@ internal fun Codec.registerRev948ServerCodecsSocial() {
     // is retained. TODO: re-derive the exact 64-bit-mask field layout from 0x001d29c0 + a live
     // capture, then register the correct (friend-delta) encoder under its confirmed identity.
 
-    // CLANCHANNEL_FULL (op 67, varShort) — was op 28 in 947-3.
-    serverProt<ClanChannelFull>(opcode = 67, size = ProtSize.VarShort) { out ->
+    // CLANCHANNEL_FULL (op 9, varShort, 948) — handler-identity adjudication (2026-06-25): the
+    // official CLANCHANNEL_FULL is op9 (op67 is a DISTINCT member-roster packet, UNKNOWN_67). The
+    // prior op67 binding was wrong — it made op67 display the CLAN_CHANNEL_FULL fallback while op9
+    // had no encoder. Was op28 in 947-3. Format (clan name + members) matches op9's handler.
+    serverProt<ClanChannelFull>(opcode = 9, size = ProtSize.VarShort) { out ->
         if (clanName == null || chatters == null) {
             out.writeByte(0xFF)
             return@serverProt

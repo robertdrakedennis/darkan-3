@@ -8,6 +8,8 @@
 #include <condition_variable>
 #include <chrono>
 #include <algorithm>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
@@ -15,6 +17,10 @@
 
 // External log file from bootstrap
 extern FILE *log_file;
+
+// Real user home from the passwd db (NOT the bolt-overridden $HOME); defined in
+// undercut_bootstrap.cpp.
+extern const char *resolve_real_home();
 
 // Error logging function following the pattern from undercut_bootstrap.cpp
 void imgui_log_message(const char *format, ...) {
@@ -214,6 +220,21 @@ extern "C" {
             IMGUI_CHECKVERSION();
             ImGui::CreateContext();
             ImGuiIO& io = ImGui::GetIO();
+
+            // Persist imgui.ini under ~/.undercut alongside the other configs.
+            // ImGui defaults IniFilename to "imgui.ini" relative to the CWD (the
+            // folder the launcher was started from), and it stores this pointer
+            // verbatim without copying — so the buffer must outlive the context.
+            {
+                static char ini_path[1024];
+                const char *home = resolve_real_home();
+                char undercut_dir[768];
+                std::snprintf(undercut_dir, sizeof(undercut_dir), "%s/.undercut", home);
+                mkdir(undercut_dir, 0755); // best-effort; ignore EEXIST
+                std::snprintf(ini_path, sizeof(ini_path), "%s/imgui.ini", undercut_dir);
+                io.IniFilename = ini_path;
+                imgui_log_message("imgui.ini path set to %s\n", ini_path);
+            }
 
             // Configure error recovery according to ImGui best practices
             io.ConfigErrorRecovery = true;

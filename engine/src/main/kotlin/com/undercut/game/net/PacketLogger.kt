@@ -7,7 +7,7 @@ import org.darkan.core.net.prot.Codec
 import org.darkan.core.net.prot.revision.rev948.register948
 import java.io.BufferedWriter
 import java.io.File
-import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
@@ -26,6 +26,7 @@ object PacketLogger {
     private val codec: Codec = register948()
     private var writer: BufferedWriter? = null
     private val timeFmt = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+    private val fileFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss")
 
     data class PacketEntry(
         val time: String,
@@ -44,7 +45,7 @@ object PacketLogger {
     fun init() {
         val logDir = File(System.getProperty("user.home"), ".undercut/logs")
         logDir.mkdirs()
-        val logFile = File(logDir, "packets-${LocalDate.now()}.log")
+        val logFile = File(logDir, "packets-${LocalDateTime.now().format(fileFmt)}.log")
         writer = logFile.bufferedWriter(Charsets.UTF_8, bufferSize = 8192).also {
             it.write("# Packet log started at ${LocalTime.now().format(timeFmt)}\n")
             it.flush()
@@ -65,6 +66,20 @@ object PacketLogger {
 
     fun logServerPacket(opcode: Int, size: Int, payload: ByteArray) =
         emit('S', codec.serverProtName(opcode), opcode, size, payload, decoded = null)
+
+    /**
+     * Incoming packet whose payload could not be read coherently (no connection's in-flight
+     * (opcode, size) matched the hook). The body is withheld rather than fabricated — a withheld,
+     * clearly-marked entry is honest; a mislabeled body silently corrupts every downstream analysis.
+     */
+    fun logServerPacketDesync(opcode: Int, size: Int, detail: String) {
+        val name = runCatching { codec.serverProtName(opcode) }.getOrDefault("UNKNOWN")
+        val time = LocalTime.now().format(timeFmt)
+        runCatching {
+            onPacketLogged?.invoke(PacketEntry(time, 'S', "DESYNC:$name", opcode, size, "", "payload withheld ($detail)"))
+        }
+        writeLine("[$time] S> [DESYNC] $name (op=$opcode, claimed ${size}B) payload withheld — $detail")
+    }
 
     fun logClientPacket(opcode: Int, size: Int, payload: ByteArray) =
         emit('C', codec.clientProtName(opcode), opcode, size, payload, decoded = decodeClient(opcode, payload))

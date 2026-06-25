@@ -122,8 +122,13 @@ data class IfSetNpcHead(val scale: Int, val componentHash: Int, val partA: Int, 
 /** IF_SETOBJECT (op 100, 10B) per A1 §2.1. */
 data class IfSetObject(val objectSlot: Int, val objectCount: Int, val componentHash: Int) : ServerProt
 
-/** IF_SETANIM (op 106, 10B) per A1 §2.1. */
-data class IfSetAnim(val componentHash: Int, val frame: Int, val animId: Int) : ServerProt
+/**
+ * Unknown SetComponentProperty propType-3 packet (op 86 in 948 / op 106 in 947, 10B).
+ * Wire shape: componentHash (int) + short + int. Canonical name UNKNOWN — this is NOT IF_SETANIM
+ * (the canonical IF_SETANIM is op103, see [IfSetAnim]). Renamed from the misleading `IfSetAnim`
+ * (binary-verified 2026-06-25; op86 = SetComponentProperty propType 3, distinct from op103 propType 5).
+ */
+data class IfSetComponentProp3(val componentHash: Int, val frame: Int, val animId: Int) : ServerProt
 
 /** IF_SETCOLOUR (op 122, 8B) per A1 §2.1. */
 data class IfSetColour(val colour24: Int, val componentHash: Int) : ServerProt
@@ -142,8 +147,12 @@ data class IfSetPlayerHeadActive(val flag: Int, val componentHash: Int) : Server
 /** IF_SETRECOL (op 44, 6B) per A1 §2.2. RGB-555 expanded client-side to 24-bit. */
 data class IfSetRecol(val rgb555: Int, val componentHash: Int) : ServerProt
 
-/** IF_SET2DANGLE (op 53, 8B) per A1 §2.2. */
-data class IfSet2DAngle(val angle: Int, val componentHash: Int) : ServerProt
+/**
+ * IF_SETGRAPHIC (op 30 in 948 / op 53 in 947, 8B). update-type 0xd. value = graphicId/spriteId.
+ * Was misnamed `IfSet2DAngle`: the handler the Ghidra DB labeled IF_SET2DANGLE actually decodes as
+ * the official IF_SETGRAPHIC (binary-verified 2026-06-25, handler @0x00193f10).
+ */
+data class IfSetGraphic(val graphicId: Int, val componentHash: Int) : ServerProt
 
 /** IF_SET_MODEL_FRAME (op 64, 8B) per A1 §2.2. */
 data class IfSetModelFrame(val frame: Int, val componentHash: Int) : ServerProt
@@ -154,8 +163,15 @@ data class IfSetNpcModel(val componentHash: Int, val modelId: Int, val npcId: In
 /** IF_SETMODELORIGIN (op 88, 10B) per A1 §2.2. */
 data class IfSetModelOrigin(val componentHash: Int, val x: Int, val y: Int, val z: Int) : ServerProt
 
-/** IF_SETGRAPHIC (op 92, 8B) per A1 §2.2. */
-data class IfSetGraphic(val graphicId: Int, val componentHash: Int) : ServerProt
+/**
+ * IF_SETANIM (op 103 in 948 / op 92 in 947, 8B). update-type 5. value = animationId (seq id).
+ * Was misnamed `IfSetGraphic`: the handler the Ghidra DB labeled IF_SETGRAPHIC actually decodes as
+ * the official IF_SETANIM (binary-verified 2026-06-25, handler @0x00193fe0).
+ *
+ * This is the canonical IF_SETANIM. op86 (see [IfSetComponentProp3]) is a distinct
+ * SetComponentProperty propType-3 packet, NOT IF_SETANIM (binary-verified 2026-06-25).
+ */
+data class IfSetAnim(val animationId: Int, val componentHash: Int) : ServerProt
 
 /** IF_SETSPRITE (op 123, 8B) per A1 §2.2. */
 data class IfSetSprite(val componentHash: Int, val spriteValue: Int) : ServerProt
@@ -702,32 +718,53 @@ data class JcoinsUpdate(val balance: Int) : ServerProt
 // === Rebuild packets (per A2) ===
 
 /**
- * REBUILD_NORMAL — opcode 90, varShort — the simple-form rebuild handler at 0x002140c0
- * (`ClientState::REBUILD_NORMAL_SIMPLE`). Used for normal world login per A2 §3.
+ * REBUILD_NORMAL — the simple single-scene login rebuild (947-3 op 90; **948 op 81**).
  *
- * Wire format (16 bytes): chunkX BE u16 + forceRefresh byte + regionLow LE u16 + magic 0x7B
- * byte + chunkZ BE u16 + packedCoordA BE u32 + packedCoordB BE u32.
+ * 948-5 wire format — FIXED 18-byte body (varShort framed), binary-confirmed against handler
+ * `jag::packethandlers::ClientState::REBUILD_NORMAL @ 0x001daa70`:
  *
- * `packedCoordA/B` use the BuildArea decomposition `(plane << 28) | (y << 14) | x`.
+ * ```
+ *  [0]      u8   reserved0   = 0          (read, discarded by client)
+ *  [1..2]   u16  playerCoordX  LITTLE-endian
+ *  [3]      u8   magic       = 0x85       (MANDATORY — handler no-ops unless body[3]==0x85)
+ *  [4..5]   u16  playerCoordY  BIG-endian
+ *  [6]      u8   cameraAngle              (client stores (wireByte + 0x80) & 0xff)
+ *  [7]      u8   reserved7   = 0          (read, discarded)
+ *  [8..9]   u16  worldAreaTypeId  BIG-endian
+ *  [10..13] u32  srcPackedCoord1  BIG-endian  (BuildArea::DecodePackedCoord)
+ *  [14..17] u32  srcPackedCoord2  BIG-endian  (BuildArea::DecodePackedCoord)
+ * ```
+ *
+ * Carries NO XTEA keys and NO map-square payload: the client loads map/loc/XTEA data for the
+ * scene from the JS5 cache. Packed coords use `(plane << 28) | (y << 14) | x` (tile units;
+ * 0xFFFFFFFF = unset). `playerCoordX/Y` are CHUNK coordinates (the handler computes the local
+ * scene focus as `(val - sceneBaseChunks) * 8`). `worldAreaTypeId` is only consulted when the
+ * world-entity build manager is active (instanced regions); for a plain overworld build it is
+ * ignored and the default world area is used (see WorldServer caller + Rev948 codec notes).
  */
 data class RebuildNormalSimple(
-    val chunkX: Int,
-    val chunkZ: Int,
-    val forceRefresh: Boolean,
-    val regionLow: Int,
-    val packedCoordA: Int,
-    val packedCoordB: Int,
+    val playerCoordX: Int,
+    val playerCoordY: Int,
+    val cameraAngle: Int,
+    val worldAreaTypeId: Int,
+    val srcPackedCoord1: Int,
+    val srcPackedCoord2: Int,
 ) : ServerProt
 
 /**
- * REBUILD_REGION — opcode 172, varShort — multi-scene grid form for INSTANCED regions per
- * A2 §2. Field structure (per-scene seed + primary/secondary descriptor lists + per-cell XTEA
- * grid) is heavy; modelled as opaque payload until a downstream consumer needs structured
- * access. B4 will define the scene record API when an instanced-region flow is wired up.
+ * Multi-scene grid rebuild for INSTANCED regions (947-3 op172; 948 op199) per A2 §2. Field
+ * structure (per-scene seed + primary/secondary descriptor lists + per-cell XTEA grid) is heavy;
+ * modelled as opaque payload until a downstream consumer needs structured access. B4 will define
+ * the scene record API when an instanced-region flow is wired up.
+ *
+ * NAMING (2026-06-25): renamed from `RebuildRegion` to avoid a display-name collision with the
+ * canonical op83 REBUILD_REGION. The 948-5 binary (jag::ServerProt::RegisterAll + handler
+ * ClientState::REBUILD_NORMAL @0x001daa70, 0x7B/0x85 magic) confirms op199 is the multi-scene
+ * REBUILD_NORMAL form, distinct from op83's REBUILD_REGION_ALT (bit-packed coords @0x001df100).
  */
-data class RebuildRegion(val payload: ByteArray) : ServerProt {
+data class RebuildNormalMultiScene(val payload: ByteArray) : ServerProt {
     override fun equals(other: Any?): Boolean = this === other ||
-        (other is RebuildRegion && payload.contentEquals(other.payload))
+        (other is RebuildNormalMultiScene && payload.contentEquals(other.payload))
     override fun hashCode(): Int = payload.contentHashCode()
 }
 

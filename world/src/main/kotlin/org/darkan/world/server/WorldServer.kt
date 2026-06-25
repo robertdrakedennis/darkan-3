@@ -28,6 +28,7 @@ import org.darkan.world.net.PlayerInfoBuilder
 import org.darkan.world.social.SocialClient
 import org.darkan.world.world.Players
 import world.gregs.voidps.buffer.*
+import world.gregs.voidps.type.Tile
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.secure.RSA
 import world.gregs.voidps.cache.secure.decryptXtea
@@ -312,6 +313,12 @@ object WorldServer {
                 // doing it here avoids a refactor of Viewport's init order.
                 player.viewport.highResIndices[0] = playerIndex
 
+                // Spawn the avatar at the Lumbridge tile that matches the op81 REBUILD_NORMAL focus
+                // (chunk 400,400 -> tile centre 3204,3204; see sendWorldLoginCore). The first
+                // PLAYER_INFO (op 22) teleports the local player to exactly THIS tile (Player.teleporting
+                // is true at construction), so the avatar lands inside the scene the client just built.
+                player.tile = Tile(SPAWN_TILE_X, SPAWN_TILE_Y, SPAWN_PLANE)
+
                 // Step 13: Send WorldLoginDetails (pre-ISAAC, via noIsaac=true)
                 session.send(
                     WorldLoginDetails(
@@ -337,7 +344,9 @@ object WorldServer {
                 // Step 15: Send initial PLAYER_INFO / NPC_INFO so the client renders the
                 // local avatar before the tick loop's first per-tick build lands. After this
                 // the WorldTick loop will drive subsequent updates at 600ms cadence.
-                session.send(PlayerInfoBuilder.buildInit(player))
+                // PLAYER_INFO uses the single 4-pass build form; the local player's high-res
+                // entry teleports to its spawn tile (Player.teleporting set at construction).
+                session.send(PlayerInfoBuilder.build(player))
                 session.send(NpcInfoBuilder.buildInit(player))
                 session.flush()
 
@@ -425,17 +434,27 @@ object WorldServer {
             else session.send(UpdateStat(i, 0, 1))
         }
 
-        // 4. Map build — place player at Lumbridge (tile 3200, 3200 = chunk 400, 400)
+        // 4. Map build — place player at Lumbridge (tile 3204, 3204 = chunk 400, 400)
         //
-        // Per A2 §3 / `docs/net/serverprot/rebuild-947-3.md`, REBUILD_NORMAL is opcode 90
-        // (varShort) and its simple form has the byte layout:
-        //   chunkX BE u16, forceRefresh u8, regionLow LE u16, magic 0x7B, chunkZ BE u16,
-        //   packedCoordA BE u32, packedCoordB BE u32
-        // where packedCoord = (plane << 28) | (y << 14) | x.
+        // REBUILD_NORMAL is 948 op 81 (varShort), a FIXED 18-byte body (see RebuildNormalSimple /
+        // Rev948ServerCodecsRebuild). It carries NO XTEA/map payload — the client loads the scene's
+        // map/loc/XTEA from the JS5 cache. Magic byte 0x85 at body offset 3 is mandatory.
         //
-        // MVP: regionLow defaults to 0 (no config-provider world area), and we pack
-        // packedCoordA/B with the player's tile so the BuildArea scene cache lookup
-        // resolves to the same chunk we encoded into the bit-packed PLAYER_INFO position.
+        // FIELD UNITS — per 948-5 handler 0x001daa70 analysis (networking-protocol-engineer):
+        //   * playerCoordX/Y are CHUNK coordinates, NOT tiles. The handler computes the local scene
+        //     focus as (val - sceneBaseChunks) * 8, so val must be in chunk units (8 tiles) for the
+        //     focus to land inside the 104-tile scene; raw tile values would push it far off-scene.
+        //   * srcPackedCoord1/2 carry the tile-precise position, packed (plane<<28)|(tileY<<14)|tileX;
+        //     the client uses x>>6 / y>>6 (map-square units) to instance the scene.
+        //   * worldAreaTypeId = 0: IGNORED for a normal overworld build. The handler only consults it
+        //     when the world-entity build manager (Client+0xca6, state field +0x3c == 4) is active
+        //     (instanced / world-entity regions). For a plain Lumbridge login the gate is false, so
+        //     the scene is built from the default world area (NullConfigType @0x015d4d60) using only
+        //     the two packed coords. 0 is therefore safe (an unknown id resolves to NullConfigType too).
+        //
+        // TODO(world-owner): confirm against a clean 18-byte Lumbridge op81 capture. The only capture
+        //   on hand was Fort Forinthry (a construct-region area), so playerCoordX/Y units (chunk vs
+        //   tile) and a non-zero worldAreaTypeId, if ever required, are not yet runtime-verified.
         val chunkX = 400
         val chunkZ = 400
         val playerTileX = chunkX * 8 + 4    // tile centre within the chunk
@@ -443,12 +462,12 @@ object WorldServer {
         val packedCoord = (0 shl 28) or ((playerTileY and 0x3FFF) shl 14) or (playerTileX and 0x3FFF)
         session.send(
             RebuildNormalSimple(
-                chunkX = chunkX,
-                chunkZ = chunkZ,
-                forceRefresh = true,
-                regionLow = 0,
-                packedCoordA = packedCoord,
-                packedCoordB = packedCoord,
+                playerCoordX = chunkX,
+                playerCoordY = chunkZ,
+                cameraAngle = 0,
+                worldAreaTypeId = 0,
+                srcPackedCoord1 = packedCoord,
+                srcPackedCoord2 = packedCoord,
             )
         )
 
@@ -622,6 +641,14 @@ object WorldServer {
      * traffic while still catching floods quickly.
      */
     private const val MAX_PACKETS_PER_RATE_WINDOW = 2_000
+
+    /**
+     * Lumbridge spawn tile. Matches the op81 REBUILD_NORMAL focus chunk (400,400 -> tile centre
+     * 3204,3204) so the first PLAYER_INFO (op 22) teleport lands the avatar inside the built scene.
+     */
+    private const val SPAWN_TILE_X = 3204
+    private const val SPAWN_TILE_Y = 3204
+    private const val SPAWN_PLANE = 0
 
     /** Top-level interface ID for the character creation / gamemode selection screen. */
     private const val CHARACTER_CREATION_INTERFACE = 1349

@@ -133,6 +133,11 @@ pub fn extract_rsa_modulus(params: &[(String, String)]) -> Option<String> {
     params.iter().find(|(k, _)| k == "99").map(|(_, v)| v.clone())
 }
 
+/// Extract JS5 RSA modulus from param=100 if present
+pub fn extract_js5_modulus(params: &[(String, String)]) -> Option<String> {
+    params.iter().find(|(k, _)| k == "100").map(|(_, v)| v.clone())
+}
+
 // ---------------------------------------------------------------------------
 // Cross-platform Jagex launcher (`rs3*`) acquisition into the per-OS layout.
 //

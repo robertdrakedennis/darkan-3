@@ -219,6 +219,34 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
                         } else {
                             call.respondText("Client binary not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
                         }
+                    } else if (path.contains("darkan_patcher")) {
+                        // Serve the per-OS LD_PRELOAD/DLL RSA patcher side-by-side with the
+                        // client binary. The launcher fetches this from the SAME custom config
+                        // server before launch, so the patcher it loads always matches THIS
+                        // server's RSA keys + client build (no reliance on a locally-staged
+                        // copy that could be stale or absent). OS is inferred from the requested
+                        // file name: .dll → windows, .dylib → macos, .so → linux.
+                        val patcherName = when {
+                            path.contains("darkan_patcher.dll") -> "darkan_patcher.dll"
+                            path.contains("libdarkan_patcher.dylib") -> "libdarkan_patcher.dylib"
+                            else -> "libdarkan_patcher.so"
+                        }
+                        val os = when {
+                            patcherName.endsWith(".dll") -> "windows"
+                            patcherName.endsWith(".dylib") -> "macos"
+                            else -> "linux"
+                        }
+                        // clientBinaryPath defaults to ./data/client/linux/rs2client → the
+                        // patcher lives at ./data/client/<os>/<patcherName>, beside the binary.
+                        val clientRoot = java.io.File(EnvVars.clientBinaryPath).parentFile?.parentFile
+                        val file = clientRoot?.let { java.io.File(java.io.File(it, os), patcherName) }
+                        if (file != null && file.exists()) {
+                            logInfo("Serving patcher (os=$os): ${file.absolutePath} (${file.length()} bytes)")
+                            call.respondFile(file)
+                        } else {
+                            logWarn("Patcher for os=$os not found at ${file?.absolutePath ?: "(client root unresolved)"}")
+                            call.respondText("Patcher not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                        }
                     } else {
                         call.respondText("Not Found", ContentType.Text.Plain, HttpStatusCode.NotFound)
                     }
@@ -412,7 +440,13 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=58=https://account.jagex.com/")
         line("param=59=http://$host:${EnvVars.configHttpPort}/")   // auth RS URL (was auth.runescape.com)
         line("param=60=0")
-        line("param=99=${EnvVars.loginRsaModulusHex}")  // hex RSA modulus for client patcher
+        line("param=99=${EnvVars.loginRsaModulusHex}")   // hex login RSA modulus (1024-bit) for client patcher
+        // hex JS5 RSA modulus (4096-bit) for the client patcher: the launcher reads
+        // this and exports DARKAN_JS5_RSA_MODULUS so the patcher swaps the client's
+        // embedded JS5 key. Without it the client verifies our master index with
+        // Jagex's key, fails, and disconnects right after receiving index 255/255.
+        // Non-standard param (like 99) — the client ignores it; only the launcher reads it.
+        line("param=100=${EnvVars.js5RsaModulusHex}")
     }
 
     companion object {

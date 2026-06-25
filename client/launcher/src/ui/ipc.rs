@@ -6,9 +6,10 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 use crate::auth::types::{Account, Session};
-use crate::config::{Config, Credentials, Paths, SavedSession};
+use crate::config::{Config, Credentials, Paths, SavedSession, ServerMode};
 use crate::game::control::ClientStatus;
-use crate::game::process::LaunchParams;
+use crate::game::process::{LaunchParams, PatchEnv};
+use url::Url;
 
 /// Messages from JS to Rust
 #[derive(Debug, Deserialize)]
@@ -126,7 +127,7 @@ fn do_launch_live(
     params: &LaunchParams,
     data_dir: &Path,
     custom_cmd: Option<&str>,
-    rsa_modulus: Option<&str>,
+    patch: PatchEnv<'_>,
     auto_inject: bool,
     close_after: bool,
 ) {
@@ -136,7 +137,7 @@ fn do_launch_live(
         Some(params),
         data_dir,
         custom_cmd,
-        rsa_modulus,
+        patch,
         None, // no working_dir for live mode
     ) {
         Ok(pid) => {
@@ -446,10 +447,6 @@ impl IpcState {
                 }
             };
 
-            // Live mode connects to official Jagex servers with an unmodified
-            // client — no RSA patch.
-            let rsa_modulus: Option<String> = None;
-
             // Check for updates
             send_status("Checking for updates...");
             let pkg_info = match crate::game::rs3::fetch_package_info(&client).await {
@@ -471,7 +468,7 @@ impl IpcState {
                             &params,
                             &paths.data_dir,
                             custom_cmd.as_deref(),
-                            rsa_modulus.as_deref(),
+                            PatchEnv::default(),
                             auto_inject,
                             close_after,
                         );
@@ -544,7 +541,7 @@ impl IpcState {
                 &params,
                 &paths.data_dir,
                 custom_cmd.as_deref(),
-                rsa_modulus.as_deref(),
+                PatchEnv::default(),
                 auto_inject,
                 close_after,
             );
@@ -578,14 +575,14 @@ impl IpcState {
             format!("http://{}:8829/jav_config.ws", host)
         });
 
-        // ~/darkan-3 is the sole runtime directory for custom mode
-        let darkan_dir = std::path::PathBuf::from(
-            std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
-        )
-        .join("darkan-3");
+        // Custom/private-server mode gets its OWN data dir (a `custom/` subdir of
+        // the launcher data dir) so its cache, prefs, rs3linux/rs2client binaries
+        // and creds never mix with the official install. This is both the
+        // HOME-redirect target (set in process.rs) and the client's CWD.
+        let darkan_dir = self.paths.data_dir_for_mode(&ServerMode::Custom);
 
         let launcher_name = crate::game::process::launcher_binary_name();
-        // Per-OS source layout: data/client/<host-os>/{rs3*, patcher lib}
+        // Per-OS source layout: data/client/<host-os>/{rs3*, patcher lib, rs2client}
         let os_dir = crate::game::process::host_os_dir();
         let patcher_name = crate::game::process::patcher_lib_name();
 
@@ -610,7 +607,7 @@ impl IpcState {
                 );
             };
 
-            // Ensure ~/darkan-3 exists
+            // Ensure the custom-mode data dir exists
             if let Err(e) = tokio::fs::create_dir_all(&darkan_dir).await {
                 send_error(&format!(
                     "Failed to create {}: {}",
@@ -620,8 +617,8 @@ impl IpcState {
                 return;
             }
 
-            // Ensure the rs3 launcher is in ~/darkan-3; seed from the host-OS
-            // folder data/client/<host-os>/ if needed.
+            // Ensure the rs3 launcher is in the custom data dir; seed from the
+            // host-OS folder data/client/<host-os>/ if needed.
             let target_binary = darkan_dir.join(launcher_name);
             if !target_binary.exists() {
                 let client_root = std::path::PathBuf::from("data").join("client");
@@ -647,7 +644,12 @@ impl IpcState {
                 if source.exists() {
                     send_status("Installing launcher binary...");
                     if let Err(e) = tokio::fs::copy(&source, &target_binary).await {
-                        send_error(&format!("Failed to copy {} to ~/darkan-3: {}", launcher_name, e));
+                        send_error(&format!(
+                            "Failed to copy {} to {}: {}",
+                            launcher_name,
+                            darkan_dir.display(),
+                            e
+                        ));
                         return;
                     }
                     // Preserve executable permission
@@ -661,50 +663,149 @@ impl IpcState {
                     }
                 } else {
                     send_error(&format!(
-                        "{} not found in ~/darkan-3 or ./data/client/{}/ (and auto-download unavailable)",
-                        launcher_name, os_dir
+                        "{} not found in {} or ./data/client/{}/ (and auto-download unavailable)",
+                        launcher_name,
+                        darkan_dir.display(),
+                        os_dir
                     ));
                     return;
                 }
             }
 
-            // Also seed the host's patcher library (linux .so / mac .dylib /
-            // win .dll) if available and not yet in ~/darkan-3.
+            // Seed the host's patcher library from the config server (primary)
+            // or local candidate slots (fallback). Always overwrite so a
+            // freshly built patcher propagates on every launch (cp -f
+            // semantics). If no source is found and the target is also absent,
+            // the hard-fail check below catches it with a clear error message.
             let target_patcher = darkan_dir.join(patcher_name);
-            if !target_patcher.exists() {
-                // Check the per-OS data folder, then next to the launcher exe,
-                // then the dev build path.
-                let dev_crate = if cfg!(target_os = "macos") {
-                    "patcher-mac"
-                } else {
-                    "patcher"
+            {
+                // Derive the config-server base URL by stripping the final
+                // path segment from config_uri (after removing any query
+                // string).
+                // e.g. "http://localhost:8829/jav_config.ws"
+                //       → "http://localhost:8829/"
+                //      "http://h/k=5/l=0/jav_config.ws"
+                //       → "http://h/k=5/l=0/"
+                let base_url = {
+                    let without_query = match config_uri.find('?') {
+                        Some(q) => &config_uri[..q],
+                        None => config_uri.as_str(),
+                    };
+                    match without_query.rfind('/') {
+                        Some(last_slash) => format!("{}/", &without_query[..last_slash]),
+                        None => format!("{}/", without_query),
+                    }
                 };
-                let candidates = [
-                    Some(
-                        std::path::PathBuf::from("data")
-                            .join("client")
-                            .join(os_dir)
-                            .join(patcher_name),
-                    ),
-                    std::env::current_exe()
-                        .ok()
-                        .and_then(|e| e.parent().map(|p| p.join(patcher_name))),
-                    std::env::current_exe().ok().and_then(|e| {
-                        e.parent().map(|p| {
-                            p.join("..")
-                                .join("..")
-                                .join("..")
-                                .join(dev_crate)
-                                .join("target")
-                                .join("release")
-                                .join(patcher_name)
-                        })
-                    }),
-                ];
-                for candidate in candidates.iter().flatten() {
-                    if candidate.exists() {
-                        let _ = tokio::fs::copy(candidate, &target_patcher).await;
-                        break;
+                let patcher_url = format!("{}{}", base_url, patcher_name);
+
+                // --- Primary: fetch patcher from the config server ---
+                let fetch_client = crate::http_client();
+                let server_ok = match fetch_client.get(&patcher_url).send().await {
+                    Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+                        Ok(bytes) if !bytes.is_empty() => {
+                            match tokio::fs::write(&target_patcher, &bytes).await {
+                                Ok(()) => {
+                                    #[cfg(unix)]
+                                    {
+                                        use std::os::unix::fs::PermissionsExt;
+                                        let _ = std::fs::set_permissions(
+                                            &target_patcher,
+                                            std::fs::Permissions::from_mode(0o755),
+                                        );
+                                    }
+                                    send_status(&format!(
+                                        "Fetched patcher from {} ({} bytes)",
+                                        patcher_url,
+                                        bytes.len()
+                                    ));
+                                    log::info!(
+                                        "Patcher fetched from {} ({} bytes) -> {}",
+                                        patcher_url,
+                                        bytes.len(),
+                                        target_patcher.display()
+                                    );
+                                    true
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Failed to write patcher fetched from {}: {}",
+                                        patcher_url,
+                                        e
+                                    );
+                                    false
+                                }
+                            }
+                        }
+                        Ok(_) => {
+                            log::warn!(
+                                "Patcher fetch from {} returned empty body",
+                                patcher_url
+                            );
+                            false
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to read patcher response body from {}: {}",
+                                patcher_url,
+                                e
+                            );
+                            false
+                        }
+                    },
+                    Ok(resp) => {
+                        log::warn!(
+                            "Patcher fetch from {} returned HTTP {}",
+                            patcher_url,
+                            resp.status()
+                        );
+                        false
+                    }
+                    Err(e) => {
+                        log::warn!("Patcher fetch from {} failed: {}", patcher_url, e);
+                        false
+                    }
+                };
+
+                // --- Fallback: local candidate slots ---
+                if !server_ok {
+                    let dev_crate = if cfg!(target_os = "macos") {
+                        "patcher-mac"
+                    } else {
+                        "patcher"
+                    };
+                    let candidates = [
+                        Some(
+                            std::path::PathBuf::from("data")
+                                .join("client")
+                                .join(os_dir)
+                                .join(patcher_name),
+                        ),
+                        std::env::current_exe()
+                            .ok()
+                            .and_then(|e| e.parent().map(|p| p.join(patcher_name))),
+                        std::env::current_exe().ok().and_then(|e| {
+                            e.parent().map(|p| {
+                                p.join("..")
+                                    .join("..")
+                                    .join("..")
+                                    .join(dev_crate)
+                                    .join("target")
+                                    .join("release")
+                                    .join(patcher_name)
+                            })
+                        }),
+                    ];
+                    for candidate in candidates.iter().flatten() {
+                        if candidate.exists() {
+                            if let Err(e) = tokio::fs::copy(candidate, &target_patcher).await {
+                                log::warn!(
+                                    "Failed to update patcher {}: {}",
+                                    target_patcher.display(),
+                                    e
+                                );
+                            }
+                            break;
+                        }
                     }
                 }
             }
@@ -739,8 +840,44 @@ impl IpcState {
                 .custom_rsa_modulus
                 .clone()
                 .or_else(|| crate::game::rs3::extract_rsa_modulus(&jav_params));
+            // JS5 RSA modulus comes from param=100 in jav_config.ws
+            let js5_modulus = crate::game::rs3::extract_js5_modulus(&jav_params);
+            // HTTP port derived from the config-server URL (e.g. 8829 for
+            // http://localhost:8829/jav_config.ws). Left None when the URL has
+            // no explicit port so the patcher skips the HTTP-port override.
+            let http_port = Url::parse(&config_uri).ok().and_then(|u| u.port());
 
-            // Launch from ~/darkan-3 — rs3linux will auto-download rs2client from config server
+            // Hard-fail on Linux if the patcher or RSA modulus is missing.
+            // Without the patcher, rs3linux downloads a binary that fails Jagex
+            // RSA verification and exits with "Error saving file (14)". On
+            // Windows the injector handles its own DLL lookup, so we don't fail
+            // there; on macOS the same logic applies but is not yet enforced.
+            #[cfg(all(unix, not(target_os = "macos")))]
+            {
+                if crate::game::process::find_patcher_library(&target_binary).is_none() {
+                    send_error(
+                        "Custom server requires libdarkan_patcher.so but it was not found in \
+                         any search location. Run the patcher build+deploy script, which \
+                         compiles it and copies it to every location the launcher looks in:\n\
+                         \n  client/launcher/patcher/build.sh\n\
+                         \nThen launch again.",
+                    );
+                    return;
+                }
+                if rsa_modulus.is_none() {
+                    send_error(
+                        "Custom server requires an RSA modulus (for the patcher) but none was \
+                         found. Either set custom_rsa_modulus in the launcher config, or ensure \
+                         the jav_config.ws served by the custom server includes param=99 with \
+                         the hex modulus.",
+                    );
+                    return;
+                }
+            }
+
+            // Launch from the custom data dir — rs3linux auto-downloads rs2client
+            // from the config server. HOME + RS_CACHE_DIR are redirected here by
+            // launch_rs3, so cache/prefs/binaries all land under this dir.
             send_status("Launching rs3linux (Custom server)...");
             match crate::game::process::launch_rs3(
                 &target_binary,
@@ -748,8 +885,12 @@ impl IpcState {
                 None,
                 &darkan_dir,
                 custom_cmd.as_deref(),
-                rsa_modulus.as_deref(),
-                Some(&darkan_dir), // CWD = ~/darkan-3
+                PatchEnv {
+                    rsa_modulus: rsa_modulus.as_deref(),
+                    js5_modulus: js5_modulus.as_deref(),
+                    http_port,
+                },
+                Some(&darkan_dir), // CWD = custom data dir
             ) {
                 Ok(pid) => {
                     send_status("Game launched!");

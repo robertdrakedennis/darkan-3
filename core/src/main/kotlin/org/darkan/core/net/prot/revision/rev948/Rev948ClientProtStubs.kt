@@ -57,7 +57,7 @@ internal fun Codec.registerRev948ClientProtStubs() {
     c(10, "IF_BUTTOND", 16)                           // CONF:HIGH — beta InterfaceManager::UpdateDragging→&ClientProt::IF_BUTTOND; 16B 2-component drag (entry 0x015d3e10). 948-5 cross-confirm: jag::PacketHandler::SendComponentDrag attributes the descriptor; layout shortLE+intME+shortLE+shortBEA+shortBE+intLE matches IF_BUTTOND 2-component drag (see docs/net/948-5-delta-from-948-2.md §3 op 10).
     c(11, "UNKNOWN_11", 3)                            // CONF:NONE — shim FUN_0015c3d0 → FUN_0015c100 else-branch (3B comp-target); no provable official name
     c(12, "UNKNOWN_12", -1)                           // CONF:NONE — fn SendMultiDisplayPackets @ 0x001a2d90 (entry 0x015d3de0); no MULTI_DISPLAY official enum. 948-5 sender attribution: jag::ClientWatch::MainLogic — still no official jag::ClientProt enum match; stays UNKNOWN_12 (see docs/net/948-5-delta-from-948-2.md §3, Q5 periodic-emit family).
-    c(13, "UNKNOWN_13", 8)                            // CONF:NONE — UNBOUND (CS2 data-table 0x01365960)
+    c(13, "IF_BUTTON9", 8)                            // CONFIRMED (2026-06-25, capture) — CS2 dispatch table 0x01365920 indexed by (button-1): slot8 = op13 = IF_BUTTON9. 8B click: interfaceHash intLittle + slotId uShortAddLittle + itemId uShortAdd. Decoder in Rev948ClientCodecs.
     c(14, "ABORT_P_DIALOG", 0)                        // CONF:HIGH — beta Resume::Resume lambda#7→&ClientProt::ABORT_P_DIALOG; 948 emitter @ 0x002d0040 size-0 dialog-abort (entry 0x015d3dc0). NOT the keepalive (that is op51).
     c(15, "EVENT_MOUSE_CLICK", 6)                     // CONF:HIGH — beta ClientWatch::MainLogic→&ClientProt::EVENT_MOUSE_CLICK; 948 SendEventMouseClick @ 0x001805b0 (entry 0x015d3db0). 948-5 cross-confirm: jag::ClientProt::SendMouseClick attributes the descriptor; 4B intME + 2B shortLE matches EVENT_MOUSE_CLICK (see docs/net/948-5-delta-from-948-2.md §3 op 15).
     c(16, "UNKNOWN_16", 6)                            // CONF:NONE — CS2 SendIfButtonN_CS2 @0x002d9970 component-press, not a click (size-sanity VETO: no interfaceHash/slot/item). Only one IF_BUTTON1..10 set exists and it's owned by the size-8 clicks; this carries no official enum.
@@ -65,9 +65,9 @@ internal fun Codec.registerRev948ClientProtStubs() {
     c(18, "UNKNOWN_18", 17)                           // PROBABLE: OPLOCT — beta DoOpLoc->&OPLOCT long-form (beta 0x00a395d8); 948 SendOpLocTLong entry 0x015d3d80 (17B). Layout family-match but exact send-site not isolated -> stays UNKNOWN (strict).
     c(19, "UNKNOWN_19", 9)                            // CONF:NONE — UNBOUND (RegisterAll only)
     c(20, "UNKNOWN_20", -1)                           // CONF:NONE — fn SendOpObjCS2_2 @ 0x002a24c0 (entry 0x015d3d60); no official OPOBJ*_CS2 enum
-    c(21, "IF_BUTTON10", 8)                           // CONFIRMED — beta 0x00a395c8 / 948 IfButtonXInner 0x002978d0, CS2-table opt10 slot 0x01365968->ProtEntry 0x015d3d50 (xref-verified). 8B click: interfaceHash intLittle + slotId uShortAddLittle + itemId uShortAdd. Decoder in Rev948ClientCodecs.
+    c(21, "IF_BUTTON8", 8)                            // CONFIRMED (2026-06-25, capture) — CS2 dispatch table 0x01365920 indexed by (button-1): slot7 = op21 = IF_BUTTON8 (CORRECTED from IF_BUTTON10; the slot order 127,103,92,45,30,68,43,21,13,23 = IF_BUTTON1..10). 8B click: interfaceHash intLittle + slotId uShortAddLittle + itemId uShortAdd. Decoder in Rev948ClientCodecs.
     c(22, "UNKNOWN_22", 3)                            // CONF:NONE — FUN_002d9970 IF_BUTTON family, entry not in 1-10 switch → generic 3B comp; no provable official name
-    c(23, "UNKNOWN_23", 8)                            // CONF:NONE — UNBOUND (RegisterAll only)
+    c(23, "IF_BUTTON10", 8)                           // CONFIRMED (2026-06-25, capture) — CS2 dispatch table 0x01365920 indexed by (button-1): slot9 = op23 = IF_BUTTON10. 8B click: interfaceHash intLittle + slotId uShortAddLittle + itemId uShortAdd. Decoder in Rev948ClientCodecs.
     c(24, "UNKNOWN_24", 7)                            // PROBABLE: OPOBJ1 — SendOpTargetOption_CS2 case->OPOBJ1; beta DoOpObj OPOBJ family 7B tile-coord+id+flag (beta 0x00a39548). Case-to-N mapping inferred, not byte-diffed -> stays UNKNOWN (strict).
     c(25, "UNKNOWN_25", 11)                           // CONF:NONE — FUN_00aeeb60 outlier entry 0x015bfb40; server-active-props transmit; no provable official name
     c(26, "RESUME_P_COUNTDIALOG", -2)                 // CONF:HIGH — 948 SendResumeCountDialog @ 0x002cfdb0 CS2 count-pair (entry 0x015d3d10); official enum
@@ -182,5 +182,7 @@ private fun Codec.c(opcode: Int, name: String, size: Int) {
         -2 -> ProtSize.VarShort
         else -> ProtSize.Fixed(size)
     }
-    clientProtInfo.putIfAbsent(opcode, Codec.ProtInfo(name, protSize))
+    // Canonical official UPPER_SNAKE name wins for the DISPLAYED name; the decoder's authoritative
+    // size (when present) is preserved. See Codec.clientProtStub.
+    clientProtStub(opcode, name, protSize)
 }

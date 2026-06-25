@@ -26,7 +26,7 @@
 // Resolve the real user home from the passwd db, NOT $HOME — the launcher
 // (bolt) overrides $HOME to its own data dir, which is where crash logs were
 // silently landing and why they appeared "missing".
-static const char *resolve_real_home() {
+const char *resolve_real_home() {
     struct passwd *pw = getpwuid(getuid());
     if (pw && pw->pw_dir && pw->pw_dir[0]) return pw->pw_dir;
     const char *h = std::getenv("HOME");

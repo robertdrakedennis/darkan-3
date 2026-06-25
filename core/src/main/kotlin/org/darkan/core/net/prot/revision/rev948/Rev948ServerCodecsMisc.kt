@@ -67,8 +67,10 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
         out.writeByte(energy)
     }
 
-    // SET_DISPLAY_INT (op 74, 4B) — was op 59 (JCOINS_UPDATE) in 947-3.
-    serverProt<JcoinsUpdate>(opcode = 74, size = 4) { out ->
+    // JCOINS_UPDATE (op 191, 4B). OPCODE REBIND (2026-06-25 oracle): JCOINS_UPDATE is op191
+    //   (HANDLER_ID_HIGH, handler ClientState::UNKNOWN_op0xBF_handler), NOT op74. op74 is
+    //   Misc::SET_DISPLAY_INT (UNKNOWN). This encoder previously sent on op74 (wrong opcode).
+    serverProt<JcoinsUpdate>(opcode = 191, size = 4) { out ->
         out.writeInt(balance)
     }
 

@@ -205,7 +205,20 @@ fn patch_rsa() {
     // string in .rodata (256 chars for 1024-bit key). At startup, FUN_001706b0
     // parses it into a jag::math::BigInteger. We replace the hex string in-place
     // so the BigInteger parser loads our custom modulus instead.
-    if let Some(ref modulus_hex_clean) = modulus_hex_clean {
+    //
+    // GATED on is_rs2client: these rs2client key patches must NOT run in the
+    // rs3linux launcher process. There the binary-specific scan misses, so
+    // find_first_with_fallback searches the all-file-backed FALLBACK pool and
+    // matches a copy of the prefix elsewhere in the address space; the write
+    // (1024 bytes for JS5) then corrupts adjacent patcher memory and silently
+    // breaks the rs3linux codebase-regex patch below — leaving the launcher's
+    // codebase check on the original Jagex regex, which rejects our
+    // http://localhost:<port>/ codebase → rs3linux "Error saving file (13)".
+    // The rs2client CHILD process runs its own ctor (is_rs2client=true) and
+    // patches these keys correctly via its binary-specific scan.
+    if !is_rs2client {
+        eprintln!("[darkan-patcher] Non-rs2client process: skipping rs2client login + JS5 key patches");
+    } else if let Some(ref modulus_hex_clean) = modulus_hex_clean {
         match pad_modulus_hex(modulus_hex_clean, RS2CLIENT_MODULUS_HEX_LEN) {
             Some(replacement_str) => {
                 let replacement_bytes = replacement_str.as_bytes();
@@ -242,7 +255,11 @@ fn patch_rsa() {
     // The version table / master index signature is verified using a separate 4096-bit key
     // stored at DAT_016e7330, loaded from a 1024-char hex string in .rodata.
     // Skipped in proxy mode: JS5 goes directly to Jagex, so their key must remain.
-    if proxy_mode {
+    if !is_rs2client {
+        // rs2client JS5 key patch — skipped in the rs3linux process (see the
+        // is_rs2client gating note on Patch 1 above; running it here corrupts the
+        // codebase-regex patch via the all-file-backed fallback pool).
+    } else if proxy_mode {
         eprintln!("[darkan-patcher] Proxy mode: skipping JS5 RSA modulus patch");
     } else if let Some(ref js5_hex) = js5_modulus_hex {
         match pad_modulus_hex(js5_hex, RS2CLIENT_JS5_MODULUS_HEX_LEN) {

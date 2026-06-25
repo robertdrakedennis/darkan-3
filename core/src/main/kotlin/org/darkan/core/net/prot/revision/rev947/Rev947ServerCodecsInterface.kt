@@ -177,8 +177,9 @@ internal fun Codec.registerRev947ServerCodecsInterface() {
         out.writeIntInverseMiddle(componentHash)
     }
 
-    // IF_SETANIM (op 106, 10B) — wire: g4_alt2 componentHash; g4_alt3 frame; g2_alt2 animId.
-    serverProt<IfSetAnim>(opcode = 106, size = 10) { out ->
+    // UNKNOWN propType-3 (op 106, 10B) — wire: g4_alt2 componentHash; g4_alt3 frame; g2_alt2 animId.
+    //   NOT IF_SETANIM (that is op92). Class renamed IfSetAnim → IfSetComponentProp3; wire UNCHANGED.
+    serverProt<IfSetComponentProp3>(opcode = 106, size = 10) { out ->
         out.writeIntMiddle(componentHash)
         out.writeIntInverseMiddle(frame)
         out.writeByte((animId ushr 8) and 0xFF)
@@ -219,9 +220,10 @@ internal fun Codec.registerRev947ServerCodecsInterface() {
         out.writeIntMiddle(componentHash)
     }
 
-    // IF_SET2DANGLE (op 53, 8B) — wire: g4_alt3 angle; g4_alt1 componentHash.
-    serverProt<IfSet2DAngle>(opcode = 53, size = 8) { out ->
-        out.writeIntInverseMiddle(angle)
+    // IF_SETGRAPHIC (op 53, 8B) — wire: g4_alt3 graphicId; g4_alt1 componentHash.
+    //   Class renamed IfSet2DAngle → IfSetGraphic (shared with rev948 op30); wire UNCHANGED.
+    serverProt<IfSetGraphic>(opcode = 53, size = 8) { out ->
+        out.writeIntInverseMiddle(graphicId)
         out.writeIntLittle(componentHash)
     }
 
@@ -252,9 +254,10 @@ internal fun Codec.registerRev947ServerCodecsInterface() {
         out.writeShortLittle(z)
     }
 
-    // IF_SETGRAPHIC (op 92, 8B) — wire: g4_alt3 graphicId; g4_alt3 componentHash.
-    serverProt<IfSetGraphic>(opcode = 92, size = 8) { out ->
-        out.writeIntInverseMiddle(graphicId)
+    // IF_SETANIM (op 92, 8B) — wire: g4_alt3 animationId; g4_alt3 componentHash.
+    //   Canonical IF_SETANIM (shared with rev948 op103); class IfSetAnim; wire UNCHANGED.
+    serverProt<IfSetAnim>(opcode = 92, size = 8) { out ->
+        out.writeIntInverseMiddle(animationId)
         out.writeIntInverseMiddle(componentHash)
     }
 

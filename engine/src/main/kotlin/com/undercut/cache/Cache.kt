@@ -83,10 +83,32 @@ class Cache private constructor() {
     }
 
     companion object {
-        private val PATH: Path = Paths.get(
-            System.getenv("RS_CACHE_DIR")
-                ?: "${System.getProperty("user.home")}/.local/share/bolt-launcher/Jagex/RuneScape"
-        )
+        private val PATH: Path = resolveCacheDir()
+
+        /**
+         * Resolve the live NXT client cache dir. `RS_CACHE_DIR` (exported by the darkan launcher,
+         * chosen per server mode — official vs custom) is authoritative; otherwise probe the known
+         * launcher locations and pick the first that actually holds a cache. The injected engine
+         * runs inside rs2client whose HOME the launcher redirects to its data dir, so the cache
+         * lands at `$HOME/Jagex/RuneScape`. The resolved dir is logged so a wrong/empty path is
+         * obvious on inject.
+         */
+        private fun resolveCacheDir(): Path {
+            System.getenv("RS_CACHE_DIR")?.let {
+                println("[Cache] cache dir = $it (RS_CACHE_DIR)")
+                return Paths.get(it)
+            }
+            val home = System.getProperty("user.home")
+            val candidates = listOf(
+                "$home/Jagex/RuneScape",                              // launcher redirects HOME -> its data dir
+                "$home/.local/share/darkan-launcher/Jagex/RuneScape", // data dir resolved from the real HOME
+            )
+            val chosen = candidates.firstOrNull { dir ->
+                Files.isDirectory(Paths.get(dir)) && (0..255).any { Files.exists(Paths.get(dir, "js5-$it.jcache")) }
+            } ?: candidates.first()
+            println("[Cache] cache dir = $chosen (probed; RS_CACHE_DIR unset)")
+            return Paths.get(chosen)
+        }
 
         @Volatile
         private var instance: Cache? = null

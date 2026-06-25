@@ -92,13 +92,18 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
     // IF_OPENSUB (op 94, 8B). 948 wire (re-derived from handler 0x00194100 disasm):
     //   subId = LE i16 (no transform); walkable = LE i16 (no transform); parentHash = BE u32.
     // CHANGED from 947-3 (which used g2_alt2/g2_alt2/g4_alt1). See 948-research-B doc.
+    // Opcode/size are AUTHORITATIVE from the deterministic prot dump (948-prot-tables-dump.csv):
+    //   SERVER op94 = IF_OPENSUB size 8; op82 = IF_SETPOSITION size 23 (below). NOT swapped — a
+    //   prior handler-id "oracle" swap got these backwards and broke lobby login.
     serverProt<IfOpenSub>(opcode = 94, size = 8) { out ->
         out.writeShortLittle(subId)
         out.writeShortLittle(walkable)
         out.writeInt(parentHash)
     }
 
-    // IF_SETPOSITION (op 82, 23B). 948 wire (handler 0x00189180, disasm verified + live capture):
+    // IF_SETPOSITION (op 82, 23B). Opcode/size AUTHORITATIVE from the deterministic prot dump
+    //   (948-prot-tables-dump.csv): SERVER op82 = IF_SETPOSITION size 23. (Confirmed by the live
+    //   948 lobby capture, which the lobby login depends on.) Wire (handler 0x00189180):
     //   [0]      byte LAYER. Client computes ((-byte) - 0x80) & 0xFF, so byte = writeByteSubtract(layer).
     //   [1..4]   gT_unsigned_int DISCARD.
     //   [5..8]   g4_alt3 POSITION = packed parent component hash ((parentInterface<<16)|slot).
@@ -108,8 +113,7 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
     //   [17..20] gT_unsigned_int DISCARD.
     //   [21..22] LE u16 COMPONENTID = child interface id placed at the slot (handler reads
     //            byte22*0x100 + byte21 == writeShortLittle(componentId)) → passed to GetInterface.
-    //   Verified against live 948 lobby capture: layer=1→0x7F, position=(906<<16)|44=0x038A002C →
-    //   bytes `8A 03 2C 00`, componentId=907 → bytes `8B 03`.
+    //   Capture: layer=1→0x7F, position=(906<<16)|44=0x038A002C → `8A 03 2C 00`, componentId=907 → `8B 03`.
     serverProt<IfSetPosition>(opcode = 82, size = 23) { out ->
         out.writeByteSubtract(layer)         // [0]
         out.skip(4)                          // [1..4]
@@ -227,9 +231,10 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
         out.writeShortLittle(objectSlot)
     }
 
-    // IF_SETANIM (op 86, 10B). 948 wire (0x00185740): componentHash = g4_alt1; frame = BE u16;
-    //   animId = BE u32. CHANGED from 947-3.
-    serverProt<IfSetAnim>(opcode = 86, size = 10) { out ->
+    // UNKNOWN_86 — SetComponentProperty propType 3 (op 86, 10B). 948 wire (0x00185740):
+    //   componentHash = g4_alt1; frame = BE u16; animId = BE u32. CHANGED from 947-3.
+    //   NOT IF_SETANIM (that is op103). Class renamed IfSetAnim → IfSetComponentProp3; wire UNCHANGED.
+    serverProt<IfSetComponentProp3>(opcode = 86, size = 10) { out ->
         out.writeIntLittle(componentHash)
         out.writeShort(frame)
         out.writeInt(animId)
@@ -275,11 +280,13 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
         out.writeIntLittle(componentHash)
     }
 
-    // IF_SET2DANGLE (op 30, 8B). 948 wire (0x00193f10): componentHash = g4_alt3 FIRST;
-    //   angle = g4_alt3. CHANGED from 947-3 (order + componentHash transform).
-    serverProt<IfSet2DAngle>(opcode = 30, size = 8) { out ->
+    // IF_SETGRAPHIC (op 30, 8B). 948 wire (handler 0x00193f10, binary-verified): update-type 0xd,
+    //   HASH-then-VALUE — componentHash [0..3] g4_alt3, graphicId [4..7] g4_alt3.
+    //   Class renamed IfSet2DAngle → IfSetGraphic: the handler the DB labeled IF_SET2DANGLE is the
+    //   official IF_SETGRAPHIC. (Wire layout was already correct; only the class/field names changed.)
+    serverProt<IfSetGraphic>(opcode = 30, size = 8) { out ->
         out.writeIntInverseMiddle(componentHash)
-        out.writeIntInverseMiddle(angle)
+        out.writeIntInverseMiddle(graphicId)
     }
 
     // IF_SET_MODEL_FRAME (op 38, 8B). 948 wire (0x00185b70): frame = g4_alt3; componentHash = g4_alt3.
@@ -306,9 +313,11 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
         out.writeShortLittle(z)
     }
 
-    // IF_SETGRAPHIC (op 103, 8B).
-    serverProt<IfSetGraphic>(opcode = 103, size = 8) { out ->
-        out.writeIntInverseMiddle(graphicId)
+    // IF_SETANIM (op 103, 8B). 948 wire (handler 0x00193fe0, binary-verified): update-type 5,
+    //   VALUE-then-HASH — animationId [0..3] g4_alt3, componentHash [4..7] g4_alt3.
+    //   Canonical IF_SETANIM. op86 is a distinct propType-3 packet (IfSetComponentProp3), NOT this.
+    serverProt<IfSetAnim>(opcode = 103, size = 8) { out ->
+        out.writeIntInverseMiddle(animationId)
         out.writeIntInverseMiddle(componentHash)
     }
 
@@ -345,12 +354,15 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
         out.writeIntMiddle(part2)
     }
 
-    // IF_SETSCROLLPOS (op 179, 9B).
+    // IF_SETSCROLLPOS (op 179, 9B). 948 wire (handler 0x001938e0, binary-verified). Field order is
+    //   scrollY [0..1] g2_add_le (low byte first, carries +128); subSlot [2] g1_sub (128 - v);
+    //   scrollX [3..4] g2_le; componentHash [5..8] g4_alt3. CHANGED: prior encoder wrote scrollY BE,
+    //   componentHash BE, and subSlot byteAdd in the wrong slot order.
     serverProt<IfSetScrollPos>(opcode = 179, size = 9) { out ->
-        out.writeShort(scrollY)
-        out.writeInt(componentHash)
-        out.writeShortLittle(scrollX)
-        out.writeByteAdd(subSlot)
+        out.writeShortAddLittle(scrollY)          // [0..1] g2_add_le
+        out.writeByteSubtract(subSlot)            // [2]    g1_sub
+        out.writeShortLittle(scrollX)             // [3..4] g2_le
+        out.writeIntInverseMiddle(componentHash)  // [5..8] g4_alt3
     }
 
     // ---------------------------------------------------------------------

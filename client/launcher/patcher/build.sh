@@ -26,6 +26,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CRATE_DIR="$SCRIPT_DIR"
 BUILT_SO="$CRATE_DIR/target/release/$LIB_NAME"
 
+# Repo root is DERIVED from this script's own location — the crate lives at
+# <repo>/client/launcher/patcher, so three parents up is the repo root. NEVER
+# hardcode a project path: the checkout can live anywhere (this repo is
+# darkan-3-undercut; an older one was ~/projects/darkan-3) and the build must
+# deploy into THIS checkout's data/client tree, not some unrelated path.
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
 # --- Source-of-truth RSA login-key markers ------------------------------------
 # The compiled .so does NOT store these 32-char hex prefixes as one contiguous
 # ASCII run: rustc lowers the byte-string literals into inline x86 immediates,
@@ -88,19 +95,25 @@ DEST_PATHS=(
     # Alternate data dir used by run-client.sh (it sets HOME=~/.darkan3).
     "$HOME/.darkan3/$LIB_NAME"
     "$HOME/.darkan3/Jagex/launcher/$LIB_NAME"
+    # Launcher CUSTOM-mode data dir (ServerMode::Custom => <data dir>/custom).
+    # This is the rs3linux CWD + "next to client binary" slot for a custom server
+    # launch — the exact path that was unpatched in the "Error saving file" repro.
+    "$HOME/.local/share/darkan-launcher/custom/$LIB_NAME"
+    "$HOME/.local/share/darkan-launcher/custom/Jagex/launcher/$LIB_NAME"
     # ~/darkan-3: explicit search path in find_patcher_library AND the custom-mode
     # cwd / rs3linux location in ui/ipc.rs (find_patcher_library hits it as
     # "next to client binary" for rs3linux). Also noted as required in project memory.
     "$HOME/darkan-3/$LIB_NAME"
     "$HOME/darkan-3/Jagex/launcher/$LIB_NAME"
-    # Project tree copies (project root + ./data/client/linux used by run-client.sh
-    # and find_patcher_library's data/client/<host-os>/ slot).
-    "$HOME/projects/darkan-3/$LIB_NAME"
-    "$HOME/projects/darkan-3/data/client/linux/$LIB_NAME"
+    # THIS checkout's project tree (repo-root-derived — NOT a hardcoded path).
+    # data/client/linux is run-client.sh's PATCHER_SO and find_patcher_library's
+    # first (data/client/<host-os>/) slot; project root is a legacy fallback slot.
+    "$REPO_ROOT/$LIB_NAME"
+    "$REPO_ROOT/data/client/linux/$LIB_NAME"
     # Next to the launcher executable itself (release + debug) — find_patcher_library's
-    # first candidate, and the dev "../patcher/target/release" candidate.
-    "$HOME/projects/darkan-3/client/launcher/target/release/$LIB_NAME"
-    "$HOME/projects/darkan-3/client/launcher/target/debug/$LIB_NAME"
+    # "next to the launcher exe" candidate, and the dev "../patcher/target/release" one.
+    "$REPO_ROOT/client/launcher/target/release/$LIB_NAME"
+    "$REPO_ROOT/client/launcher/target/debug/$LIB_NAME"
 )
 
 # --- Deploy -------------------------------------------------------------------

@@ -29,16 +29,17 @@ import world.gregs.voidps.buffer.readUShortAddLittle
  *  - FRIENDLIST_ADD:         948 op 100 (SendFriendlistAdd @ 0x0026a530)
  *  - CLANCHANNEL_KICKUSER:   948 op 89 (SendSocialRequest @ 0x0026aef0, varByte)
  *  - RESUME_P_NAMEDIALOG:    948 op 71 (Resume::Resume lambda#4, varByte length-prefixed UTF8)
- *  - IF_BUTTON1..7/10:       948 op 127/103/92/45/30/68/43/21 (IfButtonXInner short path, 8B click)
+ *  - IF_BUTTON1..10:         948 op 127/103/92/45/30/68/43/21/13/23 (IfButtonXInner short path, 8B click)
  *  - MESSAGE_PUBLIC:         948 op 124 (SendMessagePublic @ 0x0037a9c0)
  *  - MESSAGE_PRIVATE:        948 op 38 (SendMessagePrivate @ 0x00306dd0)
  *
- * **IF_BUTTON fix (948 re-validation):** the size-8 interface CLICK opcodes are
+ * **IF_BUTTON fix (2026-06-25 capture):** the size-8 interface CLICK opcodes are
  * IF_BUTTON1=op127, IF_BUTTON2=op103, IF_BUTTON3=op92, IF_BUTTON4=op45, IF_BUTTON5=op30,
- * IF_BUTTON6=op68, IF_BUTTON7=op43, IF_BUTTON10=op21 (dispatched by IfButtonXInner @0x002978d0
- * via the CS2 ProtEntry table @0x01365920). op35 is IF_PLAYER (the long-path use-button-on-player,
- * varByte) and is NOT registered as IfButton here. The size-3 ops 39/73/47/33/108/56/91/50/16/40
- * are SendIfButtonN_CS2 component-presses (NOT clicks) and remain UNKNOWN.
+ * IF_BUTTON6=op68, IF_BUTTON7=op43, IF_BUTTON8=op21, IF_BUTTON9=op13, IF_BUTTON10=op23
+ * (dispatched by IfButtonXInner @0x002978d0 via the CS2 ProtEntry table @0x01365920, indexed by
+ * (button-1); slot order 127,103,92,45,30,68,43,21,13,23). op35 is IF_PLAYER (the long-path
+ * use-button-on-player, varByte) and is NOT registered as IfButton here. The size-3 ops
+ * 39/73/47/33/108/56/91/50/16/40 are SendIfButtonN_CS2 component-presses (NOT clicks) and remain UNKNOWN.
  */
 internal fun Codec.registerRev948ClientProts() {
     // NO_TIMEOUT keepalive — 948 dedicated emitter is op 51 (ProcessConnections/MainLogic timer).
@@ -85,16 +86,18 @@ internal fun Codec.registerRev948ClientProts() {
         ResumePNameDialog(name = readRSString())
     }
 
-    // IF_BUTTON1..IF_BUTTON7 + IF_BUTTON10 — the canonical interface CLICK family (size 8).
-    // RESOLVED (948 re-validation): the size-8 click opcodes are dispatched by
+    // IF_BUTTON1..IF_BUTTON10 — the canonical interface CLICK family (size 8).
+    // RESOLVED (2026-06-25 capture): the size-8 click opcodes are dispatched by
     // jag::InterfaceManager::IfButtonXInner @0x002978d0, which indexes the CS2 ProtEntry pointer
-    // table @0x01365920 by [option-1]. Each option maps to a distinct opcode (xref-verified):
+    // table @0x01365920 by [option-1]. The full slot order (slot0..slot9) is
+    //   127, 103, 92, 45, 30, 68, 43, 21, 13, 23  ==  IF_BUTTON1..IF_BUTTON10  (xref + capture-verified):
     //   opt1->op127, opt2->op103, opt3->op92, opt4->op45, opt5->op30, opt6->op68, opt7->op43,
-    //   opt10->op21. (opt8/opt9 reuse op20/op10 ProtEntries; op10=IF_BUTTOND drag-16B, op20=UNKNOWN
-    //   — they are NOT labelled IF_BUTTON8/9.)
+    //   opt8->op21, opt9->op13, opt10->op23.
+    // CORRECTION: the prior mapping had op21=IF_BUTTON10 and treated op13/op23 as unbound. The CS2
+    //   table is dense across all 10 slots; op21=IF_BUTTON8, op13=IF_BUTTON9, op23=IF_BUTTON10.
     // 8-byte wire layout: interfaceHash = WriteUInt32LE (readUIntLittle, bytes0-3 LE);
     //   slotId = uShortAddLittle (byte4=lo-128, byte5=hi); itemId = uShortAdd (byte6=hi, byte7=lo-128).
-    // buttonId carries the option index (1..7,10) per opcode.
+    // buttonId carries the option index (1..10) per opcode.
     // NOTE: op35 is NOT a click — it is IF_PLAYER (use-button-on-player, varByte, the IfButtonXInner
     //   long-path where the component carries a string). Do NOT register IfButton at op35.
     ifButtonClick(opcode = 127, buttonId = 1)
@@ -104,7 +107,9 @@ internal fun Codec.registerRev948ClientProts() {
     ifButtonClick(opcode = 30, buttonId = 5)
     ifButtonClick(opcode = 68, buttonId = 6)
     ifButtonClick(opcode = 43, buttonId = 7)
-    ifButtonClick(opcode = 21, buttonId = 10)
+    ifButtonClick(opcode = 21, buttonId = 8)
+    ifButtonClick(opcode = 13, buttonId = 9)
+    ifButtonClick(opcode = 23, buttonId = 10)
 
     // MESSAGE_PUBLIC
     clientProt<MessagePublicSend>(

@@ -153,6 +153,36 @@ impl Paths {
         restrict_dir_permissions(&self.data_dir);
         Ok(())
     }
+
+    /// The data directory (and `HOME`-redirect target) for a given server mode.
+    ///
+    /// * [`ServerMode::Live`] → the canonical shared data dir
+    ///   (`~/.local/share/darkan-launcher`). This is the location the injected
+    ///   Undercut engine reads from for official play, so live cache/prefs/
+    ///   binaries stay where the engine and any existing install expect them.
+    /// * [`ServerMode::Custom`] → a `custom/` subdir of it
+    ///   (`~/.local/share/darkan-launcher/custom`), so a private server's cache,
+    ///   preferences, `rs3linux`/`rs2client` binaries and creds never mix with
+    ///   the official install.
+    ///
+    /// A subdir (rather than a sibling) is the cleanest fit for how paths are
+    /// built here: it stays under the single `ProjectDirs` root that
+    /// `ensure_dirs` already creates and restricts to 0700, and that
+    /// `migrate_data_dir` relocates as one unit.
+    pub fn data_dir_for_mode(&self, mode: &ServerMode) -> PathBuf {
+        match mode {
+            ServerMode::Live => self.data_dir.clone(),
+            ServerMode::Custom => self.data_dir.join("custom"),
+        }
+    }
+}
+
+/// The NXT client cache directory under a given data dir. The client writes its
+/// SQLite JS5 cache to `$HOME/Jagex/RuneScape`, and the launcher redirects
+/// `HOME` to the mode-selected data dir — so this is the same path exported as
+/// `RS_CACHE_DIR` for the injected engine to read.
+pub fn cache_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("Jagex").join("RuneScape")
 }
 
 /// Restrict a directory to owner-only access (0700). No-op on non-unix.

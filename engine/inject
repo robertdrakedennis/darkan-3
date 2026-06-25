@@ -137,7 +137,7 @@ inject_undercut() {
     return $?
 }
 
-process_name="/bolt-launcher/Jagex/launcher/rs2client"
+process_name="/.darkan3/Jagex/launcher/rs2client"
 echo "Searching for processes matching: $process_name"
 
 mapfile -t all_pids < <(find_all_processes "$process_name")

@@ -246,5 +246,7 @@ private fun Codec.s(opcode: Int, name: String, size: Int) {
         -2 -> ProtSize.VarShort
         else -> ProtSize.Fixed(size)
     }
-    serverProtInfo.putIfAbsent(opcode, Codec.ProtInfo(name, protSize))
+    // Canonical official UPPER_SNAKE name wins for the DISPLAYED name; the encoder's authoritative
+    // size (when present) is preserved. See Codec.serverProtStub.
+    serverProtStub(opcode, name, protSize)
 }
