@@ -20,18 +20,16 @@ import org.darkan.world.world.Viewport
  * positions the camera and JS5/cache are healthy — both settled; the scene stream was the missing
  * piece.) Latest production streams **606 op78** before the HUD root commit.
  *
- * ## Scene window + base origin (empirically derived; byte-exact vs the production capture)
+ * ## Scene window + base origin
  *
- * The rendered scene is the classic RS **13×13 zone block (104×104 tiles) centred on the spawn**,
- * across planes 0–3. Each op78 carries the zone in **build-area-local** coordinates:
+ * The rendered scene is the classic RS **13×13 zone block (104×104 tiles) centred on the spawn**.
+ * Each op78 carries a zone coordinate relative to the scene-state base at local zone 16, so the
+ * southwest streamed zone `(centre - 6)` is sent as local `10`. This matches production's first
+ * op78 byte sample `80 76 0a` without tying the op78 local space to op81's packed build-area SW.
  *
- *     localZone = sceneZone − buildAreaSWzone
- *
- * where `buildAreaSWzone` is the build area's SW corner in zones (the client's `base608`/`base60c`,
- * set from op81's `packedCoordA`). For the default MEDIUM build area the spawn sits 2 regions
- * (16 zones) from the SW corner, so the window lands at local **[10..22]** with the spawn at local
- * **16** — identical to production. Verification: the first production op78 `80 76 0a` decodes to
- * `(level 0, local (10,10))` = the scene's SW corner, which this streamer reproduces exactly.
+ * The packed op81 build-area bounds are still needed for map-square allocation/JS5, but they are
+ * not the coordinate origin for op78. Production rev948 uses much larger packed bounds while op78
+ * remains in the same `[10..22]` scene-local range.
  *
  * ## Ordering (critical)
  *
@@ -43,6 +41,9 @@ object ZoneStreamer {
 
     /** Half-extent of the render scene in zones: a `2*RADIUS+1` = 13-zone (104-tile) square. */
     const val SCENE_RADIUS_ZONES: Int = 6
+
+    /** Local scene zone assigned to the centre zone by the client scene state. */
+    const val SCENE_CENTER_LOCAL_ZONE: Int = 16
 
     /** Scene planes streamed (0–3). */
     const val SCENE_PLANES: Int = 4
@@ -58,10 +59,8 @@ object ZoneStreamer {
     suspend fun streamScene(session: GameSession, viewport: Viewport) {
         val centreZoneX = viewport.buildAreaChunkX
         val centreZoneZ = viewport.buildAreaChunkY
-        // Build-area SW corner in ZONE units (region << 3 = region * 8 zones-per-region). This is
-        // the client's op78 base608/base60c, established by op81's packedCoordA.
-        val baseZoneX = viewport.buildArea.minRegion.x shl 3
-        val baseZoneZ = viewport.buildArea.minRegion.y shl 3
+        val baseZoneX = sceneBaseZone(centreZoneX)
+        val baseZoneZ = sceneBaseZone(centreZoneZ)
         for (level in 0 until SCENE_PLANES) {
             for (zoneX in (centreZoneX - SCENE_RADIUS_ZONES)..(centreZoneX + SCENE_RADIUS_ZONES)) {
                 for (zoneZ in (centreZoneZ - SCENE_RADIUS_ZONES)..(centreZoneZ + SCENE_RADIUS_ZONES)) {
@@ -90,6 +89,8 @@ object ZoneStreamer {
         3 -> (relativeX to relativeY) !in LEVEL_3_OMIT
         else -> false
     }
+
+    internal fun sceneBaseZone(centreZone: Int): Int = centreZone - SCENE_CENTER_LOCAL_ZONE
 
     private val LEVEL_2_OMIT = setOf(
         -6 to -2,

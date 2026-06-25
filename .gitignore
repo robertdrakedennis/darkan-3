@@ -70,3 +70,9 @@ world/data/worldConfig.json
 mainlog.txt
 lobby-server.jar
 /capture/
+
+# Local Ghidra project databases are too large for GitHub.
+claude-re/ghidra/
+
+# Project-local Codex config may contain machine-specific MCP paths.
+.codex/config.toml

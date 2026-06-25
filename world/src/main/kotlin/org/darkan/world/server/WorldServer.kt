@@ -29,6 +29,8 @@ import org.darkan.world.net.GameHud
 import org.darkan.world.net.NpcInfoBuilder
 import org.darkan.world.net.Op81GpiPrefix
 import org.darkan.world.net.PlayerInfoBuilder
+import org.darkan.world.net.SceneMapCacheDiagnostics
+import org.darkan.world.net.SceneMapRegionPlanner
 import org.darkan.world.net.ZoneStreamer
 import org.darkan.world.entity.Player
 import org.darkan.world.entity.Rev948FirstLightVarpDefaults
@@ -588,6 +590,11 @@ object WorldServer {
             )
         )
         logTrace("World build area for ${player.account.username}: $buildArea centreZone=${centreZone.x},${centreZone.y} gpiPrefix=${gpiPrefix.size}B slot=${player.index}")
+        val sceneRegions = SceneMapRegionPlanner.regionsForScene(centreZone.x, centreZone.y)
+        logInfo(
+            "World scene map groups for ${player.account.username}: " +
+                SceneMapCacheDiagnostics.describe(Cache.get(), sceneRegions)
+        )
 
         val tokenBytes = ByteArray(32).also { loginRandom.nextBytes(it) }
         val token = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes)

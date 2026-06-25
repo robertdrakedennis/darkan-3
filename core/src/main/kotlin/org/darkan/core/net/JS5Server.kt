@@ -16,6 +16,7 @@ import world.gregs.voidps.buffer.*
 import world.gregs.voidps.cache.file.FileProvider
 import java.io.EOFException
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicIntegerArray
 
 data class JS5Request(val index: Int, val group: Int, val urgent: Boolean, val priority: Int, val ref: Long)
 
@@ -30,10 +31,28 @@ private class JS5ConnectionStats {
     val prefetch = AtomicInteger()
     val served = AtomicInteger()
     val misses = AtomicInteger()
+    val requestsByIndex = AtomicIntegerArray(256)
+    val servedByIndex = AtomicIntegerArray(256)
+    val missesByIndex = AtomicIntegerArray(256)
+    val lastGroupByIndex = AtomicIntegerArray(IntArray(256) { -1 })
     @Volatile var lastIndex = -1
     @Volatile var lastGroup = -1
     @Volatile var lastPriority = -1
     @Volatile var lastUrgent = false
+
+    fun markRequest(index: Int, group: Int) {
+        if (index !in 0..255) return
+        requestsByIndex.incrementAndGet(index)
+        lastGroupByIndex.set(index, group)
+    }
+
+    fun markServed(index: Int) {
+        if (index in 0..255) servedByIndex.incrementAndGet(index)
+    }
+
+    fun markMiss(index: Int) {
+        if (index in 0..255) missesByIndex.incrementAndGet(index)
+    }
 }
 
 class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
@@ -124,7 +143,9 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
             logInfo(
                 "JS5 session ended for $ip: requests=${stats.requests.get()} urgent=${stats.urgent.get()} prefetch=${stats.prefetch.get()} " +
                     "served=${stats.served.get()} misses=${stats.misses.get()} last=${stats.lastIndex}/${stats.lastGroup} " +
-                    "pri=${stats.lastPriority} ${if (stats.lastUrgent) "urgent" else "prefetch"}"
+                    "pri=${stats.lastPriority} ${if (stats.lastUrgent) "urgent" else "prefetch"} " +
+                    "requestsByIndex=${stats.requestsByIndex.nonZeroMapString()} servedByIndex=${stats.servedByIndex.nonZeroMapString()} " +
+                    "missesByIndex=${stats.missesByIndex.nonZeroMapString()} lastGroupByIndex=${stats.lastGroupByIndex.lastGroupMapString()}"
             )
         }
     }
@@ -170,6 +191,7 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
                         stats.lastGroup = group
                         stats.lastPriority = priority
                         stats.lastUrgent = urgent
+                        stats.markRequest(index, group)
                         if (requestCount <= 20 || requestCount % 1000 == 0) {
                             logInfo("JS5 processed $requestCount requests from $ip (latest index=$index group=$group ${if (urgent) "urgent" else "prefetch"} pri=$priority)")
                         }
@@ -282,9 +304,11 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
                 val ok = provider.serve(output, req.ref, prefetch = !req.urgent, xorKey = xorKey)
                 if (!ok) {
                     stats.misses.incrementAndGet()
+                    stats.markMiss(req.index)
                     logWarn("JS5 miss: index=${req.index} group=${req.group} from $ip")
                 } else {
                     stats.served.incrementAndGet()
+                    stats.markServed(req.index)
                 }
                 xorKey
             }
@@ -302,4 +326,22 @@ class JS5Server(val provider: FileProvider, val prefetchKeys: IntArray) {
             input.readShort()
         }
     }
+}
+
+private fun AtomicIntegerArray.nonZeroMapString(): String {
+    val values = ArrayList<String>()
+    for (index in 0 until length()) {
+        val count = get(index)
+        if (count != 0) values += "$index=$count"
+    }
+    return values.joinToString(prefix = "{", postfix = "}")
+}
+
+private fun AtomicIntegerArray.lastGroupMapString(): String {
+    val values = ArrayList<String>()
+    for (index in 0 until length()) {
+        val group = get(index)
+        if (group >= 0) values += "$index=$group"
+    }
+    return values.joinToString(prefix = "{", postfix = "}")
 }

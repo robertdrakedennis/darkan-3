@@ -3,6 +3,7 @@ package org.darkan.world.net
 import org.darkan.core.net.prot.LocAdd
 import org.darkan.core.net.prot.LocDel
 import org.darkan.core.net.prot.ObjAdd
+import world.gregs.voidps.type.Region
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -34,6 +35,30 @@ class ZoneStreamerTest {
         assertFalse(ZoneStreamer.shouldStream(3, -6, -2))
         assertTrue(ZoneStreamer.shouldStream(2, 6, 6))
         assertTrue(ZoneStreamer.shouldStream(3, 6, 6))
+    }
+
+    @Test
+    fun `scene base keeps production local range independent of build-area bounds`() {
+        val centreZone = 403
+        val baseZone = ZoneStreamer.sceneBaseZone(centreZone)
+
+        assertEquals(387, baseZone)
+        assertEquals(10, centreZone - ZoneStreamer.SCENE_RADIUS_ZONES - baseZone)
+        assertEquals(16, centreZone - baseZone)
+        assertEquals(22, centreZone + ZoneStreamer.SCENE_RADIUS_ZONES - baseZone)
+    }
+
+    @Test
+    fun `Lumbridge scene map planner covers visible region squares`() {
+        assertEquals(
+            setOf(
+                Region(49, 49),
+                Region(49, 50),
+                Region(50, 49),
+                Region(50, 50),
+            ),
+            SceneMapRegionPlanner.regionsForScene(400, 400),
+        )
     }
 
     @Test

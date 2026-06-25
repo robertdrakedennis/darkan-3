@@ -85,15 +85,13 @@ internal fun Codec.registerRev948ServerCodecsZone() {
         out.writeByteInverse(level)
         out.writeByte(zoneY)
         out.writeByteSubtract(zoneX)
-        if (subPackets.isNotEmpty()) {
-            // The 948 enclosed sub-opcode table (g_zoneSubProtVector @ DAT_015d4580) has not
-            // been RE'd, so sub-packet payloads CANNOT be encoded yet. Dropping them silently
-            // would lose zone state — warn loudly until the table is documented.
-            logWarn(
-                "UPDATE_ZONE_PARTIAL_ENCLOSED (op 76) dropped ${subPackets.size} sub-packet(s) — " +
-                    "948 enclosed sub-opcode table not yet RE'd; only the 3-byte zone header was sent. " +
-                    "TODO: document g_zoneSubProtVector in docs/net/serverprot/ and implement sub-packet encoding."
-            )
+        for (packet in subPackets) {
+            if (!out.writeEnclosedZoneSubPacket(packet)) {
+                logWarn(
+                    "UPDATE_ZONE_PARTIAL_ENCLOSED (op 76) cannot encode ${packet::class.simpleName}; " +
+                        "send it as a standalone zone update or add its rev948 sub-op mapping."
+                )
+            }
         }
     }
 
@@ -230,4 +228,24 @@ internal fun Codec.registerRev948ServerCodecsZone() {
         out.writeByte(0)
         out.writeRSString("")
     }
+}
+
+private suspend fun ByteWriteChannel.writeEnclosedZoneSubPacket(packet: ServerProt): Boolean =
+    when (packet) {
+        is LocAnim -> {
+            writeByte(13)
+            writeLocAnimBody(packet)
+            true
+        }
+        else -> false
+    }
+
+private suspend fun ByteWriteChannel.writeLocAnimBody(packet: LocAnim) {
+    writeByte(packet.packedCoord)
+    writeInt(packet.animId)
+    writeByte(packet.shapeFlags)
+    writeByte(packet.unknown1)
+    writeByte(packet.delay)
+    writeShort(packet.speed)
+    writeByte(packet.mode)
 }

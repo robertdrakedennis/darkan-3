@@ -1110,6 +1110,17 @@ data class LocAnimSpecific(
     val speed: Int,
 ) : ServerProt
 
+/** LOC_ANIM — rev948 enclosed zone sub-op 13, 11B. */
+data class LocAnim(
+    val packedCoord: Int,
+    val animId: Int,
+    val shapeFlags: Int,
+    val unknown1: Int,
+    val delay: Int,
+    val speed: Int,
+    val mode: Int,
+) : ServerProt
+
 /** LOC_MERGE — rev948 op 170, 5B. Merge a location's model with another entity. */
 data class LocMerge(val entityServerIndex: Int, val packedCoordAndShape: Int) : ServerProt
 
