@@ -1,3 +1,16 @@
+/*
+ * ⚠️ DEPRECATED — login MITM proxy.
+ *
+ * This proxy redirected the client's network traffic through a local listener to decode the
+ * live protocol (and required a patched client). In darkan-3-undercut it is SUPERSEDED by the
+ * Undercut engine's in-process `TcpIn` network sniffer, which reads the protocol directly from
+ * client memory after injection — NO network redirection required. See CLAUDE.md
+ * ("Unified Launcher & Injection" → "Proxy Deprecation").
+ *
+ * Retained (not deleted) ONLY until the engine sniffer's capture-export mode writes the
+ * capture/<session>/ format consumed by the :tools framingRegression / wireFormatVerify gates.
+ * Do not build new functionality on this; prefer the injected sniffer.
+ */
 package org.darkan.tools.loginproxy
 
 import kotlinx.io.Buffer

@@ -1,0 +1,342 @@
+{
+  "slug": "recipe-for-disaster-freeing-pirate-pete",
+  "name": "Recipe for Disaster: Freeing Pirate Pete",
+  "members": true,
+  "length": "short",
+  "timeline": "legendary",
+  "releaseDate": 1142380800,
+  "neededItems": [],
+  "recommendedItems": [],
+  "combatNPCs": [],
+  "prereqQuests": [
+    "Recipe for Disaster: Another Cook's Quest"
+  ],
+  "questReqs": [],
+  "steps": [
+    {
+      "title": "Pirate Pete",
+      "text": "Inspect Pirate Pete in the banquet hall in Lumbridge Castle.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Cook in the Lumbridge Castle.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Protecting the Pirate"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Where do I get Ground Cod?"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Where do I get Ground Giant Crab Meat?"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Where do I get Breadcrumbs?"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Thanks!"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": ""
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Diving",
+      "text": "Bank any Summoning pouches or Pets.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [
+        {
+          "name": "Fishbowl",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Needle",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Bronze wire",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        }
+      ],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Murphy on the docks of Port Khazard.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Talk about Recipe for Disaster."
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "With your fishbowl, talk to him again.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Talk about Recipe for Disaster."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Not just yet."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " Ok, well I'll be here if you change your mind."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Equip the fishbowl helmet and diving apparatus.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Whilst weighing under or exactly 27 kg, having your needle and bronze wire, talk to Murphy again.<ul><li>There is a bank deposit box next to Murphy.</li></ul>",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Talk about Recipe for Disaster."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Yes, Let's go diving."
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Pick some kelp (your inventory is hidden).<ul><li>It is advisable to obtain multiple in the event you burn the fishcake.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Swim north and talk to Nung.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Head west to the Mudskipper cave and pick up five rocks.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Enter the cave and equip your weapon.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill mudskippers for 5 hides.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Return to Nung with the five hides, your needle, and three bronze wire.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Nung again.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Enter the crab pen and equip your weapon.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill some crabs and take their meat.<ul><li>It is advised to obtain multiple in the event you burn the fishcake.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "While in the pen teleport out to Lumbridge.<ul><li>Alternatively, leave the crab pen and climb up the anchor chain to the south.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Freeing Pirate Pete",
+      "text": "Return to the kitchen in Lumbridge Castle.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [
+        {
+          "name": "Kelp (Mogre Camp)",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Crab meat",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Raw cod",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Bread",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        }
+      ],
+      "recommendedItems": []
+    },
+    {
+      "text": "Prepare the ingredients:<ul><li>Grind the kelp.</li><li>Choose the Grind option on the crab meat.</li><li>Choose the Grind option on the raw cod.</li><li>Choose the Slice option on the bread.</li><li>If at any point while preparing the ingredients, the message 'Nothing interesting happens' appears, talk to the Cook.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Cook.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Protecting the Pirate"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use the ingredients on each other.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Cook the Raw fishcake.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use fishcake on Pirate Pete.<ul><li>If the fishcake is eaten, you need to re-obtain all of the ingredients.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Subquest complete!",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    }
+  ],
+  "stageVarbit": 12753,
+  "stageVarbitCompleteValue": 110,
+  "cacheQuestId": 301
+}

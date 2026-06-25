@@ -1,0 +1,300 @@
+{
+  "slug": "dream-mentor",
+  "name": "Dream Mentor",
+  "members": true,
+  "length": "shortmedium",
+  "timeline": "legendary",
+  "releaseDate": 1179187200,
+  "neededItems": [],
+  "recommendedItems": [],
+  "combatNPCs": [],
+  "prereqQuests": [
+    "Lunar Diplomacy"
+  ],
+  "questReqs": [],
+  "steps": [
+    {
+      "title": "A helping hand",
+      "text": "Enter the mine in the north-east area of Lunar Isle.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Crawl-through the cave entrance (quest minimap icon).",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the fallen man (close the interface when it appears).",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "questInterfaceOpen"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "[Accept Quest]",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "questStarted"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Starting with one of your 7 item foods, feed him 4 food while cycling through your different foods.<ul><li>Starting with a food item of which you brought 7 items will ensure you do not run out of variety.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to him again.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Just don't worry."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Of course."
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Feed him 4 more food as before.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Raising his spirit",
+      "text": "Talk to repeatedly to raise his spirits:<ul><li>Of the four chat options, choose the one that appears on the table below.</li><li>Select the response according to the table.</li><li>Repeat until a short cutscene plays and he sits up.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "<table class=\"wikitable sortable mw-collapsible jquery-tablesorter mw-made-collapsible\"><thead><tr><th class=\"headerSort\" tabindex=\"0\" role=\"columnheader button\" title=\"Sort ascending\">Answer #1</th><th class=\"headerSort\" tabindex=\"0\" role=\"columnheader button\" title=\"Sort ascending\"><button type=\"button\" class=\"mw-collapsible-toggle mw-collapsible-toggle-default mw-collapsible-toggle-expanded\" aria-expanded=\"true\" tabindex=\"0\"><span class=\"mw-collapsible-text\">hide</span></button>Answer #2</th></tr></thead><tbody><tr style=\"\"><td>You seem like a nice guy.</td><td>Just being honest.</td></tr><tr style=\"\"><td>When we get out of here I'll buy you a drink!</td><td>Whatever and wherever you want - my treat.</td></tr><tr style=\"\"><td>I'm very impressed you managed to get into this cave.</td><td>I would have given up personally.</td></tr><tr style=\"\"><td>You'll survive this easily.</td><td>Think of all the places you can visit when you get out!</td></tr><tr style=\"\"><td>What are you going to do when you get out of here?</td><td>That's up to you. You could travel with me!</td></tr><tr style=\"\"><td>It's a good thing you have me to look after you.</td><td>Not that I'm bragging or anything.</td></tr><tr style=\"\"><td>Not long now and you'll be back on your feet!</td><td>On whether you mind me helping you further.</td></tr><tr style=\"\"><td>You're sounding much better.</td><td>If you need anything, just let me know.</td></tr><tr style=\"\"><td>It's quite cosy in here.</td><td>The perfect environment for getting back on your feet!</td></tr><tr style=\"\"><td>You're very safe in this little cave.</td><td>The suqah will never fit through that tunnel.</td></tr><tr style=\"\"><td>Just don't worry.</td><td>Of course.</td></tr><tr style=\"\"><td>You're looking better now.</td><td>Well, you look and sound more lively.</td></tr><tr style=\"\"><td>Are you looking forward to getting out?</td><td>That's the spirit!</td></tr><tr style=\"\"><td>Tell me a bit about yourself.</td><td>Fishing!</td></tr></tbody><tfoot></tfoot></table>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Feed him 6 more food.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to him and raise his spirit as before until he stands up.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Exit the cave and climb up the ladder.<ul><li>Or just use the Lunar Isle lodestone</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to 'Bird's-Eye' Jack in the bank.  You will need 1 free inventory space for Cyrisus's chest.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Cyrisus in the mine"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Select the equipment he needs. The equipment is usually, but not always, dependent on your highest combat stats (Magic, Ranged, Melee):<ul><li>Melee: Dragon helm, Abyssal whip, Ahrim's robe top, Ahrim's robe skirt, Ranger boots</li><li>Ranged: Splitbark Helm, Karil's top, Torag's platelegs, Adamant boots, Magic shortbow</li><li>Magic: Robin Hood hat, Dragon Chainbody, Black dragonhide chaps, Infinity boots, Ancient staff</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "You can use the NPC Contact spell to ensure you have the right equipment.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Return and talk to Cyrisus for a cutscene.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Talk about the Armament"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Right-click 'inspect' and fill the remaining stats until he tells you that he is ok (if not already).",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Dream potion",
+      "text": "Talk to the Oneiromancer at the astral altar (most south-eastern part of the Lunar Isle) for a dream vial (herb).",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Cyrisus"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Change your spellbook as necessary if you wish to use magic in the final fight.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use an astral rune on an anvil (there's one on Lunar Isle in a small building to the south), then grind the shards. Add it to the potion.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Prepare for 4 fights (below level 100). Prayers and emergency teleports won't work. Neither will familiars.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Dreamland",
+      "text": "Light the Ceremonial Brazier in the long hall building, near the lodestone.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Cyrisus (dismiss any followers before).<ul><li>Do not click away of the chat or you will be teleported out</li></ul>",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Yes, let's go!"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "During the fight, you can leave at any time by using the pedestal.<ul><li>Kill The Inadequacy</li><li>Kill The Everlasting (can safespot by the pedestal)</li><li>Kill The Untouchable (can safespot by the pedestal)</li><li>Kill The Illusive</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Return to the Oneiromancer.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Cyrisus"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Quest complete!",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    }
+  ],
+  "stageVarbit": 9530,
+  "stageVarbitCompleteValue": 28,
+  "cacheQuestId": 79
+}

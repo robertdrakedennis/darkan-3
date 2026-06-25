@@ -1,0 +1,227 @@
+{
+  "slug": "osseous-rex",
+  "name": "Osseous Rex",
+  "members": true,
+  "length": "short",
+  "timeline": "ageofchaos",
+  "releaseDate": 1716854400,
+  "neededItems": [],
+  "recommendedItems": [],
+  "combatNPCs": [],
+  "prereqQuests": [
+    "Anachronia base camp tutorial"
+  ],
+  "questReqs": [],
+  "steps": [
+    {
+      "title": "Learning about Osseous",
+      "text": "Talk to the 'Calm' Archaeologist at the rex skeleton in Anachronia base camp to begin the quest.",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "questInterfaceOpen"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "[Accept Quest]",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Yes."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "questStarted"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Head to the teleportation device in the spirit grove.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Activate the teleportation device.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Head east and talk to the 'Calm' Archaeologist.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Finding a teleportation crystal",
+      "text": "Go north-east towards the Matriarch lair entrance, and then through the archway to the north and follow the path anti-clockwise until you reach an Ancient Artefact (Inactive).",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [
+        {
+          "name": "Backpack",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        }
+      ],
+      "recommendedItems": []
+    },
+    {
+      "text": "Activate the Ancient Artefact (Inactive) to unlock the first gate.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go back to the area near the archaeologist and Pass Through the gate.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go south, then east, then north through the arch, and activate the second Ancient Artefact (Inactive).",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "A cutscene ensues, unlocking two more gates.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go south, looping around to the immediate west and Pass Through the gate.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go east, following the path south and around anti-clockwise up a hill.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Pass Through the gate.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Uncover the soil.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Excavate the crystallised rubble for a teleportation crystal (damaged).",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Finishing up",
+      "text": "Restore the teleportation crystal (damaged) at an archaeologist's workbench.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [
+        {
+          "name": "Teleportation crystal (damaged)",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Orthenglass",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        }
+      ],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the 'Calm' Archaeologist in the Rex Matriarch lair with the restored teleportation crystal.<ul><li>He will no longer be found in in the Anachronia base camp, you have to travel to the Rex Matriarch lair to speak with him.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Watch the cutscene.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Quest complete!",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    }
+  ],
+  "stageVarbit": 55491,
+  "stageVarbitCompleteValue": 30,
+  "cacheQuestId": 512
+}

@@ -1,0 +1,34 @@
+package com.undercut.traversal.nodes
+
+import com.undercut.game.Tile
+import com.undercut.profiling.PlayerProfiles
+import com.undercut.script.Script
+import com.undercut.script.api.localPlayer
+import com.undercut.script.api.walkTo
+import com.undercut.traversal.TraversalNode
+import com.undercut.util.gaussian
+
+class TileExactNode(
+    private val tile: Tile,
+    private val minimap: Boolean = false,
+    private var customReached: () -> Boolean
+) : TraversalNode() {
+    private var nextClick: Long = 0
+
+    override suspend fun process(script: Script): Boolean {
+        if (System.currentTimeMillis() < nextClick) return true
+        val success = walkTo(tile, minimap)
+        if (success) {
+            script.delayUntil(15000) { !localPlayer.isMoving }
+            nextClick = System.currentTimeMillis() + gaussian(PlayerProfiles.get().walkPathClickTime, PlayerProfiles.get().walkPathClickTime / 2)
+            return true
+        }
+        return false
+    }
+
+    override fun reached(script: Script) = customReached.invoke()
+
+    override fun copy(): TraversalNode = TileExactNode(this.tile, this.minimap, this.customReached)
+
+    override fun toString() = "[${this.tile}, ${this.minimap}]"
+}

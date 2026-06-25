@@ -1,0 +1,317 @@
+int, int script_6506(AttrMap attrmap0) {
+	if (getrs3AttributeMapValue(attrmap0, 2976) == 1) {
+		return VAR_2[2215], VAR_2[2216];
+	}
+	switch (attrmap0) {
+		case 14881:
+			return VAR_2[2091], VAR_2[2092];
+		case 14882:
+			return VAR_2[2091], VAR_2[2092];
+		case 29145:
+			return VAR_2[2091], VAR_2[4617];
+		case 14677:
+			return VAR_2[2093], VAR_2[2094];
+		case 14678:
+		case 40935:
+			return VAR_2[2095], VAR_2[2096];
+		case 14679:
+		case 44221:
+			return VAR_2[2097], VAR_2[2098];
+		case 44222:
+		case 44223:
+			return VAR_2[2099], VAR_2[2100];
+		case 14681:
+		case 44224:
+			return VAR_2[2101], VAR_2[2102];
+		case 14682:
+			return VAR_2[2103], VAR_2[2104];
+		case 28505:
+			return VAR_2[4231], VAR_2[4232];
+		case 14683:
+			return VAR_2[2105], VAR_2[2106];
+		case 14684:
+		case 40936:
+			return VAR_2[2107], VAR_2[2108];
+		case 14685:
+			return VAR_2[2109], VAR_2[2110];
+		case 14686:
+			return VAR_2[2111], VAR_2[2112];
+		case 14687:
+			return VAR_2[2113], VAR_2[2114];
+		case 14688:
+			return VAR_2[2115], VAR_2[2116];
+		case 19255:
+			return VAR_2[2713], VAR_2[2714];
+		case 28178:
+			return VAR_2[4175], VAR_2[4176];
+		case 44243:
+		case 44244:
+			return VAR_2[2117], VAR_2[2118];
+		case 14699:
+			return VAR_2[2119], VAR_2[2120];
+		case 28432:
+			return VAR_2[4233], VAR_2[4234];
+		case 14700:
+			return VAR_2[2121], VAR_2[2122];
+		case 14701:
+		case 40941:
+			return VAR_2[2123], VAR_2[2124];
+		case 14702:
+			return VAR_2[2125], VAR_2[2126];
+		case 14703:
+			return VAR_2[2127], VAR_2[2128];
+		case 14704:
+			return VAR_2[2129], VAR_2[2130];
+		case 14705:
+			return VAR_2[2131], VAR_2[2132];
+		case 14706:
+			return VAR_2[2133], VAR_2[2134];
+		case 14707:
+			return VAR_2[2135], VAR_2[2136];
+		case 14708:
+			return VAR_2[2137], VAR_2[2138];
+		case 14709:
+			return VAR_2[2139], VAR_2[2140];
+		case 46279:
+			return VAR_2[7059], VAR_2[7060];
+		case 14710:
+			return VAR_2[2141], VAR_2[2142];
+		case 14711:
+			return VAR_2[2143], VAR_2[2144];
+		case 14712:
+			return VAR_2[2145], VAR_2[2146];
+		case 14713:
+			return VAR_2[2147], VAR_2[2148];
+		case 14714:
+			return VAR_2[2149], VAR_2[2150];
+		case 14715:
+			return VAR_2[2151], VAR_2[2152];
+		case 14716:
+			return VAR_2[2153], VAR_2[2154];
+		case 14717:
+			return VAR_2[2155], VAR_2[2156];
+		case 14718:
+			return VAR_2[2157], VAR_2[2158];
+		case 14719:
+			return VAR_2[2159], VAR_2[2160];
+		case 14720:
+			return VAR_2[2161], VAR_2[2162];
+		case 14721:
+			return VAR_2[2163], VAR_2[2164];
+		case 19252:
+			return VAR_2[2715], VAR_2[2716];
+		case 25028:
+			return VAR_2[3893], VAR_2[3894];
+		case 37206:
+			return VAR_2[6593], VAR_2[6594];
+		case 37207:
+			return VAR_2[6595], VAR_2[6596];
+		case 45045:
+			return VAR_2[6866], VAR_2[6867];
+		case 45340:
+			return VAR_2[6951], VAR_2[6952];
+		case 14690:
+			return VAR_2[2165], VAR_2[2166];
+		case 19253:
+			return VAR_2[2717], VAR_2[2718];
+		case 24188:
+			return VAR_2[3895], VAR_2[3896];
+		case 24189:
+			return VAR_2[3897], VAR_2[3898];
+		case 24190:
+			return VAR_2[3899], VAR_2[3900];
+		case 28179:
+			return VAR_2[4177], VAR_2[4178];
+		case 31649:
+			return VAR_2[7772], VAR_2[7773];
+		case 31982:
+			return VAR_2[7774], VAR_2[7775];
+		case 31983:
+			return VAR_2[7776], VAR_2[7777];
+		case 28429:
+			return VAR_2[4235], VAR_2[4236];
+		case 31984:
+			return VAR_2[7778], VAR_2[7779];
+		case 33650:
+			return VAR_2[7780], VAR_2[7781];
+		case 37199:
+			return VAR_2[6597], VAR_2[6598];
+		case 37200:
+			return VAR_2[6599], VAR_2[6600];
+		case 37201:
+			return VAR_2[6601], VAR_2[6602];
+		case 37202:
+			return VAR_2[6603], VAR_2[6604];
+		case 37203:
+			return VAR_2[6605], VAR_2[6606];
+		case 37204:
+			return VAR_2[6607], VAR_2[6608];
+		case 37205:
+			return VAR_2[6609], VAR_2[6610];
+		case 14663:
+			return VAR_2[2167], VAR_2[2168];
+		case 14664:
+			return VAR_2[2169], VAR_2[2170];
+		case 28504:
+			return VAR_2[4237], VAR_2[4238];
+		case 14665:
+			return VAR_2[2171], VAR_2[2172];
+		case 14666:
+		case 44239:
+			return VAR_2[2173], VAR_2[2174];
+		case 14667:
+		case 44240:
+			return VAR_2[2175], VAR_2[2176];
+		case 31986:
+			return VAR_2[4978], VAR_2[4979];
+		case 14668:
+		case 45048:
+			return VAR_2[2177], VAR_2[2178];
+		case 14669:
+			return VAR_2[2179], VAR_2[2180];
+		case 14670:
+			return VAR_2[2181], VAR_2[2182];
+		case 14671:
+			return VAR_2[2183], VAR_2[2184];
+		case 14672:
+			return VAR_2[2185], VAR_2[2186];
+		case 14673:
+			return VAR_2[2187], VAR_2[2188];
+		case 14674:
+			return VAR_2[2189], VAR_2[2190];
+		case 19340:
+		case 44241:
+		case 1490:
+			return VAR_2[2723], VAR_2[2724];
+		case 19341:
+		case 44242:
+			return VAR_2[2725], VAR_2[2726];
+		case 19251:
+		case 46276:
+			return VAR_2[2719], VAR_2[2720];
+		case 28177:
+			return VAR_2[4179], VAR_2[4180];
+		case 39532:
+			return VAR_2[6384], VAR_2[6385];
+		case 39533:
+			return VAR_2[6386], VAR_2[6387];
+		case 44900:
+		case 14725:
+			return VAR_2[2191], VAR_2[2192];
+		case 14726:
+			return VAR_2[2193], VAR_2[2194];
+		case 14727:
+			return VAR_2[2195], VAR_2[2196];
+		case 28431:
+			return VAR_2[4239], VAR_2[4240];
+		case 14728:
+		case 45046:
+			return VAR_2[2197], VAR_2[2198];
+		case 14729:
+		case 44235:
+			return VAR_2[2199], VAR_2[2200];
+		case 31985:
+			return VAR_2[4980], VAR_2[4981];
+		case 14730:
+		case 44236:
+			return VAR_2[2201], VAR_2[2202];
+		case 14731:
+			return VAR_2[2203], VAR_2[2204];
+		case 14732:
+			return VAR_2[2205], VAR_2[2206];
+		case 14733:
+			return VAR_2[2207], VAR_2[2208];
+		case 14734:
+			return VAR_2[2209], VAR_2[2210];
+		case 14735:
+			return VAR_2[2211], VAR_2[2212];
+		case 14736:
+			return VAR_2[2213], VAR_2[2214];
+		case 47221:
+		case 19342:
+		case 44237:
+			return VAR_2[2727], VAR_2[2728];
+		case 45450:
+		case 19343:
+		case 44238:
+			return VAR_2[2729], VAR_2[2730];
+		case 19254:
+		case 46275:
+			return VAR_2[2721], VAR_2[2722];
+		case 28180:
+			return VAR_2[4181], VAR_2[4182];
+		case 39530:
+			return VAR_2[6388], VAR_2[6389];
+		case 39531:
+			return VAR_2[6390], VAR_2[6391];
+		case 14869:
+		case 14870:
+		case 14871:
+			return VAR_2[4992], VAR_2[4993];
+		case 14865:
+			return VAR_2[4994], VAR_2[4995];
+		case 37220:
+			return VAR_2[6611], VAR_2[6612];
+		case 1491:
+			return VAR_2[6035], VAR_2[6036];
+		case 47129:
+		case 1488:
+			return VAR_2[6037], VAR_2[6038];
+		case 45800:
+		case 28927:
+			return VAR_2[6991], VAR_2[6992];
+		case 48296:
+			return VAR_2[7225], VAR_2[7226];
+		case 48298:
+			return VAR_2[7244], VAR_2[7245];
+		case 48302:
+			return VAR_2[7227], VAR_2[7228];
+		case 48303:
+			return VAR_2[7229], VAR_2[7230];
+		case 48299:
+			return VAR_2[7247], VAR_2[7248];
+		case 48308:
+			return VAR_2[7251], VAR_2[7252];
+		case 48297:
+			return VAR_2[7242], VAR_2[7243];
+		case 48309:
+			return VAR_2[7253], VAR_2[7254];
+		case 48301:
+			return VAR_2[7249], VAR_2[7250];
+		case 48311:
+			return VAR_2[7255], VAR_2[7256];
+		case 48312:
+			return VAR_2[7257], VAR_2[7258];
+		case 48313:
+			return VAR_2[7259], VAR_2[7260];
+		case 48314:
+			return VAR_2[7261], VAR_2[7262];
+		case 48324:
+			return VAR_2[7263], VAR_2[7264];
+		case 48304:
+			return VAR_2[7232], VAR_2[7233];
+		case 48305:
+			return VAR_2[7234], VAR_2[7235];
+		case 48306:
+			return VAR_2[7237], VAR_2[7238];
+		case 48307:
+			return VAR_2[7239], VAR_2[7240];
+		case 48326:
+			return VAR_2[7268], VAR_2[7269];
+		case 48327:
+			return VAR_2[7270], VAR_2[7271];
+		case 48328:
+			return VAR_2[7266], VAR_2[7267];
+		case 48329:
+			return VAR_2[7272], VAR_2[7273];
+		case 48330:
+			return VAR_2[7275], VAR_2[7276];
+		case 48331:
+			return VAR_2[7278], VAR_2[7279];
+		case 48332:
+			return VAR_2[7281], VAR_2[7282];
+		case 49072:
+			return VAR_2[7347], VAR_2[7348];
+	}
+	return 0, 0;
+}

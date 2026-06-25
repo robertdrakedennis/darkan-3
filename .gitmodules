@@ -1,0 +1,9 @@
+[submodule "re-resources"]
+	path = re-resources
+	url = git@gitlab.com:project-undercut/reclass-data
+[submodule "engine/native-bootstrap/funchook"]
+	path = engine/native-bootstrap/funchook
+	url = https://github.com/kubo/funchook.git
+[submodule "engine/native-bootstrap/imgui"]
+	path = engine/native-bootstrap/imgui
+	url = https://github.com/ocornut/imgui

@@ -1,0 +1,459 @@
+{
+  "slug": "ancient-awakening",
+  "name": "Ancient Awakening",
+  "members": true,
+  "length": "medium",
+  "timeline": "ageofchaos",
+  "releaseDate": 1696809600,
+  "neededItems": [],
+  "recommendedItems": [],
+  "combatNPCs": [],
+  "prereqQuests": [
+    "Dead and Buried"
+  ],
+  "questReqs": [],
+  "steps": [
+    {
+      "title": "Starting off",
+      "text": "Talk to Overseer Siv in the Command Centre in the Fort Forinthry.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Talk about 'Ancient Awakening'."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "questInterfaceOpen"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "[Accept Quest]",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "questStarted"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go north of Fort Forinthry and enter the Wilderness crypt entrance. Beware of risen ghosts inside.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Finding artefacts",
+      "text": "Go across the bridge and enter the ancient door.<ul><li>If the bridge is missing, log out and back in to have it reappear.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to any character near the map table.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Collect 20 dragonkin artefacts in the tomb. Kill any tomb zombies that appear, and then collect the artefacts they drop. The zombies are based on your combat level, e.g. 3,200 life points at combat level 152. One can be collected from each Dragonkin artefact hotspot throughout the crypt as well.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to anyone near the map table again.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Jolly Boar Inn",
+      "text": "Go to the Jolly Boar Inn, south-west of Fort Forinthry. Use the marker to continue the quest at the entrance, then stay on the ground floor[UK]1st floor[US].",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Bill at the bar.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "I don't need to know your family history, Bill."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " I should be off now, anyways. Goodbye, Your Grace."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go up the staircase, talk to Ellamaria.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Let's skip the small talk."
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Continue the quest with the marker near the bridge west of the Champions' Guild.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Aster slightly south.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "I need you to return to the fort."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " We will be embarking on an expedition to Ungael. I need you back at the fort to discuss preparations."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go back to Fort Forinthry, continue Ancient Awakening at the Town Hall.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to anyone in the Town Hall.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Leave through the marker at the entrance to the Town Hall.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Yes."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": ""
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Ungael",
+      "text": "Gear up for combat.<ul><li>Most of the enemies are weak to magic (earth or fire spells)</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go to the Grove east of the fort and interact with the rowboat to travel to Ungael.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Yes."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": ""
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill all of the attacking monsters.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the team and make your way north-east up the path.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Interact with the Ruins Entrance.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go up the stairs to the east, then head west. Interact with the tower entrance.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Yes."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": ""
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Watch the cutscene.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Undead waves",
+      "text": "Defeat 12 waves of Zemouregal's minions. After each wave of enemies, you have to activate necrotic energy and sometimes choose a power-up for one of your allies. See the full guide for details on all waves and power-ups.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Watch the cutscene.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Getting off the island",
+      "text": "Talk to Aster.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Interact with the doorway to the south.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Walk west, then south, then interact with runic projector.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Collect three motes of energy from:<ul><li>Go north to catch the mote just outside the tower.</li><li>Searching bookcase in the north.</li><li>Searching ruined pillar in the south-west.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Interact with the runic projector.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Finishing up",
+      "text": "Listen to the archivist.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "What is this place?"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Tell me about Vorkath."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Tell me about this tomb."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Can you activate this conduit?"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Inspect the mysterious device to the south-east.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Finish the conversation.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Return to Fort Forinthry and continue via the marker in front of the Town Hall.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to anyone in the Town Hall.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Quest complete!",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    }
+  ],
+  "stageVarbit": 54562,
+  "stageVarbitCompleteValue": 50,
+  "cacheQuestId": 502
+}

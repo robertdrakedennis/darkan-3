@@ -1,0 +1,805 @@
+{
+  "slug": "the-brink-of-extinction",
+  "name": "The Brink of Extinction",
+  "members": true,
+  "length": "mediumlong",
+  "timeline": "mythic",
+  "releaseDate": 1354579200,
+  "neededItems": [],
+  "recommendedItems": [],
+  "combatNPCs": [],
+  "prereqQuests": [
+    "The Elder Kiln"
+  ],
+  "questReqs": [],
+  "steps": [
+    {
+      "title": "Getting started",
+      "text": "Speak to TzHaar-Mej-Ak or TzHaar-Mej-Jeh in the main plaza of TzHaar City.",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "questInterfaceOpen"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "[Accept Quest]",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "questStarted"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Run east through the arch. A cutscene will begin.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Run north-east to the Birthing Pool and speak to TzHaar-Mej-Het.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "I require TokKul."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "That's the TokKul I'm looking for!"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Run around the wall to where the Fight Kiln entrance is, and mine the Statue of TzHaar-Ket-Teg.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Run south-west to the TzHaar City entrance. Mine the nearby Statue of TzHaar-Xil-Kal.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Return to the main plaza. Melt the two stacks of fragments into TokKul with the furnace slightly south-east of the main plaza.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Speak to TzHaar-Mej-Ak or TzHaar-Mej-Jeh again.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Goodbye."
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "The Ga'al",
+      "text": "Go to the entrance to the Library, north-west of the main plaza and speak to Ga'al.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [
+        {
+          "name": "Communication orb",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        }
+      ],
+      "recommendedItems": []
+    },
+    {
+      "text": "Run south until you reach the cooking icon on the minimap. Speak to the next Ga'al.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Continue south along the eastern wall to the southwest corner of the city (east of the  TzHaar City mine), and speak to the final Ga'al.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Return to the main plaza and speak to TzHaar-Mej-Ak or TzHaar-Mej-Jeh again.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Enter the Fight Kiln entrance east of Main Plaza.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "'The Brink of Extinction'."
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "A cutscene plays.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "We have to take the risk. Reforge the Ga'al in the Kiln."
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Run to the easternmost part of TzHaar City, where a cave entrance is. The entrance is not clickable until after you interact with the orb, cave entrance is indicated on your map.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Activate the communication orb in your backpack.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "TokKul of TzHaar-Mej-Gek."
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Enter the cave.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Combat Weaknesses",
+      "text": "<table><tbody><tr><th>Room</th><th>Wave</th><th>Combat levels</th><th>Pray against</th><th>Weakness(es)</th></tr><tr class=\"\"><td>1</td><td>4 Tz-Kih</td><td>85</td><td>Melee</td><td>Stab</td></tr><tr class=\"\"><td>2</td><td>2 Tz-Kek</td><td>86</td><td>Melee</td><td>Water</td></tr><tr class=\"\"><td>2</td><td>1 Tz-Kih, 1 Tok-Xil</td><td>85,105</td><td>Ranged</td><td>Stab, Slash</td></tr><tr class=\"\"><td>3</td><td>2 TokHaar-Hur, 2 TokHaar-Ket</td><td>112/119</td><td>Melee</td><td>Water</td></tr><tr class=\"\"><td>3</td><td>3 TokHaar-Xil</td><td>119</td><td>Ranged</td><td>Crush</td></tr><tr><td>3</td><td>1 TokHaar-Ket Champion</td><td>112</td><td>Melee</td><td>-</td></tr><tr class=\"\"><td>4</td><td>4 Tz-Kil</td><td>103</td><td>Magic</td><td>Bolts</td></tr><tr class=\"\"><td>5</td><td>3 Tz-Kih</td><td>85</td><td>Melee</td><td>Stab</td></tr><tr class=\"\"><td>5</td><td>2 Tz-Kil, 1 Yt-MejKot</td><td>103,105</td><td>Melee</td><td>Bolts, -</td></tr><tr class=\"\"><td>6</td><td>4 TokHaar-Hur</td><td>112</td><td>Melee</td><td>Water</td></tr><tr class=\"\"><td>6</td><td>2 TokHaar-Xil</td><td>119</td><td>Ranged</td><td>Crush</td></tr><tr><td>6</td><td>2 TokHaar-Mej</td><td>119</td><td>Magic</td><td>Bolts</td></tr><tr class=\"\"><td>6</td><td>2 TokHaar-Ket Champion</td><td>112</td><td>Melee</td><td>-</td></tr><tr><td>7</td><td>3 Tz-Kek</td><td>86</td><td>Melee</td><td>Water</td></tr><tr><td>8</td><td>3 Tz-Kil</td><td>103</td><td>Magic</td><td>Bolts</td></tr><tr><td>8</td><td>2 Tz-Kek, 1 Ket-Zek</td><td>86,105</td><td>Magic</td><td>Water, Bolts</td></tr></tbody></table>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Room 1",
+      "text": "Kill the 4 Tz-Kih.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Pick up the mace, sword and knife.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Put the mace on the western and the sword on the eastern scales.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go through the ancient gate.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Room 2",
+      "text": "Kill the 2 Tz-Kek.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill the Tz-Kih and Tok-Xil",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Move the statues such that TzHaar-Mej faces TzHaar-Ket, who faces TzHaar-Xil, who faces TzHaar-Mej. This involves a triangle formed by Xil and Mej (parallel) to the south and Ket to the north. If it doesn't work, make the triangle smaller.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go through the ancient gate.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Room 3",
+      "text": "Turn off Auto-retaliate so your character does not inadvertently step on a glowing square when running to attack a monster (they deal 1000+ damage per second).",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Pass the hot vent door to the east.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Avoid standing on glowing floor squares.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill the 2 TokHaar-Kets and 2 TokHaar-Hurs.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill the 3 TokHaar-Xils.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill the TokHaar-Ket Champion and pick up the obsidian maul it drops.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Pass back through the hot vent door.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Place the maul on the scales.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go through the ancient gate.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Room 4",
+      "text": "Kill the 4 Tz-Kils.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Pick up each of the obsidian weapons: throwing ring, sword, mace and staff.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Place each of the obsidian weapons on the scales according to their location:",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "<table class=\"wikitable lighttable\"><tbody><tr><th>Scale location</th><th>Weapon</th></tr><tr class=\"\"><td>North-west</td><td>Obsidian sword</td></tr><tr class=\"\"><td>North-east</td><td>Obsidian mace</td></tr><tr class=\"\"><td>South-west</td><td>Obsidian staff</td></tr><tr class=\"highlight-over\"><td>South-east</td><td>Obsidian throwing ring</td></tr></tbody></table>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go through the Ancient gate.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Room 5",
+      "text": "Kill the 3 Tz-Kihs.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill the 2 Tz-Kils and Yt-MejKot.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Touch one of the pedestals.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Touch the pedestals in the order that they light up until the puzzle is complete. There are 8 combinations you will need to complete correctly.<ul><li>Recommended to give each pedestal a number between 1-4. Write the number of the last pedestal that lights up each round in your chatbox, forming a list. When touching pedestals, simply follow the numbers in your chatbox.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go through the Ancient gate.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Room 6",
+      "text": "Turn off Auto-retaliate so your character does not inadvertently step on a glowing square when running to attack a monster (they deal 1000+ damage per second).",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Pass the hot vent door to the east.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Avoid standing on glowing floor squares.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill the 4 TokHaar-Hurs.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill the 2 TokHaar-Xils.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill the 2 TokHaar-Mejs.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill the 2 TokHaar-Ket Champions and pick up the obsidian maul dropped.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Pass back through the Hot vent door.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Place the maul on the scales.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go through the ancient gate.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Room 7",
+      "text": "Kill the 3 Tz-Keks.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Pick up the sword, maul, mace, knife and staff.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Inspect each scale for the TzHaar word. Use the correct obsidian weapon on each scale according to the table below:",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "<table class=\"wikitable lighttable\"><tbody><tr><th>TzHaar word</th><th>Weapon</th></tr><tr class=\"\"><td>Xil</td><td>Obsidian sword</td></tr><tr class=\"\"><td>Mej</td><td>Obsidian staff</td></tr><tr class=\"\"><td>Ket</td><td>Obsidian maul</td></tr><tr class=\"\"><td>Ket and Hur</td><td>Obsidian mace</td></tr><tr class=\"\"><td>Xil and Hur</td><td>Obsidian knife</td></tr></tbody></table>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go through the ancient gate.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Room 8",
+      "text": "Kill the 3 Tz-Kils.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill the Ket-Zek and 2 Tz-Keks.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Rotate the tiles on the ground to form the TzHaar symbol.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go through the Ancient gate.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Room 9",
+      "text": "Switch to Legacy Combat Mode",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Pass the hot vent door to the east.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Ga'al-Xox.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Rotate the eastern valve.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill TokHaar-Hok.<ul><li>You cannot teleport out or leave the fight early.</li><li>Pray Deflect/Protection from Melee the entire fight.</li><li>Avoid standing on glowing floor squares, as always.</li><li>You do not need to kill the spawned enemies - higher level players may focus on TokHaar-Hok. When he is defeated, the spawned enemies will die.</li><li>Stun TokHaar-Hok once he has lost half his health, this prevents him from healing at the flowing lava.</li><li>The stun mechanic may be bugged and you may only be able to use  basic Ranged ability, Binding Shot, the basic Magic ability, Impact and the Magic threshold ability, Asphyxiate, and the basic melee ability, Backhand.</li><li>In Legacy Mode, you need to stun him with a special attack.</li><li>In Revolution mode, you can easily stun-lock him with Backhand, Kick, Forceful Backhand, Stomp (threshold), Destroy (dual-wield threshold), or by using Death Grasp (T70+ weapon special attack) with Necromancy.</li><li>The stun mechanic may be bugged and you may only be able to use  basic Ranged ability, Binding Shot, the basic Magic ability, Impact and the Magic threshold ability, Asphyxiate, and the basic melee ability, Backhand.</li><li>In Legacy Mode, you need to stun him with a special attack.</li><li>In Revolution mode, you can easily stun-lock him with Backhand, Kick, Forceful Backhand, Stomp (threshold), Destroy (dual-wield threshold), or by using Death Grasp (T70+ weapon special attack) with Necromancy.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Finishing up",
+      "text": "Talk to TokHaar-Hok.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Ga'al-Xox.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Ga'al-Xox again.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Farewell."
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Return to the city through the door. Activate your communication orb.<ul><li>If you have destroyed your communication orb, talk to either TzHaar-Mej-Ak or TzHaar-Mej-Jeh in the main plaza of TzHaar City.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go back to the Fight Kiln entrance.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "'The Brink of Extinction'"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "A cutscene ensues.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "I can't wait to battle the TokHaar."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Quest complete!",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    }
+  ],
+  "stageVarbit": 16905,
+  "stageVarbitCompleteValue": 225,
+  "cacheQuestId": 360
+}

@@ -1,0 +1,253 @@
+{
+  "slug": "soul-searching",
+  "name": "Soul Searching",
+  "members": true,
+  "length": "short",
+  "timeline": "ageofchaos",
+  "releaseDate": 1721606400,
+  "neededItems": [],
+  "recommendedItems": [],
+  "combatNPCs": [],
+  "prereqQuests": [
+    "Necromancy!"
+  ],
+  "questReqs": [],
+  "steps": [
+    {
+      "title": "Suspicious Stranger",
+      "text": "Talk to Trista on the dock north of Soul Supplies in the City of Um.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Choose the 'Eavesdrop' option on Trista.",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "questInterfaceOpen"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "[Accept Quest]",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "questStarted"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Death",
+      "text": "Talk to Death in the City of Um.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Talk about 'Soul Searching'"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " I'm working on it."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Suspicious Stranger on the dock where Trista was earlier.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Convince"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Persuade."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Threaten."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " Right then, what are you going to do? Kill me?"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Death in the City of Um.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Talk about 'Soul Searching'"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " I'm working on it."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Malignius",
+      "text": "Talk to Malignius Mortifer at the Um ritual site with the required items in your backpack.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Quests."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Soul Searching."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Yes."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": ""
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [
+        {
+          "name": "Cadava berries",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Fishing bait",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Antipoison",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Charcoal",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Papyrus",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        }
+      ],
+      "recommendedItems": []
+    },
+    {
+      "text": "Return to the dock with the Suspicious Stranger.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Zombification",
+      "text": "Drink the potion of zombification at least 8 paces away from the Suspicious Stranger but still closer than the bottom of the stairs to transmogrify into a zombie.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [
+        {
+          "name": "Potion of zombification",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        }
+      ],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Suspicious Stranger.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Board the gondola.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Continue dialogue with Icthlarin.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "What now? (Continue Quest)"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " I ask that very same question Player."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Quest complete!",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    }
+  ],
+  "stageVarbit": 55818,
+  "stageVarbitCompleteValue": 65,
+  "cacheQuestId": 513
+}

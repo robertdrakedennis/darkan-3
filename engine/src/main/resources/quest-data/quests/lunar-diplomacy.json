@@ -1,0 +1,3983 @@
+{
+  "slug": "lunar-diplomacy",
+  "name": "Lunar Diplomacy",
+  "members": true,
+  "length": "long",
+  "timeline": "heroic",
+  "releaseDate": 1153699200,
+  "neededItems": [
+    {
+      "name": "Coins",
+      "itemId": -1,
+      "quantity": 1000,
+      "duringQuest": false
+    },
+    {
+      "name": "Runes for combat spells",
+      "itemId": -1,
+      "quantity": 1,
+      "duringQuest": false
+    },
+    {
+      "name": "Dramen staff",
+      "itemId": 772,
+      "quantity": 1,
+      "duringQuest": false
+    },
+    {
+      "name": "Spade (tool belt doesn't work)",
+      "itemId": 952,
+      "quantity": 1,
+      "duringQuest": false
+    },
+    {
+      "name": "Access to the air, water, earth, and fire altars",
+      "itemId": -1,
+      "quantity": 1,
+      "duringQuest": false
+    },
+    {
+      "name": "Thread",
+      "itemId": 1734,
+      "quantity": 2,
+      "duringQuest": false
+    },
+    {
+      "name": "Clean guam",
+      "itemId": 249,
+      "quantity": 1,
+      "duringQuest": true
+    },
+    {
+      "name": "Clean marrentill",
+      "itemId": 251,
+      "quantity": 1,
+      "duringQuest": true
+    }
+  ],
+  "recommendedItems": [
+    {
+      "name": "Coins",
+      "itemId": -1,
+      "quantity": 2000,
+      "duringQuest": false
+    },
+    {
+      "name": "Wicked hood",
+      "itemId": -1,
+      "quantity": 1,
+      "duringQuest": false
+    },
+    {
+      "name": "Skull sceptre",
+      "itemId": -1,
+      "quantity": 1,
+      "duringQuest": false
+    },
+    {
+      "name": "Ring of duelling",
+      "itemId": -1,
+      "quantity": 1,
+      "duringQuest": false
+    },
+    {
+      "name": "Enlightened amulet",
+      "itemId": -1,
+      "quantity": 1,
+      "duringQuest": false
+    },
+    {
+      "name": "Archaeology journal",
+      "itemId": -1,
+      "quantity": 1,
+      "duringQuest": false
+    },
+    {
+      "name": "Agility boost (Summer pie, Surefooted aura)",
+      "itemId": -1,
+      "quantity": 1,
+      "duringQuest": false
+    },
+    {
+      "name": "Extra dramen staves (for more lunar staves)",
+      "itemId": -1,
+      "quantity": 1,
+      "duringQuest": false
+    }
+  ],
+  "combatNPCs": [
+    {
+      "name": "Suqah",
+      "level": "73, 74, 79",
+      "quantity": 5
+    },
+    {
+      "name": "Me",
+      "level": "84",
+      "quantity": 1
+    }
+  ],
+  "prereqQuests": [
+    "The Fremennik Trials",
+    "Lost City"
+  ],
+  "questReqs": [
+    {
+      "type": "skill",
+      "name": "Crafting",
+      "level": 61,
+      "ironmanOnly": false
+    },
+    {
+      "type": "skill",
+      "name": "Defence",
+      "level": 40,
+      "ironmanOnly": false
+    },
+    {
+      "type": "skill",
+      "name": "Firemaking",
+      "level": 49,
+      "ironmanOnly": false
+    },
+    {
+      "type": "skill",
+      "name": "Herblore",
+      "level": 5,
+      "ironmanOnly": false
+    },
+    {
+      "type": "skill",
+      "name": "Magic",
+      "level": 65,
+      "ironmanOnly": false
+    },
+    {
+      "type": "skill",
+      "name": "Mining",
+      "level": 60,
+      "ironmanOnly": false
+    },
+    {
+      "type": "skill",
+      "name": "Woodcutting",
+      "level": 55,
+      "ironmanOnly": false
+    }
+  ],
+  "steps": [
+    {
+      "title": "Starting out",
+      "text": "Talk to Lokar Searunner on Rellekka's westernmost dock.",
+      "warning": "For the tracking to work properly, you need to have the chat visible, game messages set to 'On', and chat timestamps on.",
+      "tpHint": {
+        "type": "icon",
+        "hover": "Fremennik Province lodestone",
+        "url": "Fremennik_Province_lodestone_icon.png"
+      },
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2621.0,
+          "heightFine": 925.0,
+          "y": 3688.0,
+          "instance": false,
+          "distance": 20
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4537,
+          "modelIds": [
+            3405
+          ],
+          "displayName": "Lokar Searunner",
+          "distance": 20
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "You've been away from these parts a while?"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Why did you leave?"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "questInterfaceOpen"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "[Accept Quest]",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "questStarted"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Continue talking to Lokar Searunner.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4537,
+          "modelIds": [
+            3405
+          ],
+          "displayName": "Lokar Searunner"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "be right back"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Buy a spade from Sigmund the Merchant.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 1282,
+          "modelIds": [],
+          "displayName": "Sigmund The Merchant"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 952,
+          "displayName": "Spade",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Getting to the isle",
+      "text": "Speak to Brundt the Chieftain in the Longhall for a seal of passage.",
+      "warning": "Keep the seal on you throughout the quest.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2658.5,
+          "heightFine": 2685.0,
+          "y": 3668.0,
+          "instance": false,
+          "distance": 4
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 1294,
+          "modelIds": [],
+          "candidateNpcTypeIds": [
+            7394,
+            7395,
+            9118,
+            9135,
+            9139,
+            9315,
+            9323,
+            9331,
+            13284,
+            17059,
+            21215,
+            27677,
+            29647
+          ],
+          "displayName": "Brundt the Chieftain",
+          "distance": 6
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Ask about a seal of passage."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "best that you do"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Return and talk to Lokar.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2621.0,
+          "heightFine": 925.0,
+          "y": 3688.0,
+          "instance": false,
+          "distance": 20
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4537,
+          "modelIds": [
+            3405
+          ],
+          "displayName": "Lokar Searunner",
+          "distance": 20
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Arrr! Yar! Let's be on our way, yar!"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "already on board"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb the ladder.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            4632
+          ],
+          "candidateObjectTypeIds": [
+            4684
+          ],
+          "displayName": "Pirates cove ladder"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2209.0,
+          "heightFine": 2821.0,
+          "y": 3803.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Captain Bentley.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 407,
+          "modelIds": [
+            4128
+          ],
+          "displayName": "Captain Bentley"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Can we sail to Lunar Isle now?"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "VERY strange"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb down the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2222.0,
+          "heightFine": 3965.0,
+          "y": 3797.6,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2222.0,
+          "heightFine": 2021.0,
+          "y": 3797.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to 'Bird's-Eye' Jack to the south.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            3876
+          ],
+          "candidateNpcTypeIds": [
+            340,
+            22022,
+            30711
+          ],
+          "displayName": "Birds eye jack"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "I'm gone"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb up the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2222.0,
+          "heightFine": 2621.0,
+          "y": 3797.6,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2222.0,
+          "heightFine": 3365.0,
+          "y": 3796.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Captain Bentley again.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 407,
+          "modelIds": [
+            4128
+          ],
+          "displayName": "Captain Bentley"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Perhaps it's the Navigator's fault?"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "GAH"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb down the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2222.0,
+          "heightFine": 3965.0,
+          "y": 3797.6,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2222.0,
+          "heightFine": 2021.0,
+          "y": 3797.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to 'Birds-Eye' Jack again.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            3876
+          ],
+          "candidateNpcTypeIds": [
+            340,
+            22022,
+            30711
+          ],
+          "displayName": "Birds eye jack"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "being my fault"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb up the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2222.0,
+          "heightFine": 2621.0,
+          "y": 3797.6,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2222.0,
+          "heightFine": 3365.0,
+          "y": 3796.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to 'Eagle-eye' Shultz at the very front of the ship.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            3387
+          ],
+          "displayName": "Eagle eye shultz"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "been extremely helpful"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb down the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2222.0,
+          "heightFine": 3965.0,
+          "y": 3797.6,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2222.0,
+          "heightFine": 2021.0,
+          "y": 3797.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb down the ladder again.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2222.0,
+          "heightFine": 2021.0,
+          "y": 3804.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2222.0,
+          "heightFine": 485.0,
+          "y": 3806.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to 'Beefy' Burns in the kitchen.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            3582
+          ],
+          "candidateObjectTypeIds": [
+            65344,
+            65345
+          ],
+          "displayName": "Beefy burns"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Thanks for the help"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb up the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2222.0,
+          "heightFine": 1085.0,
+          "y": 3805.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2222.0,
+          "heightFine": 2021.0,
+          "y": 3803.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb up the ladder again.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2222.0,
+          "heightFine": 2621.0,
+          "y": 3797.6,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2222.0,
+          "heightFine": 3365.0,
+          "y": 3796.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb up the ladder yet again.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2218.0,
+          "heightFine": 4941.0,
+          "y": 3791.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2218.0,
+          "heightFine": 5381.0,
+          "y": 3789.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to 'Lecherous' Lee.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            2880
+          ],
+          "candidateObjectTypeIds": [
+            62829,
+            62830
+          ],
+          "displayName": "Lecherous lee"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "No problem"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb down the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2218.0,
+          "heightFine": 5381.0,
+          "y": 3790.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2218.0,
+          "heightFine": 4341.0,
+          "y": 3792.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to First mate 'Davey-boy'.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            3783
+          ],
+          "candidateNpcTypeIds": [
+            14419,
+            15227
+          ],
+          "displayName": "Davey boy"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "have a word with him"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb up the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2218.0,
+          "heightFine": 4941.0,
+          "y": 3791.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2218.0,
+          "heightFine": 5381.0,
+          "y": 3789.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the cabin boy (2 inventory spaces required).",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "item",
+          "typeId": 32117,
+          "modelIds": [
+            2979
+          ],
+          "displayName": "Cabin boy"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9066,
+          "displayName": "Emerald lens",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use the lens on the lantern. Light it.",
+      "actions": [
+        {
+          "t": "inventoryHighlight",
+          "itemId": 9066,
+          "modelIds": [
+            66
+          ],
+          "displayName": "Emerald lens"
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            402
+          ],
+          "candidateItemTypeIds": [
+            20810
+          ],
+          "displayName": "Empty bullseye lantern"
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            384,
+            204
+          ],
+          "displayName": "Emerald bullseye lantern"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": -1,
+          "displayName": "Lit emerald bullseye lantern",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb down the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2218.0,
+          "heightFine": 5381.0,
+          "y": 3790.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2218.0,
+          "heightFine": 4341.0,
+          "y": 3792.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use the lantern on the wallchart in the captains quarters.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            33
+          ],
+          "candidateObjectTypeIds": [
+            193
+          ],
+          "displayName": "Marked wallchart"
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            384,
+            204
+          ],
+          "displayName": "Lit emerald bullseye lantern"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Rub away!"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "One down"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb down the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2222.0,
+          "heightFine": 3965.0,
+          "y": 3797.6,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2222.0,
+          "heightFine": 2021.0,
+          "y": 3797.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use the lantern on the cannon.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            1128
+          ],
+          "candidateObjectTypeIds": [
+            3556,
+            9323
+          ],
+          "displayName": "Marked cannon"
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            384,
+            204
+          ],
+          "displayName": "Lit emerald bullseye lantern"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Rub away!"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Two down"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb down the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2222.0,
+          "heightFine": 2021.0,
+          "y": 3804.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2222.0,
+          "heightFine": 485.0,
+          "y": 3806.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use the lantern on the chest.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            1110
+          ],
+          "candidateObjectTypeIds": [
+            107,
+            925,
+            928,
+            933,
+            934,
+            940,
+            943,
+            976,
+            4687,
+            6251,
+            9162,
+            11475,
+            84014
+          ],
+          "displayName": "Marked chest"
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            384,
+            204
+          ],
+          "displayName": "Lit emerald bullseye lantern"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Rub away!"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Three down"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use the lantern on the support.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            384
+          ],
+          "candidateNpcTypeIds": [
+            210,
+            943,
+            22107,
+            25274
+          ],
+          "displayName": "Marked mast"
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            384,
+            204
+          ],
+          "displayName": "Lit emerald bullseye lantern"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Rub away!"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Four down"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use the lantern on the barrel.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            4824
+          ],
+          "candidateNpcTypeIds": [
+            1439,
+            1440,
+            1449,
+            1450,
+            1465,
+            1466,
+            1467,
+            1468,
+            1485,
+            1486,
+            4371,
+            4372,
+            15504
+          ],
+          "displayName": "Marked barrels"
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            384,
+            204
+          ],
+          "displayName": "Lit emerald bullseye lantern"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Rub away!"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "hopefully the jinx"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb up the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2222.0,
+          "heightFine": 1085.0,
+          "y": 3805.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2222.0,
+          "heightFine": 2021.0,
+          "y": 3803.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb up the ladder again.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2222.0,
+          "heightFine": 2621.0,
+          "y": 3797.6,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2222.0,
+          "heightFine": 3365.0,
+          "y": 3796.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Captain Bentley.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 407,
+          "modelIds": [
+            4128
+          ],
+          "displayName": "Captain Bentley"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 2130.0,
+          "heightFine": 2469.0,
+          "y": 3899.0,
+          "range": 4
+        },
+        {
+          "t": "conversationText",
+          "text": "Thanks Cap'n"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Lunar Isle",
+      "text": "Climb down the ladders and walk into the city (there will be a small cutscene).<ul><li>You can use the bank if you have seal of passage.</li></ul>",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2127.5,
+          "heightFine": 2373.0,
+          "y": 3893.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2126.0,
+          "heightFine": 965.0,
+          "y": 3893.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [
+        {
+          "name": "Clean guam",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Clean marrentill",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Suqah tooth",
+          "itemId": 72,
+          "quantity": 1,
+          "duringQuest": false
+        }
+      ],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2109.0,
+          "heightFine": 2885.0,
+          "y": 3911.5,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 2110.0,
+          "heightFine": 2885.0,
+          "y": 3911.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "chatText",
+          "text": "goes nothing"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go north-east outside the city and kill suqahs until these items are obtained:<ul><li>One suqah tooth.</li><li>4 suqah hides.</li><li>If not already in the backpack, one grimy guam and one grimy marrentill. Clean the herbs.</li></ul>",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4527,
+          "modelIds": [
+            3084,
+            3387
+          ],
+          "displayName": "Suqah",
+          "priority": "closest"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9079,
+          "displayName": "Suqah tooth",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4527,
+          "modelIds": [
+            3084,
+            3387
+          ],
+          "displayName": "Suqah",
+          "priority": "closest"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9080,
+          "displayName": "Suqah hide",
+          "quantity": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4527,
+          "modelIds": [
+            3084,
+            3387
+          ],
+          "displayName": "Suqah",
+          "priority": "closest"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 249,
+          "displayName": "Clean guam",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4527,
+          "modelIds": [
+            3084,
+            3387
+          ],
+          "displayName": "Suqah",
+          "priority": "closest"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 251,
+          "displayName": "Clean marrentill",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb down the ladder into the mine.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2142.0,
+          "heightFine": 3109.0,
+          "y": 3944.0,
+          "instance": false,
+          "distance": 15
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            888
+          ],
+          "candidateObjectTypeIds": [
+            1416,
+            18906
+          ],
+          "displayName": "Mine ladder",
+          "distance": 16
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 2329.0,
+          "heightFine": 3101.0,
+          "y": 10353.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Mine a stalagmite.<ul><li>Optional: Mine the Rune Essence rcok to complete the Hard Fremennik achievement 'Runes on the Moon'.</li></ul>",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2321.0,
+          "heightFine": 2709.0,
+          "y": 10343.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9076,
+          "displayName": "Lunar ore",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Exit the mine.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2330.0,
+          "heightFine": 3701.0,
+          "y": 10353.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 2142.0,
+          "heightFine": 3109.0,
+          "y": 3944.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Oneiromancer near the astral altar at the south-east part of the island.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2150.0,
+          "heightFine": 277.0,
+          "y": 3867.0,
+          "instance": false,
+          "distance": 20
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4511,
+          "modelIds": [],
+          "candidateNpcTypeIds": [
+            9348,
+            21224,
+            26302,
+            27685
+          ],
+          "displayName": "Oneiromancer",
+          "distance": 20
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "north of the town"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Go inside the walking house in the northern section of the city.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2091.0,
+          "heightFine": 2725.0,
+          "y": 3930.0,
+          "instance": false,
+          "distance": 16
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            14139
+          ],
+          "displayName": "Baba yagas house",
+          "distance": 20
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "modelVisible",
+          "kind": "npc",
+          "typeId": 4513,
+          "modelIds": [],
+          "candidateNpcTypeIds": [
+            9093,
+            9094,
+            9146,
+            9324,
+            9326,
+            9330,
+            9339,
+            9341,
+            9347,
+            21226
+          ],
+          "displayName": "Baba Yaga"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Baba Yaga (1 inventory space required).",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4513,
+          "modelIds": [],
+          "candidateNpcTypeIds": [
+            9093,
+            9094,
+            9146,
+            9324,
+            9326,
+            9330,
+            9339,
+            9341,
+            9347,
+            21226
+          ],
+          "displayName": "Baba Yaga"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "The Oneiromancer told me you may be able to help..."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Thanks"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use the vial on the sink.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 3105.225,
+          "heightFine": 1781.0,
+          "y": 4450.0,
+          "instance": false
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            426,
+            96
+          ],
+          "displayName": "Empty special vial"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "chatText",
+          "text": "fill the Vial"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use a clean guam on the vial of water.",
+      "actions": [
+        {
+          "t": "inventoryHighlight",
+          "itemId": 249,
+          "modelIds": [],
+          "displayName": "Clean guam"
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            426,
+            96
+          ],
+          "displayName": "Empty special vial"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9088,
+          "displayName": "Guam vial",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use a clean marrentill on the guam vial.",
+      "warning": "No tracking for this step.",
+      "actions": [
+        {
+          "t": "inventoryHighlight",
+          "itemId": 251,
+          "modelIds": [],
+          "displayName": "Clean marrentill"
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": 9088,
+          "modelIds": [
+            426,
+            150
+          ],
+          "displayName": "Guam vial"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Grind the suqah tooth.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "item",
+          "typeId": 9079,
+          "modelIds": [
+            72
+          ],
+          "displayName": "Suqah tooth"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": -1,
+          "displayName": "Ground suqah tooth",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use the ground suqah tooth on the guam-marr vial.",
+      "warning": "No tracking for this step.",
+      "actions": [
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            72
+          ],
+          "displayName": "Ground suqah tooth"
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": 9088,
+          "modelIds": [
+            426,
+            150
+          ],
+          "displayName": "Guam vial"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Leave the house.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 3103.0,
+          "heightFine": 1981.0,
+          "y": 4446.5,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 2083.0,
+          "heightFine": 2885.0,
+          "y": 3927.0,
+          "range": 20
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Return to the Oneiromancer with the potion.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2150.0,
+          "heightFine": 277.0,
+          "y": 3867.0,
+          "instance": false,
+          "distance": 20
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4511,
+          "modelIds": [],
+          "candidateNpcTypeIds": [
+            9348,
+            21224,
+            26302,
+            27685
+          ],
+          "displayName": "Oneiromancer",
+          "distance": 20
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryDoesNotContain",
+          "itemId": 9088,
+          "displayName": "Guam vial"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Lunar staff",
+      "text": "Order matters. Use your dramen staff/staves on the air altar.",
+      "warning": "No tracking for this step.",
+      "tpHint": {
+        "type": "icon",
+        "hover": "Varrock lodestone",
+        "url": "Varrock_lodestone_icon.png"
+      },
+      "actions": [
+        {
+          "t": "direction",
+          "x": 3127.0,
+          "heightFine": 2421.0,
+          "y": 3405.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 2842.0,
+          "heightFine": 4973.0,
+          "y": 4832.0,
+          "range": 20
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [
+        {
+          "name": "Dramen staff",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        }
+      ],
+      "recommendedItems": [
+        {
+          "name": "Wicked hood",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Skull sceptre",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Ring of duelling",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Enlightened amulet",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Archaeology journal",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        }
+      ]
+    },
+    {
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2844.0,
+          "heightFine": 5645.0,
+          "y": 4834.0,
+          "instance": false
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": 772,
+          "modelIds": [],
+          "displayName": "Dramen staff"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use your dramen staff/staves on the fire altar.",
+      "warning": "No tracking for this step.",
+      "tpHint": {
+        "type": "icon",
+        "hover": "Al Kharid lodestone",
+        "url": "Al_Kharid_lodestone_icon.png"
+      },
+      "actions": [
+        {
+          "t": "direction",
+          "x": 3313.0,
+          "heightFine": 2029.0,
+          "y": 3255.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 2581.0,
+          "heightFine": 2181.0,
+          "y": 4842.0,
+          "range": 20
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2585.0,
+          "heightFine": 2781.0,
+          "y": 4838.0,
+          "instance": false
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": 772,
+          "modelIds": [],
+          "displayName": "Dramen staff"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use your dramen staff/staves on the water altar.",
+      "warning": "No tracking for this step.",
+      "tpHint": {
+        "type": "icon",
+        "hover": "Lumbridge lodestone",
+        "url": "Lumbridge_lodestone_icon.png"
+      },
+      "actions": [
+        {
+          "t": "direction",
+          "x": 3183.0,
+          "heightFine": 2093.0,
+          "y": 3158.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 3489.0,
+          "heightFine": 941.0,
+          "y": 4833.0,
+          "range": 20
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "direction",
+          "x": 3484.0,
+          "heightFine": 1725.0,
+          "y": 4836.0,
+          "instance": false
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": 772,
+          "modelIds": [],
+          "displayName": "Dramen staff"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use your dramen staff/staves on the earth altar.",
+      "tpHint": {
+        "type": "icon",
+        "hover": "Fort Forinthry lodestone",
+        "url": "Fort_Forinthry_lodestone_icon.png"
+      },
+      "actions": [
+        {
+          "t": "direction",
+          "x": 3306.0,
+          "heightFine": 997.0,
+          "y": 3474.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 2658.0,
+          "heightFine": 1981.0,
+          "y": 4833.0,
+          "range": 20
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2658.0,
+          "heightFine": 2397.0,
+          "y": 4841.0,
+          "instance": false
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": 772,
+          "modelIds": [],
+          "displayName": "Dramen staff"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9084,
+          "displayName": "Lunar staff",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Smelt the lunar ore at any regular furnace.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Yes"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9077,
+          "displayName": "Lunar bar",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Make a lunar helmet at a regular anvil.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Yes"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9096,
+          "displayName": "Lunar helm",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "'Travel' from Lokar Searunner in Rellekka at the westernmost dock",
+      "tpHint": {
+        "type": "icon",
+        "hover": "Fremennik Province lodestone",
+        "url": "Fremennik_Province_lodestone_icon.png"
+      },
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2621.0,
+          "heightFine": 925.0,
+          "y": 3688.0,
+          "instance": false,
+          "distance": 20
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4537,
+          "modelIds": [
+            3405
+          ],
+          "displayName": "Lokar Searunner",
+          "distance": 20
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 2209.0,
+          "heightFine": 273.0,
+          "y": 3792.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb up the ladder.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            4632
+          ],
+          "candidateObjectTypeIds": [
+            4684
+          ],
+          "displayName": "Pirates cove ladder"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2209.0,
+          "heightFine": 2821.0,
+          "y": 3803.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Travel with Captain Bentley.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 407,
+          "modelIds": [
+            4128
+          ],
+          "displayName": "Captain Bentley"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 2130.0,
+          "heightFine": 2469.0,
+          "y": 3899.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb down the ladder.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2127.5,
+          "heightFine": 2373.0,
+          "y": 3893.0,
+          "instance": false
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceToWithHeight",
+          "x": 2126.0,
+          "heightFine": 965.0,
+          "y": 3893.0,
+          "range": 4
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Oneiromancer to give her a lunar staff.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2150.0,
+          "heightFine": 277.0,
+          "y": 3867.0,
+          "instance": false,
+          "distance": 16
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4511,
+          "modelIds": [],
+          "candidateNpcTypeIds": [
+            9348,
+            21224,
+            26302,
+            27685
+          ],
+          "displayName": "Oneiromancer",
+          "distance": 20
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "hear about"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Lunar gear",
+      "text": "Talk to Pauline Polaris in the north-western-most building in the city.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2072.5,
+          "heightFine": 2885.0,
+          "y": 3922.0,
+          "instance": false,
+          "distance": 4
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 13619,
+          "modelIds": [
+            4869
+          ],
+          "displayName": "Pauline Polaris",
+          "distance": 5
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Pauline?"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Jane Blud-Hagic-Maid"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9101,
+          "displayName": "Lunar cape",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [
+        {
+          "name": "Thread",
+          "itemId": -1,
+          "quantity": 2,
+          "duringQuest": false
+        },
+        {
+          "name": "Spade (tool belt doesn't work)",
+          "itemId": -1,
+          "quantity": 1,
+          "duringQuest": false
+        },
+        {
+          "name": "Suqah hide",
+          "itemId": 156,
+          "quantity": 4,
+          "duringQuest": false
+        }
+      ],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Meteora south in the city.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2080.0,
+          "heightFine": 2885.0,
+          "y": 3895.0,
+          "instance": false,
+          "distance": 4
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4515,
+          "modelIds": [
+            5190
+          ],
+          "displayName": "Meteora",
+          "distance": 5
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Gud"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill Suqahs until one drops a special tiara.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4527,
+          "modelIds": [
+            3084,
+            3387
+          ],
+          "displayName": "Suqah",
+          "priority": "closest"
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "item",
+          "typeId": 5525,
+          "modelIds": [
+            123
+          ],
+          "displayName": "Tiara"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 5525,
+          "displayName": "Tiara",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Give Meteora the tiara.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2080.0,
+          "heightFine": 2885.0,
+          "y": 3895.0,
+          "instance": false,
+          "distance": 4
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4515,
+          "modelIds": [
+            5190
+          ],
+          "displayName": "Meteora",
+          "distance": 5
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9102,
+          "displayName": "Lunar amulet",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Rimae Sirsalis in the clothing store south of the bank about ceremonial clothes.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2104.0,
+          "heightFine": 2885.0,
+          "y": 3903.0,
+          "instance": false,
+          "distance": 4
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4518,
+          "modelIds": [
+            3639
+          ],
+          "displayName": "Rimae Sirsalis",
+          "distance": 5
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "You know the ceremonial clothes?"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Interesting"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Rimae Sirsalis again, she will tan your hides.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "You know the ceremonial clothes?"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "That seems like a fair deal."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "test"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Craft a lunar torso, trousers, gloves, and boots from your hides.<ul><li>You can buy thread from Rimae's shop.</li></ul>",
+      "actions": [
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            156
+          ],
+          "displayName": "Tanned suqah hide"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Lunar Torso"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9097,
+          "displayName": "Lunar torso",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            156
+          ],
+          "displayName": "Tanned suqah hide"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Lunar Trousers"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": -1,
+          "displayName": "Lunar trousers",
+          "quantity": 1,
+          "candidateItemTypeIds": [
+            20813
+          ]
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            156
+          ],
+          "displayName": "Tanned suqah hide"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Lunar Gloves"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9099,
+          "displayName": "Lunar gloves",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "inventoryHighlight",
+          "itemId": -1,
+          "modelIds": [
+            156
+          ],
+          "displayName": "Tanned suqah hide"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Lunar Boots"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9100,
+          "displayName": "Lunar boots",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Selene next to the lodestone.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4517,
+          "modelIds": [
+            6288
+          ],
+          "displayName": "Selene"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "I'm looking for a ring."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "I hope"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Dig on the marked tile south of the city.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2078.0,
+          "heightFine": 149.0,
+          "y": 3863.0,
+          "instance": false,
+          "tile": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9104,
+          "displayName": "Lunar ring",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Oneiromancer.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2150.0,
+          "heightFine": 277.0,
+          "y": 3867.0,
+          "instance": false,
+          "distance": 16
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4511,
+          "modelIds": [],
+          "candidateNpcTypeIds": [
+            9348,
+            21224,
+            26302,
+            27685
+          ],
+          "displayName": "Oneiromancer",
+          "distance": 20
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Thanks"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2150.0,
+          "heightFine": 277.0,
+          "y": 3867.0,
+          "instance": false,
+          "distance": 16
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4511,
+          "modelIds": [],
+          "candidateNpcTypeIds": [
+            9348,
+            21224,
+            26302,
+            27685
+          ],
+          "displayName": "Oneiromancer",
+          "distance": 20
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9097,
+          "displayName": "Lunar torso",
+          "quantity": 1
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Getting ready for bed",
+      "text": "Use the vial on the kindling.",
+      "actions": [
+        {
+          "t": "inventoryHighlight",
+          "itemId": 9094,
+          "modelIds": [
+            342
+          ],
+          "displayName": "Kindling"
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": 9088,
+          "modelIds": [
+            426,
+            150
+          ],
+          "displayName": "Guam vial"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "chatText",
+          "text": "soak the kindling"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Get ready for the next sections. Manually move to the next step when you're ready.<ul><li>Equip <b>ALL</b> lunar gear.</li><li>Get your combat runes (prioritize fire spells) and supplies.</li><li>Dismiss your follower</li><li>Wear all your lunar items.</li><li>Four backpack spaces are required.</li><li>Do <b>not</b> carry an augmented crystal hatchet in the backpack to avoid a bug later in the quest.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Light the ceremonial brazier in the building west of the lodestone.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2073.0,
+          "heightFine": 3485.0,
+          "y": 3912.0,
+          "instance": false,
+          "distance": 15
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "object",
+          "typeId": 1705,
+          "modelIds": [
+            7890
+          ],
+          "displayName": "Brazier",
+          "distance": 16
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "modelVisible",
+          "kind": "object",
+          "typeId": 100052,
+          "modelIds": [
+            789
+          ],
+          "displayName": "Lit brazier"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use the soaked kindling on the brazier.<ul><li>If you exit the Dreamworld early, you can get a new kindling from the Oneiromancer.</li></ul>",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "object",
+          "typeId": 1705,
+          "modelIds": [
+            7890
+          ],
+          "displayName": "Brazier"
+        },
+        {
+          "t": "inventoryHighlight",
+          "itemId": 9094,
+          "modelIds": [
+            342
+          ],
+          "displayName": "Kindling"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inInstance"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Dicing",
+      "text": "Talk to the Ethereal Man/Lady.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            5616,
+            5640
+          ],
+          "candidateObjectTypeIds": [
+            63701
+          ],
+          "displayName": "Ethereal being",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Good point"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Step on the yellow/green platform south-west of the island.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": -12.0,
+          "heightFine": -32.0,
+          "y": -7.0,
+          "instance": true,
+          "tile": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": -28.0,
+          "heightFine": -16.0,
+          "y": -18.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Ethereal Fluke.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4507,
+          "modelIds": [
+            3840
+          ],
+          "displayName": "Ethereal Fluke",
+          "priority": "closest",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "number you want"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "He will call out a number. You need to make the dice add up to the number he called. When you 'roll' one of the dice, it will turn the die upside down, so each die only has two possible numbers (1 and 6, 2 and 5, 3 and 4).",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "You've done it! Good work"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "<table cellspacing=\"13\"><caption>Answers</caption><tbody><tr><td colspan=\"7\" style=\"text-align: center; ;\" class=\"table-na nohighlight\" data-sort-value=\"0\">N/A</td><th rowspan=\"10\"></th><th>21</th><td>1</td><td>6</td><td>2</td><td>5</td><td>3</td><td>4</td></tr><tr><th>12</th><td>1</td><td>1</td><td>2</td><td>2</td><td>3</td><td>3</td><th>22</th><td>1</td><td>6</td><td>2</td><td>5</td><td>4</td><td>4</td></tr><tr><th>13</th><td>1</td><td>1</td><td>2</td><td>2</td><td>3</td><td>4</td><th>23</th><td>1</td><td>6</td><td>5</td><td>5</td><td>3</td><td>3</td></tr><tr><th>14</th><td>1</td><td>1</td><td>2</td><td>2</td><td>4</td><td>4</td><th>24</th><td>1</td><td>6</td><td>5</td><td>5</td><td>3</td><td>4</td></tr><tr><th>15</th><td>1</td><td>1</td><td>2</td><td>5</td><td>3</td><td>3</td><th>25</th><td>1</td><td>6</td><td>5</td><td>5</td><td>4</td><td>4</td></tr><tr><th>16</th><td>1</td><td>1</td><td>2</td><td>5</td><td>3</td><td>4</td><th>26</th><td>6</td><td>6</td><td>2</td><td>5</td><td>3</td><td>4</td></tr><tr><th>17</th><td>1</td><td>1</td><td>2</td><td>5</td><td>4</td><td>4</td><th>27</th><td>6</td><td>6</td><td>2</td><td>5</td><td>4</td><td>4</td></tr><tr><th>18</th><td>1</td><td>1</td><td>5</td><td>5</td><td>3</td><td>3</td><th>28</th><td>6</td><td>6</td><td>5</td><td>5</td><td>3</td><td>3</td></tr><tr><th>19</th><td>1</td><td>1</td><td>5</td><td>5</td><td>3</td><td>4</td><th>29</th><td>6</td><td>6</td><td>5</td><td>5</td><td>3</td><td>4</td></tr><tr><th>20</th><td>1</td><td>1</td><td>5</td><td>5</td><td>4</td><td>4</td><th>30</th><td>6</td><td>6</td><td>5</td><td>5</td><td>4</td><td>4</td></tr></tbody></table>",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "You've done it! Good work"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Wait to be teleported back to the middle plaform.",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": -12.0,
+          "heightFine": -32.0,
+          "y": -7.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Ethereal Man/Lady.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            5616,
+            5640
+          ],
+          "candidateObjectTypeIds": [
+            63701
+          ],
+          "displayName": "Ethereal being",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Spot on"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Number sequence",
+      "text": "Head south-east and step on the pink/purple platform.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 5.0,
+          "heightFine": -32.0,
+          "y": -7.0,
+          "instance": true,
+          "tile": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 24.0,
+          "heightFine": -32.0,
+          "y": -20.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Ethereal Numerator.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4503,
+          "modelIds": [
+            3840
+          ],
+          "displayName": "Ethereal Numerator",
+          "priority": "closest",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationActive"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4503,
+          "modelIds": [
+            3840
+          ],
+          "displayName": "Ethereal Numerator",
+          "priority": "closest",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationInactive"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Click on the numbers to complete the patterns for four times.<br/><br/><table><tbody><tr><td>0</td><td>1</td><td>3</td><td>4</td><td>6</td><td>7</td></tr><tr><td>1</td><td>1</td><td>1</td><td>2</td><td>1</td><td>3</td><td>1</td><td>4</td><td>1</td><td>5</td></tr><tr><td>1</td><td>1</td><td>2</td><td>2</td><td>3</td><td>3</td><td>4</td></tr><tr><td>1</td><td>1</td><td>2</td><td>3</td><td>1</td><td>1</td><td>4</td><td>5</td><td>1</td></tr><tr><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr><tr><td>1</td><td>3</td><td>5</td><td>7</td><td>9</td></tr><tr><td>1</td><td>4</td><td>2</td><td>5</td><td>3</td><td>6</td></tr><tr><td>1</td><td>6</td><td>2</td><td>5</td><td>3</td><td>4</td></tr><tr><td>1</td><td>9</td><td>2</td><td>8</td><td>3</td><td>7</td></tr><tr><td>2</td><td>3</td><td>5</td><td>6</td><td>8</td><td>9</td></tr><tr><td>2</td><td>6</td><td>3</td><td>7</td><td>4</td><td>8</td></tr><tr><td>3</td><td>4</td><td>2</td><td>5</td><td>1</td><td>6</td></tr><tr><td>7</td><td>3</td><td>6</td><td>2</td><td>5</td><td>1</td></tr><tr><td>8</td><td>6</td><td>4</td><td>2</td><td>0</td></tr><tr><td>9</td><td>7</td><td>5</td><td>3</td><td>1</td></tr><tr><td>9</td><td>8</td><td>7</td><td>6</td><td>5</td><td >4</td></tr></tbody></table>",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "hang of 124151 this now"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Wait to be be teleported back to the middle plaform.",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 5.0,
+          "heightFine": -32.0,
+          "y": -7.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Ethereal Man/Lady.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            5616,
+            5640
+          ],
+          "candidateObjectTypeIds": [
+            63701
+          ],
+          "displayName": "Ethereal being",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "great deal"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Logging race",
+      "text": "Head north-east and step on the blue platform.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 1.0,
+          "heightFine": -16.0,
+          "y": 11.0,
+          "instance": true,
+          "tile": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 5.0,
+          "heightFine": -32.0,
+          "y": 25.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Ethereal Perceptive.<ul><li>Bug: Do not carry an augmented crystal hatchet or you will have to leave to bank it.</li></ul>",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4505,
+          "modelIds": [
+            4698
+          ],
+          "displayName": "Ethereal Perceptive",
+          "instance": true
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Ok, let's go!"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "chatText",
+          "text": "Go go"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Run west.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": -12.0,
+          "heightFine": -16.0,
+          "y": 25.0,
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": -12.0,
+          "heightFine": -16.0,
+          "y": 25.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Run west and chop 20 dream logs, depositing them on your log pile.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "object",
+          "typeId": 16604,
+          "modelIds": [
+            1062
+          ],
+          "displayName": "Dream tree",
+          "priority": "closest",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "inventoryContains",
+          "itemId": 9067,
+          "displayName": "Dream log",
+          "quantity": 20
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Deposit your logs.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": -4.0,
+          "heightFine": 0.0,
+          "y": 24.0,
+          "instance": true,
+          "tile": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Wew done"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Wait to be be teleported back to the middle plaform.",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 1.0,
+          "heightFine": -16.0,
+          "y": 11.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Ethereal Man/Lady.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            5616,
+            5640
+          ],
+          "candidateObjectTypeIds": [
+            63701
+          ],
+          "displayName": "Ethereal being",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "very impressed"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Memorisation",
+      "text": "Head north-west and step on the grey platform.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": -12.0,
+          "heightFine": -8.0,
+          "y": 8.0,
+          "instance": true,
+          "tile": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": -27.0,
+          "heightFine": -32.0,
+          "y": 25.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Ethereal Guide.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4506,
+          "modelIds": [
+            3840
+          ],
+          "displayName": "Ethereal Guide",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Very well"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Cross the chasm by jumping on the correct combination of Dream Puffs. <b>Keep a note of the correct steps!</b> You can use the table on the wiki to track them.",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "have you learned"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Wait to be be teleported back to the middle plaform.",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": -12.0,
+          "heightFine": -8.0,
+          "y": 8.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Ethereal Man/Lady.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            5616,
+            5640
+          ],
+          "candidateObjectTypeIds": [
+            63701
+          ],
+          "displayName": "Ethereal being",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Bingo"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "The hurdles",
+      "text": "Head east and step on the yellow platform.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 7.0,
+          "heightFine": -32.0,
+          "y": 1.0,
+          "instance": true,
+          "tile": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 22.0,
+          "heightFine": -32.0,
+          "y": -9.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Ethereal Expert and start the race.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4504,
+          "modelIds": [
+            3840
+          ],
+          "displayName": "Ethereal Expert",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationActive"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4504,
+          "modelIds": [
+            3840
+          ],
+          "displayName": "Ethereal Expert",
+          "instance": true
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Ok."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationInactive"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Jump over the hurdles. If you fail three times, you will lose the race. Run and stop before each hurdle, before clicking the orb to jump over.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Eat my dust!"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "I won"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Wait to be be teleported back to the middle plaform.",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 7.0,
+          "heightFine": -32.0,
+          "y": 1.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Ethereal Man/Lady.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            5616,
+            5640
+          ],
+          "candidateObjectTypeIds": [
+            63701
+          ],
+          "displayName": "Ethereal being",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Very, very good"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Copy cat",
+      "text": "Head south and step on the green platform.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2.0,
+          "heightFine": 0.0,
+          "y": -8.0,
+          "instance": true,
+          "tile": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 10.0,
+          "heightFine": -32.0,
+          "y": -17.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Ethereal Mimic.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 33,
+          "modelIds": [
+            3912
+          ],
+          "displayName": "Ethereal Mimic",
+          "priority": "closest",
+          "instance": true
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Suppose I may as well have a go."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Follow!"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Click on them and then copy the emote that they perform. They teleport after each correct emote.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 33,
+          "modelIds": [
+            3912
+          ],
+          "displayName": "Ethereal Mimic",
+          "priority": "closest",
+          "instance": true
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "Yep"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Wait to be be teleported back to the middle plaform.",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "distanceTo",
+          "x": 2.0,
+          "heightFine": 0.0,
+          "y": -8.0,
+          "range": 4,
+          "instance": true
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Ethereal Man/Lady.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            5616,
+            5640
+          ],
+          "candidateObjectTypeIds": [
+            63701
+          ],
+          "displayName": "Ethereal being",
+          "instance": true
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Of course. I'm ready."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "about right to me"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Fight Me",
+      "text": "Talk to the Ethereal Man/Lady to begin the final fight.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "model",
+          "typeId": -1,
+          "modelIds": [
+            5616,
+            5640
+          ],
+          "candidateObjectTypeIds": [
+            63701
+          ],
+          "displayName": "Ethereal being",
+          "instance": true
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Of course. I'm ready."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "I'm ready"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Kill Me. You can safe-spot them behind the dream tree.<ul><li>Should you forget your runes after entering the fight, you will not be able to leave the fight in any way unless you log out and back in. This will take you back to Lunar Isle where you can bank to get the runes.</li><li>Be sure to equip your Seal of passage before speaking to a banker.</li><li>Go back to the Oneiromancer again to get the kindling and potion to return back to the dream.</li><li>Re-equip your Lunar amulet before attempting to enter the dream.</li></ul>",
+      "warning": "No tracking for this step.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Finishing up",
+      "text": "Read the lectern to return to Lunar Isle.",
+      "actions": [
+        {
+          "t": "modelHighlight",
+          "kind": "object",
+          "typeId": 13642,
+          "modelIds": [
+            756
+          ],
+          "displayName": "Lectern",
+          "instance": true
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Yes"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "notInInstance"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the Oneiromancer.",
+      "actions": [
+        {
+          "t": "direction",
+          "x": 2150.0,
+          "heightFine": 277.0,
+          "y": 3867.0,
+          "instance": false,
+          "distance": 16
+        },
+        {
+          "t": "modelHighlight",
+          "kind": "npc",
+          "typeId": 4511,
+          "modelIds": [],
+          "candidateNpcTypeIds": [
+            9348,
+            21224,
+            26302,
+            27685
+          ],
+          "displayName": "Oneiromancer",
+          "distance": 20
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "questComplete"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    }
+  ],
+  "stageVarbit": 10236,
+  "stageVarbitCompleteValue": 190,
+  "cacheQuestId": 24
+}

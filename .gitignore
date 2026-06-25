@@ -70,3 +70,15 @@ world/data/worldConfig.json
 mainlog.txt
 lobby-server.jar
 /capture/
+
+# ===== darkan-3-undercut monorepo additions =====
+# 24 GB JS5 cache: copied to disk for running, never git-tracked
+/data/cache/
+# Rust launcher/patcher build output (regenerable)
+target/
+# Undercut engine local-only derived data (sprite/type dumps, gitignored upstream too)
+/engine/dumps/
+# Undercut engine native bootstrap CMake output (the .so lands in engine/build/libs via gradle)
+/engine/native-bootstrap/build/
+# Local Claude Code settings
+.claude/settings.local.json

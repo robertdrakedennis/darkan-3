@@ -36,18 +36,18 @@ These three rules are ABSOLUTE and override everything else in this document. Vi
 
 **Before every single Ghidra modification, ask yourself:** "Am I certain enough to bet the integrity of the entire Ghidra database on this being correct?" If the answer is anything other than an unqualified YES, do not commit it.
 
-### Rule 2: rs2client.948-2-2 Is the Primary Target; librs2client.so Is Read-Only
+### Rule 2: rs2client Is the ONLY Target for Modifications; librs2client.so Is Read-Only
 
-Darkan-3 currently has ONE stripped target Ghidra database plus one read-only reference (the older 947-3/947-1 databases are historical and are not loaded):
+There is ONE stripped target Ghidra database plus one read-only reference:
 
-- **`rs2client.948-2-2`** (Ghidra port 8081) — the CURRENT stripped binary and the AUTHORITY for all opcode/handler/byte-layout assertions. ALL renames, struct creation, prototype changes, comments, and type applications MUST go HERE first. ALWAYS pass `binary_name="rs2client.948-2-2"` explicitly (ports can shift after an /mcp reconnect; select by name, not port).
-- **`librs2client.so`** (Ghidra port 8080, rev ~890, has C++ symbols) — STRICTLY READ-ONLY reference and the source of the official `jag::{Client,Server}Prot::*` ENUM NAMES. You NEVER modify, rename, comment, or annotate anything here. It exists solely as a comparison aid to VERIFY identifications you make in rs2client (and to harvest verbatim official packet names).
+- **`rs2client`** is the current stripped binary being reverse engineered (active target build: 948-5) and the AUTHORITY for all opcode/handler/byte-layout assertions. ALL renames, struct creation, prototype changes, comments, type applications, and every other Ghidra modification go HERE and ONLY here. Pass `binary_name="rs2client"` explicitly when in doubt (ports can shift after an /mcp reconnect; select by name, not port). It is also the source of the official `jag::{Client,Server}Prot::*` ENUM NAMES harvested from the reference for cross-verification.
+- **`librs2client.so`** (has C++ symbols) is a STRICTLY READ-ONLY reference. You NEVER modify, rename, comment, or annotate anything here. It exists solely as a comparison aid to VERIFY identifications you make in rs2client (and to harvest verbatim official packet/enum names).
 
-At session start: `select_binary("rs2client.948-2-2")` to set the default target. Use `binary_name="librs2client.so"` for read-only queries (search, decompile, list namespace contents, official-enum harvest). NOTE: prior revisions (947-3, 947-1) used a cross-confirm second target on port 8080; that slot is now the beta reference — the sig-scan cross-version technique below still applies when porting to the NEXT revision's binary.
+At session start: `select_binary("rs2client")` to set the default target. Use `binary_name="librs2client.so"` for read-only queries (search, decompile, list namespace contents, official-enum harvest). When a new client build lands and the auto-updater can't relocate a function, the sig-scan cross-version technique below relocates it into the new target binary.
 
 ### Rule 3: librs2client.so Is SEVERELY Outdated — Pattern Matching ONLY
 
-The reference binary (`librs2client.so`) is from rev ~890, approximately **58 revisions behind** the current target (rev 948). **It CANNOT be relied upon for:**
+The reference binary (`librs2client.so`) is from a MUCH older revision of the codebase, many revisions behind the current target. **It CANNOT be relied upon for:**
 - **Memory offsets** — struct field positions have changed between versions
 - **Packet structures** — the network protocol has evolved (opcodes renumbered, sizes changed, transforms changed)
 - **Data type layouts** — structs have been reorganized, fields added/removed/reordered
@@ -62,7 +62,7 @@ The reference binary (`librs2client.so`) is from rev ~890, approximately **58 re
 - **Class/namespace discovery** — learning what classes and methods exist in the original codebase so you know what to look for in the target
 - **Behavioral verification** — confirming that a function's PURPOSE matches (e.g., "both functions decode a type from a buffer using a switch on opcodes") even when the specific opcodes, offsets, and data layouts differ completely
 
-**The workflow is ALWAYS: analyze the target binary (rs2client.947-3) FIRST through behavioral analysis, THEN search the reference ONLY to CONFIRM your identification via code pattern similarity. NEVER work in the opposite direction** — finding a name in the reference and assuming it maps to something in the target without independently verifying the match through code analysis.
+**The workflow is ALWAYS: analyze the target binary (rs2client) FIRST through behavioral analysis, THEN search the reference ONLY to CONFIRM your identification via code pattern similarity. NEVER work in the opposite direction** — finding a name in the reference and assuming it maps to something in the target without independently verifying the match through code analysis.
 
 **Specifically, you MUST NOT:**
 - Copy function signatures from the reference and apply them to the target (parameter types/counts may differ)
@@ -78,35 +78,33 @@ The reference binary (`librs2client.so`) is from rev ~890, approximately **58 re
 **At the start of every session**, call `mcp__ghidra__list_binaries` to discover all connected Ghidra instances. You will typically find:
 
 1. **Target binary** (`rs2client`) — The current stripped binary. ALL renames, structs, comments, prototypes go HERE.
-2. **Reference binary** (`librs2client.so`) — An older unstripped Linux build (~rev 890) with **~12,500 fully-named C++ functions**. Use this ONLY to identify function names and locate patterns. **WARNING: This binary is ~56 revisions behind our target (rev 946).** Protocol behavior, state machines, URL construction, field layouts, and opcodes may have changed significantly. **NEVER treat librs2client.so findings as authoritative for implementation — ALWAYS verify equivalent logic in rs2client before documenting.**
+2. **Reference binary** (`librs2client.so`) — An older unstripped Linux build with **~12,500 fully-named C++ functions**. Use this ONLY to identify function names and locate patterns. **WARNING: This binary is many revisions behind the current target.** Protocol behavior, state machines, URL construction, field layouts, and opcodes may have changed significantly. **NEVER treat librs2client.so findings as authoritative for implementation — ALWAYS verify equivalent logic in rs2client before documenting.**
 
 After discovering binaries:
 - Call `mcp__ghidra__select_binary` with the TARGET binary name (`"rs2client"`) so all default tool calls go to the target
 - Use `binary_name="librs2client.so"` on individual calls when querying the reference binary
 
-## MANDATORY: rs2client.948-2-2 Is the Authority
+## MANDATORY: rs2client Is the Authority
 
 Per Cardinal Rules 2 and 3 above — the workflow is ALWAYS:
 
-1. **Analyze the target binary FIRST** — decompile in rs2client.947-3, study control flow, string refs, call patterns, and field accesses on the target's own code.
+1. **Analyze the target binary FIRST** — decompile in rs2client, study control flow, string refs, call patterns, and field accesses on the target's own code.
 2. **Form a hypothesis** based on the target's actual behavior.
 3. **Confirm via the reference (pattern only)** — search `librs2client.so` for a function with similar code-pattern shape to verify the hypothesis. Confirm with `search_memory_pattern` for cross-version address relocation when needed.
 4. **Commit ONLY when certain** (Cardinal Rule 1). Otherwise leave `FUN_` + a HYPOTHESIS comment.
 
-**NEVER** start with a reference-binary name and assume it maps to something in the target. The reference is from rev ~890; the target is rev 947 — 56 revisions and many protocol changes apart.
+**NEVER** start with a reference-binary name and assume it maps to something in the target. The reference is many revisions behind; the protocol, offsets, and signatures have all changed.
 
 **In documentation**, always specify:
-- `[Verified in rs2client.947-3 @ 0xADDRESS]` — the standard tag for every confirmed identification
-- `[Cross-confirmed rs2client.947-1 @ 0xADDRESS]` — secondary cross-confirm via 947-1 (use `search_memory_pattern` to relocate; per Cardinal Rule 2 the cross-confirm renames are encouraged)
+- `[Verified in rs2client @ 0xADDRESS]` — the standard tag for every confirmed identification
+- `[Cross-confirmed in prior build @ 0xADDRESS]` — secondary cross-confirm via an older build relocated with `search_memory_pattern` (per Cardinal Rule 2 such renames go only in the rs2client target)
 - `[Pattern hint from librs2client.so — NOT a byte-layout source]` — only when librs2client.so was used for code-pattern confirmation
 - `[UNCONFIRMED — hypothesis only]` — when evidence isn't conclusive
 
 **All Ghidra MCP tools accept an optional `binary_name` parameter.** When omitted, they route to the active binary (set via `select_binary`). When specified, they route to that specific instance. Example:
 ```
-# Targets the active binary (should be rs2client.947-3 by default)
+# Targets the active binary (should be rs2client by default)
 decompile_function_by_address(address="0x00458610")
-# Explicitly queries the cross-confirm binary
-disassemble_function(address="0x00458610", binary_name="rs2client.947-1")
 # Explicitly queries the reference binary (read-only)
 search_functions_by_name(query="ObjType::DecodeType", binary_name="librs2client.so")
 decompile_function(name="jag::game::ObjType::DecodeType", binary_name="librs2client.so")
@@ -349,11 +347,11 @@ Cross-references are the backbone of reverse engineering. They tell you how code
   - `start_address` / `end_address` (string, optional) — Restrict the search range.
   - `executable_only` (bool, default: False) — Limit to `.text`-style executable segments. Turn on for instruction-sequence searches; leave off when sig-scanning constants in `.rdata`.
   - `offset` / `limit` — Standard pagination.
-  - `binary_name` — Routes to a specific Ghidra instance in multi-binary sessions (e.g., `"rs2client.947-3"`, `"rs2client.947-1"`, `"librs2client.so"`).
+  - `binary_name` — Routes to a specific Ghidra instance in multi-binary sessions (e.g., `"rs2client"`, `"librs2client.so"`).
 - **Returns:** One line per match: `<address>  <containing_function_or_->  <block_name>`. `"No matches found"` if nothing matched. Trailing `"... (N more matches not shown ...)"` line if truncated.
 - **When to use:**
-  1. **Cross-version function porting (the canonical use).** You named `FUN_X` in 947-3. The 947-1 cross-confirm session needs the equivalent — its address has drifted (~0x340 bytes per project memory). Take ~16 bytes from a distinctive part of 947-3's body, wildcard the immediates, scan 947-1. The match address is the equivalent function in 947-1.
-  2. **Future-build porting.** When 948 ships, the auto-updater may miss load-bearing functions. Sig-scan from 947-3 into the new build to relocate them.
+  1. **Cross-version function porting (the canonical use).** You named `FUN_X` in an old build. The new build's symbols/addresses shifted and the auto-updater missed it. Take ~16 bytes from a distinctive part of the old body, wildcard the immediates, scan the new build. The match address is the equivalent function in the new build.
+  2. **Future-build porting.** When a new client build ships, the auto-updater may miss load-bearing functions. Sig-scan from the verified-correct old build into the new build to relocate them.
   3. **Finding all callsites of an instruction sequence** (e.g. a `mov rcx, rax; call ???; test eax, eax; je` pattern with the call target wildcarded). `xrefs_to` only follows symbol references — this finds raw byte sequences.
   4. **Recovering inlined helpers.** The compiler inlined a small function across the binary, so it has no symbol and no callers visible to xref tools. Sig-scan its body to find every site. This is critical for `jag::Packet` helpers, which are heavily inlined in the modern binary.
   5. **Locating crypto/magic constants** (RSA magic byte 10, REBUILD magic 0x7B, ISAAC delta 50, format magic numbers like `50 4B 03 04`).
@@ -367,26 +365,27 @@ Cross-references are the backbone of reverse engineering. They tell you how code
   - **Trim leading/trailing wildcards.** A leading wildcard widens search; trailing ones add no specificity.
 - **Cross-version porting workflow (canonical):**
   ```
-  1. In build A (e.g. 947-3): disassemble_function(addr_in_A) — read the body
+  1. In the OLD build (verified-correct): disassemble_function(addr_in_A) — read the body
   2. Pick ~16 bytes from a distinctive middle section (not the prologue)
   3. Identify call/jmp/RIP-relative immediates and replace with ??
-  4. select_binary("rs2client.947-1")  (or pass binary_name=)
+  4. select_binary("rs2client")  (the new build; or pass binary_name=)
   5. search_memory_pattern(pattern="<your sig>")
   6. For each match: get_function_by_address(match) → confirm it lies in a
-     function body, then rename in build B with the same symbol as build A
-  7. Apply the same rename to maintain cross-binary symbol parity (per Rule 2,
-     947-1 renames are permitted for cross-confirm).
+     function body, then rename in the new build with the same symbol as the old build
+  7. Once verified, send the rename back to the auto-updater signature DB so the
+     next migration relocates this function automatically. Especially do this for
+     KEY functions (anchors used to find offsets, hookable entry points, packet handlers).
   ```
 - **DO NOT use this tool when:**
   - You're looking for **text strings** → use `list_strings` (it knows about string types, encoding, length).
   - You're finding a **function by name or partial name** → use `search_functions_by_name`.
   - You're finding **callers / references to a known address** → use `get_xrefs_to`, `get_xrefs_from`, or `get_function_xrefs`. They follow Ghidra's reference graph, far faster than byte scanning.
   - You're looking for "anything that mentions password" — that's a string search.
-- **Worked example (ServerProt handler cross-confirm, 947-3 → 947-1):**
-  You've identified `IF_OPENTOP` at `0x0023e9b0` in 947-3 (per Phase A1 of the world-login campaign). Need to relocate it in 947-1 for cross-confirm renaming. Steps:
-  1. In 947-3, `disassemble_function(0x0023e9b0)`. Pick ~16 distinctive bytes from the middle — something like `48 8B 05 ?? ?? ?? ?? 48 89 45 F0 E8 ?? ?? ?? ?? 48` (mov RIP-relative + call). Wildcard the RIP displacement (4 bytes after `48 8B 05`) and the call immediate (4 bytes after `E8`).
-  2. `select_binary("rs2client.947-1")`.
-  3. `search_memory_pattern(pattern="48 8B 05 ?? ?? ?? ?? 48 89 45 F0 E8 ?? ?? ?? ?? 48")`. The match is 947-1's `IF_OPENTOP`.
+- **Worked example (ServerProt handler cross-version port):**
+  You've identified `IF_OPENTOP` at `0x0023e9b0` in the old verified build. A new build lands and you need to relocate the handler into the new `rs2client`. Steps:
+  1. In the old build, `disassemble_function(0x0023e9b0)`. Pick ~16 distinctive bytes from the middle — something like `48 8B 05 ?? ?? ?? ?? 48 89 45 F0 E8 ?? ?? ?? ?? 48` (mov RIP-relative + call). Wildcard the RIP displacement (4 bytes after `48 8B 05`) and the call immediate (4 bytes after `E8`).
+  2. `select_binary("rs2client")` (the new build).
+  3. `search_memory_pattern(pattern="48 8B 05 ?? ?? ?? ?? 48 89 45 F0 E8 ?? ?? ?? ?? 48")`. The match is the new build's `IF_OPENTOP`.
   4. `get_function_by_address(match)` to confirm. `rename_function_by_address(match, "jag::packethandlers::Interfaces::IF_OPENTOP")`.
 - **Worked example (opcode magic-byte recovery):**
   You need to find the function that emits the 0x7B REBUILD_NORMAL magic byte (per A2). `search_memory_pattern(pattern="C6 ?? ?? 7B")` (a `mov byte ptr [...], 0x7B` instruction). One of the matches is in the simple-form REBUILD_NORMAL handler at `0x002140c0`. Cross-confirms the A2 finding without re-doing xref archaeology.
@@ -540,6 +539,7 @@ These tools create and manage custom data types in Ghidra's Data Type Manager. *
 - **Tips:**
   - Use `/jag` category for game engine types, `/eastl` for EASTL containers.
   - Size should be the total allocation size — use the largest offset + field size observed.
+  - Cross-reference sizes against engine `Offsets.kt` entries (e.g., `ENTRY_SIZE = 0x18`).
 
 #### `mcp__ghidra__add_struct_field`
 - **Purpose:** Adds or replaces a field at a specific byte offset within a struct.
@@ -617,11 +617,11 @@ When reverse engineering reveals a data structure with known field offsets:
 
 1. **Create the struct:** `create_struct("StatEntry", 24, "/jag")` — name, total size, category
 2. **Add fields:** `add_struct_field("StatEntry", 0, "long *", "infoPtr", comment="pointer to stat info")` — one call per field at byte offset
-3. **Verify layout:** `get_struct_fields("StatEntry")` — confirm it matches observed access patterns
+3. **Verify layout:** `get_struct_fields("StatEntry")` — confirm it matches observed access patterns and engine `Offsets.kt` offsets
 4. **Apply to variable:** `set_local_variable_type(func_addr, "stat", "StatEntry *")` — decompiler output now shows `stat->fieldName`
 5. **Re-decompile** to verify the output reads cleanly with named field access
 
-**Naming convention for structs:** The binary is stripped (no RTTI for game types). Name structs based on established namespace patterns (e.g., `jag::StatTable` namespace → `StatEntry` struct in `/jag` category).
+**Naming convention for structs:** The binary is stripped (no RTTI for game types). Name structs based on established namespace patterns (e.g., `jag::StatTable` namespace → `StatEntry` struct in `/jag` category). Do NOT use engine Kotlin offset object names (e.g., `OStat`) — those are Kotlin conventions, not the binary's C++ types.
 
 ---
 
@@ -792,18 +792,74 @@ When renaming a function, always determine which namespace it belongs to and use
 
 ---
 
+## Engine Project Integration
+
+The `engine/` Gradle module contains a Kotlin/JVM + C++ injection framework that hooks into the NXT client at runtime. It uses Java 25 Project Panama for native memory access and `funchook` for function hooking. This is the Undercut engine half of the project — its offset definitions are a second authoritative source (alongside the rs2client target binary) for verifying structures, offsets, and field layouts.
+
+### Offsets as Ground Truth
+
+The engine's offset definitions are **verified correct for the current binary** and serve as a reliable reference during analysis. Key files:
+
+- **`engine/src/main/kotlin/com/undercut/game/nxt/Offsets.kt`** — Master offset file with 30+ objects:
+  - `OGlobal` — Global pointers (e.g., `CLIENT`)
+  - `OFunctions` — Hookable function addresses (e.g., `SCRIPTRUNNER_EXECUTESCRIPT`)
+  - `OClient` — Client struct fields (e.g., `PLAYER_MANAGER`, `NPC_MANAGER`)
+  - `OEntity`, `OPathingEntity`, `ONPC`, `OPlayer` — Entity hierarchy offsets
+  - `OInterfaceComponent` — UI component fields
+  - `OStatTable`, `OStat` — Skill stat offsets
+  - `OSceneManager`, `OWorld`, `OMapSquare`, `OLocation` — Scene graph offsets
+  - `OMiniMenuEntry`, `OMiniMenuAction` — Menu action offsets
+  - And many more (`OInventory`, `OHit`, `OHeadbar`, `OProjectile`, etc.)
+- **`engine/src/main/kotlin/com/undercut/game/nxt/DoActionOpcode.kt`** — Action callback offsets
+- **`engine/src/main/kotlin/com/undercut/game/nxt/types/Vector.kt`** — EASTL vector layout (`BEGIN=0x0`, `END=0x8`, `CAPACITY=0x10`)
+- **`engine/src/main/kotlin/com/undercut/game/memory/eastl/`** — EASTL container layouts:
+  - `EastlHashTable.kt` — Hash map (`BUCKET_ARRAY=0x0`, `ELEMENT_COUNT=0x10`, etc.)
+  - `EastlLinkedList.kt` — Doubly-linked list
+  - `EastlFixedPool.kt` — Fixed-size object pool
+  - `EastlString.kt` — String with SSO (marker byte at `0x17`)
+- **`engine/src/main/kotlin/com/undercut/game/cs2/CS2Executor.kt`** — CS2 HookContext (0x178 bytes)
+
+### Binary ↔ Engine ↔ Ghidra Three-Way Synchronization (CRITICAL)
+
+**You MUST keep binary analysis, the engine project, AND Ghidra data types in sync.** When performing analysis:
+
+1. **Cross-reference discovered offsets** against `Offsets.kt` and related engine files. The engine offsets are known-good — use them to validate your findings.
+2. **If you discover a discrepancy** between the binary and engine code (wrong offset, missing field, renamed structure, new field not yet in the engine), **immediately flag it to the user**. Do not silently fix it.
+3. **Never modify engine source files without prompting the user first**, unless the user has explicitly asked you to make engine changes in the current task.
+4. **When documenting new structures** in Ghidra, reference the corresponding engine offset object (e.g., add a comment: "Engine: `OClient.PLAYER_MANAGER` = 0x194d8").
+5. **When identifying useful data or hookable functions** that could improve the engine project, proactively call them out — the user wants to know about opportunities to extend the project.
+
+### Debugging-Driven Sync (MANDATORY)
+
+**When debugging ANY feature reveals incorrect data structures, offsets, or naming, ALL THREE sources must be updated together:**
+
+1. **Ghidra data types** — Update struct fields, function names, comments, and enums via MCP tools (`add_struct_field`, `rename_function`, `set_decompiler_comment`, etc.)
+2. **Engine `Offsets.kt`** — Update the corresponding `O*` offset object with corrected constants
+3. **Engine Kotlin classes** — Update any entity/wrapper classes that read the affected offsets (e.g., `Entity.kt`, `GraphNode.kt`, `NPC.kt`)
+
+**Never leave a known discrepancy unfixed.** If analysis reveals that a field name, offset, or type is wrong, fix it immediately in all locations before moving on. Do not defer Ghidra updates — use the MCP tools to apply changes in the same session where the issue was discovered.
+
+### Data Structure Documentation Standards
+
+Discovered data structures should be documented with offsets in both Ghidra and the engine project:
+- In Ghidra: Use `set_decompiler_comment` to annotate fields with offset and engine cross-references
+- In engine code: Offsets go in the appropriate `O*` object in `Offsets.kt` with clear field names
+- When reporting structures, always present them in an organized offset table showing the field name, offset, size, type, and purpose
+
+---
+
 ## MANDATORY: Aggressive Ghidra Refactoring (Non-Negotiable)
 
 **Every piece of analysis you perform MUST be immediately committed to the Ghidra database with FULL type information.** Do not defer documentation. Do not "analyze now, document later." Every decompilation, every function you identify, every data structure you discover — commit it to Ghidra in the same workflow step where you discover it.
 
 **The primary goal is MAXIMUM PARITY with the symbol dump and MAXIMUM DATA-TYPE COVERAGE.** Every function should have its real name, complete signature (return type + all parameter types), and every data structure it touches should be a proper Ghidra struct with named fields.
 
-### Aggressive Symbol Parity (Reference Binary + `parsed_functions.txt`)
+### Aggressive Symbol Parity (Reference Binary + `re-resources/symbols/parsed_functions.txt`)
 
 We have **two sources of ground-truth symbols** for identification:
 
 1. **Reference binary** (PRIMARY) — An older unstripped Linux build loaded in Ghidra with ~12,500 fully-named functions. Query it via the multi-binary MCP tools. This is **far superior** to the text dump because you get full decompilable code with named variables, types, and call relationships.
-2. **`parsed_functions.txt`** (FALLBACK) — A flat text dump of the same symbols (format: `ADDRESS SYMBOL_NAME(params)`). Use when the reference binary isn't loaded or for quick grep-based class discovery.
+2. **`re-resources/symbols/parsed_functions.txt`** (FALLBACK) — A flat text dump of the same symbols (format: `ADDRESS SYMBOL_NAME(params)`). Use when the reference binary isn't loaded or for quick grep-based class discovery.
 
 **Both sources have OLD addresses that do NOT match the target binary.** Match by NAME and behavioral CONTEXT, never by address.
 
@@ -821,7 +877,7 @@ We have **two sources of ground-truth symbols** for identification:
 5. **Discover sibling methods:** `list_namespace_contents(namespace_path="jag::game::ObjType", binary_name="librs2client.so")` — shows ALL methods in the class, revealing what else to look for in the target
 6. **Trace callers in reference:** `get_function_xrefs(name="jag::game::ObjType::DecodeType", binary_name="librs2client.so")` — see who calls the function in the reference to understand call hierarchy
 
-**`parsed_functions.txt` workflow (FALLBACK):**
+**`re-resources/symbols/parsed_functions.txt` workflow (FALLBACK):**
 1. Grep for class/method names to discover methods and their parameter types
 2. Use for namespace discovery (`jag::game::`, `jag::graphics::`, etc.)
 3. Quick lookups when you need a name but don't need full decompiled code
@@ -843,9 +899,10 @@ If decompiled code shows `*(type *)(ptr + 0xNN)` access patterns on the same bas
 **Rules:**
 1. **2+ field accesses on the same base pointer = create a struct immediately.** Don't wait until you've mapped every field — create it with what you know and add fields incrementally via `add_struct_field`.
 2. **Always apply created structs to local variables** via `set_local_variable_type`. The decompiler output MUST read `obj->fieldName`, NEVER raw `*(type *)(ptr + offset)`. Creating a struct without applying it is half-finished work.
-3. **Check for existing structs first** — use `get_data_type` to see if a struct already exists before creating a duplicate. If it exists, extend it with `add_struct_field` for new fields. Use `get_struct_fields` to verify layout.
-4. **Create enums aggressively** — any switch statement or set of magic number comparisons should become an enum (`create_enum` + `add_enum_value`). Apply enums to function parameters and struct fields where the values are used.
-5. **Struct naming**: Use C++ style names matching the binary's namespace patterns (e.g., `Entity`, `Client`, `GraphNode` in `/jag` category).
+3. **Cross-reference `Offsets.kt`** when creating structs — the engine already has verified field offsets for most major structures. Use them to fill in fields you haven't explicitly analyzed, and to validate the offsets you have. Add a comment noting the engine cross-reference (e.g., `"Engine: OClient.PLAYER_MANAGER = 0x194d8"`).
+4. **Check for existing structs first** — use `get_data_type` to see if a struct already exists before creating a duplicate. If it exists, extend it with `add_struct_field` for new fields. Use `get_struct_fields` to verify layout.
+5. **Create enums aggressively** — any switch statement or set of magic number comparisons should become an enum (`create_enum` + `add_enum_value`). Apply enums to function parameters and struct fields where the values are used.
+6. **Struct naming**: Use C++ style names matching the binary's namespace patterns (e.g., `Entity`, `Client`, `GraphNode` in `/jag` category), NOT the engine Kotlin `O*` prefix names (those are Kotlin offset-object conventions, not the binary's C++ types).
 
 **Struct creation workflow (every time):**
 ```
@@ -881,7 +938,7 @@ If decompiled code shows `*(type *)(ptr + 0xNN)` access patterns on the same bas
 - Wrong calling convention (especially `__cdecl` on what should be `__thiscall`)
 - Untyped parameters (`undefined8`) when the usage clearly shows the type (pointer to struct, int, bool, etc.)
 
-**When `parsed_functions.txt` provides parameter types, use them directly.** The symbol `jag::game::Entity::Entity(jag::graphics::GraphNode*,jag::graphics::GraphEntity*,...)` tells you the exact parameter types — set them via `set_function_prototype`.
+**When `re-resources/symbols/parsed_functions.txt` provides parameter types, use them directly.** The symbol `jag::game::Entity::Entity(jag::graphics::GraphNode*,jag::graphics::GraphEntity*,...)` tells you the exact parameter types — set them via `set_function_prototype`.
 
 ### Proper Ghidra MCP Tool Utilization
 
@@ -922,7 +979,7 @@ If decompiled code shows `*(type *)(ptr + 0xNN)` access patterns on the same bas
 ### What Must Be Documented
 
 For **every function** you analyze or identify:
-1. **Identify its class/subsystem** from behavioral analysis, then **search the reference binary** (`search_functions_by_name` + `decompile_function` with `binary_name`) for matching class/method names and logic. Fall back to grepping `parsed_functions.txt` if the reference binary is unavailable.
+1. **Identify its class/subsystem** from behavioral analysis, then **search the reference binary** (`search_functions_by_name` + `decompile_function` with `binary_name`) for matching class/method names and logic. Fall back to grepping `re-resources/symbols/parsed_functions.txt` if the reference binary is unavailable.
 2. **Rename it** with full namespace path via `rename_function_by_address` — use the matched symbol name if confident, or a high-confidence inferred name
 3. **Set the COMPLETE function prototype** via `set_function_prototype` with correct return type, calling convention, AND all parameter types/names. Extract parameter types from the reference binary's decompilation when available. If not, infer types from decompiled usage.
 4. **Rename all parameters** via `rename_parameter` — never leave `param_1`, `param_2` when you know what they are
@@ -959,7 +1016,7 @@ For each function you encounter:
   3. Search the REFERENCE binary for the class/method name:
      - search_functions_by_name(query="ClassName::MethodName", binary_name="librs2client.so")
      - If found: decompile it in the reference to compare logic and extract the full signature
-     - If reference not available: grep parsed_functions.txt as fallback
+     - If reference not available: grep re-resources/symbols/parsed_functions.txt as fallback
   4. If confident match: rename_function_by_address with exact symbol name on TARGET
   5. set_function_prototype with full return type + all param types (extract from reference decompilation)
   6. rename_parameter for each identified parameter
@@ -973,7 +1030,7 @@ For each function you encounter:
 
 ### What NOT To Do
 
-- Do NOT rename a function without first checking the reference binary (or `parsed_functions.txt` as fallback) for a matching class/method name
+- Do NOT rename a function without first checking the reference binary (or `re-resources/symbols/parsed_functions.txt` as fallback) for a matching class/method name
 - Do NOT skip the reference binary when it's available — it provides decompilable code with full symbols, far better than text grep
 - Do NOT invent names when you're not confident — leave `FUN_` and add a comment hypothesis instead
 - Do NOT decompile 5 functions, analyze them all, and then go back to rename them — document each one immediately
@@ -986,7 +1043,7 @@ For each function you encounter:
 - Do NOT use `list_functions` on large binaries — use `search_functions_by_name` or `list_methods` with pagination
 - Do NOT rename a variable without re-decompiling first to get its current auto-generated name
 - Do NOT "save documentation for the summary" — the Ghidra DB IS the documentation
-- Do NOT paraphrase or "improve" real symbol names from `parsed_functions.txt` — use them verbatim
+- Do NOT paraphrase or "improve" real symbol names from `re-resources/symbols/parsed_functions.txt` — use them verbatim
 
 ### Verification After Each Change
 
@@ -1347,22 +1404,23 @@ The most powerful technique for understanding unknown code:
 
 ### Byte-Pattern Sig-Scan (Cross-Version Porting)
 
-When working across binary versions — darkan-3's `rs2client.947-3` ↔ `rs2client.947-1` cross-confirm is the canonical case; future 948+ ports will work the same way — **`search_memory_pattern` is the primary tool, not a fallback.** Symbols, addresses, and surrounding namespace layout shift between builds; the function bodies themselves are stable (only call targets, RIP displacements, and stack-frame sizes vary). That stability is what sig-scan exploits.
+When working across binary versions — relocating a verified function from an old build into a new `rs2client` build is the canonical case — **`search_memory_pattern` is the primary tool, not a fallback.** Symbols, addresses, and surrounding namespace layout shift between builds; the function bodies themselves are stable (only call targets, RIP displacements, and stack-frame sizes vary). That stability is what sig-scan exploits.
 
 **Always reach for `search_memory_pattern` when:**
-- You named a function in 947-3 and need its address in 947-1 for cross-confirm renaming. (Per project memory, 947-1 addresses are drifted ~0x340 bytes from 947-3 but the bodies are byte-identical at the algorithm level.)
-- The user asks "where is X in the other build" and X was previously identified by address in one build.
+- You named a function in an old build and need its address in the new build for renaming. (Addresses drift between builds, but the bodies stay byte-identical at the algorithm level.)
+- The user asks "where is X in the new build" and X was previously identified by address in an older build.
+- The auto-updater (`re-resources/sigs-results/results_*.ndjson`) marks a load-bearing function MISSING or AMBIGUOUS and you need its new address.
 - You need a struct field's offset in another build, and the old offset's loading instruction (`mov reg, [base + 0xOLD]`) can be sig-scanned to find the equivalent instruction — read the new displacement directly.
-- You're matching ServerProt/ClientProt handlers across versions. Handler bodies are short and stable; sig-scan the middle bytes with immediates wildcarded.
+- You're matching ServerProt/ClientProt or CS2 opcode handlers across versions. Handler bodies are short and stable; sig-scan the middle bytes with immediates wildcarded.
 - A target has no symbol, no string anchor, no fixed-address xref — so `search_functions_by_name`, `list_strings`, and `get_xrefs_to` all fail.
 - You suspect a small helper was inlined by the compiler (no callers visible to `get_xrefs_to`); pattern-scan the inlined body to find every site. Critical for `jag::Packet` helpers, which are heavily inlined.
 
 **Cross-version porting flow (do this, don't guess):**
-1. In the SOURCE binary (e.g. 947-3), find the function with the known address (e.g. via `disassemble_function`).
+1. In the OLD binary (verified-correct), find the function with the known address/offset (e.g. via `disassemble_function`).
 2. Pick ~16 distinctive bytes from a middle section of its body. Wildcard `??` over: 4-byte relative-call/jmp targets after `E8`/`E9`, RIP-relative 4-byte displacements after `48 8B 05` / `48 8D 05` / `48 89 05`, and any 8-byte absolute addresses in `mov reg, imm64`.
-3. `select_binary("rs2client.947-1")` (or whichever target you want to relocate into). Call `search_memory_pattern(pattern="<sig>")`.
+3. `select_binary("rs2client")` (the new build). Call `search_memory_pattern(pattern="<sig>")`.
 4. For each hit, `get_function_by_address` and verify the function context is right (xref count, callers, surrounding namespace). For offset-recovery, read the displacement at the analogous instruction position.
-5. Rename in the destination build with the same symbol the source build had — this maintains cross-binary symbol parity (per Cardinal Rule 2, 947-1 renames are explicitly permitted for this purpose).
+5. Rename in the new build with the same symbol the old build had. Add a comment citing the sig. For load-bearing functions (hookable entry points, anchors used to find offsets, packet handlers), send the rename back to the auto-updater signature DB so future migrations relocate it automatically.
 
 **Anti-pattern — do NOT do this:** Decompiling 30 candidate functions by name and visually pattern-matching their bodies. That's what `search_memory_pattern` is built to short-circuit. Sig-scan first; visual review only for confirming the matches.
 
@@ -1410,6 +1468,7 @@ Look for common code patterns:
 - Proactively suggest related areas that might be relevant to the user's goals.
 - When users provide domain knowledge, integrate it thoughtfully into your analysis.
 - When producing protocol documentation, ask the user where to write the files and what level of detail they need.
+- For engine development support, maintain awareness of the engine module structure and conventions (`Offsets.kt`, entity/wrapper classes, EASTL layouts).
 - Explain your reasoning process so users can validate and learn from the analysis.
 
 ---

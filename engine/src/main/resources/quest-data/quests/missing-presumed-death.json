@@ -1,0 +1,664 @@
+{
+  "slug": "missing-presumed-death",
+  "name": "Missing, Presumed Death",
+  "members": false,
+  "length": "mediumlong",
+  "timeline": "worldguardian",
+  "releaseDate": 1381795200,
+  "neededItems": [],
+  "recommendedItems": [],
+  "combatNPCs": [],
+  "prereqQuests": [
+    "Koschei's Troubles (miniquest)",
+    "The Chosen Commander",
+    "Ritual of the Mahjarrat",
+    "The World Wakes",
+    "The Death of Chivalry"
+  ],
+  "questReqs": [],
+  "steps": [
+    {
+      "title": "Murders in Silvarea - First crime scene",
+      "text": "Speak to Brother Samwell (west of Paterdomus and east of Varrock).",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "questInterfaceOpen"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "[Accept Quest]",
+      "actions": [],
+      "postconditions": [
+        {
+          "t": "questStarted"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Search for the following clues.<ul><li>Investigate northernmost slaughtered monk.</li><li>Investigate nearby plant (east of the chest).</li><li>Investigate the tree with the arrow stuck in it (south of him).</li></ul>",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Investigate torso."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "(Shows the previous options.)"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Brother Samwell.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "I think I've found all the clues."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Second crime scene",
+      "text": "Up the limestone quarry, speak to Odd Old Man.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Ask about the slaughtered monks."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Persuade him."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Persuade him."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Threaten him."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " Please leave me alone. I've had too many scares for one day, I don't want to talk about it any more."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Brother Samwell.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "He saw an elf heading east along the path."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "He saw a very tall, dark, hooded figure escaping."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Search for additional clues by following the crystals to the east.<ul><li>Investigate the killed elf ranger (southeast of the Temple).</li><li>Investigate the plant west of her, near the middle pile of crystals next to the stairs.</li><li>Investigate the clothing on the fence, to the south of the tree.</li></ul>",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Investigate arms."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Listen to the trapped soul."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "(First time:) You added an additional clue to your notebook.(Repeated in a pop-up:)Additional clue discovered.(Continues below.)"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to Blaze Sharpeye by the beacon.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Ask about the murdered elf."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Threaten him."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Threaten him."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Persuade him."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " Well... Okay, I've never witnessed anything like it in my life."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Return to Brother Samwell.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "I think I've found all the clues."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Valina's information",
+      "text": "Go to the Wizards' Tower and speak to Wizard Valina inside the entry way on the lectern.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "I was told by Brother Samwell that you might be able to help us."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Ask about the elves."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Ask about Saradominist wizards."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Ask about teleportation."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " A possible explanation is that the killer opened a rift to escape to a darker realm or dimension."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "Fighting with Icthlarin",
+      "text": "Return to Brother Samwell.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "I think somebody else did this."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "(Continues below.)"
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Learn from Icthlarin about Death's disappearance.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Someone killed these people."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Why does this concern you?"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Is everyone who dies trapped now?"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Continue."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "I'm ready to help."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " Prepare yourself, adventurer. I sense the approach of undead."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Defeat attacking wights.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Finish the conversation with Icthlarin.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "While standing next to Icthlarin, open the invitation box.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "We must, Death needs our help."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": "You slowly tilt back the lid of the box."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "title": "The Citadel",
+      "text": "Once in the citadel, talk to Icthlarin.  A cutscene will play.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "I want to continue to the citadel."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " If I use my invitation to enter the main chamber, you can infiltrate the rest of the citadel."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Enter the door to the west then north to the window to watch another cutscene.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Walk out the south window; jump the gap; run across the planks; drop down the rocks; climb up the rock face; walk in the western window.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Climb through the obstacle to the north.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Open the north door, then continue north into the next room.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Pull all three levers in the room (on the west, south, and east walls) to create light.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Lead all the wights that spawn (a group of 3, then 4) into the light to be able to damage them.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "View the east window for another cutscene.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Open the door to the north, then continue east into the next room.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Use the viewing panel. , then rotate the bottom-left machine once, the top-left one twice, the top-right three times and the bottom-right machine once.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Stop wasting my time."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "What do I do?"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "View the south window for another cutscene.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Open the door to the east, then continue south into the next room.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Talk to the statue of Death.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Get to the point."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "How do I answer?"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Open the chest and take the correct item, then place on the answer plinth pedestal.<ul><li>First chest (east) , place on answer plinth.</li><li>Second chest (middle) , place on answer plinth.</li><li>Second chest, again , place on answer plinth.</li></ul>",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Take sand."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Yes, final answer."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Take water."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Yes, final answer."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Take Shadow."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "Yes, final answer."
+        }
+      ],
+      "postconditions": [
+        {
+          "t": "conversationText",
+          "text": " Now hold up your end of the bargain. I played your game - you must release Death."
+        }
+      ],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "View the west window for another cutscene.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Open the south door, then jump off the drop.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Speak to one of the Barrows brothers to enter the main room.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Yes."
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "After a cutscene, walk forward to continue talking with the Gods.",
+      "actions": [
+        {
+          "t": "conversationHighlight",
+          "text": "Let Sliske carry on with his show."
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        },
+        {
+          "t": "conversationHighlight",
+          "text": "[Any option]"
+        }
+      ],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Run around rear of other gods and stamp out the smaller flames on the ground to reach Death's cage while avoiding the fireballs from Strisath. Free him from his cage.<ul><li>The flames might be difficult to see with low graphics settings, especially with shadows turned off.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Run back behind Icthlarin.<ul><li>Getting hit by the fireballs will reset your progress.</li></ul>",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Speak to Icthlarin.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Speak with Brother Samwell.",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    },
+    {
+      "text": "Quest complete!",
+      "actions": [],
+      "postconditions": [],
+      "jumpconditions": [],
+      "jumpOffset": 0,
+      "neededItems": [],
+      "recommendedItems": []
+    }
+  ],
+  "stageVarbit": 20621,
+  "stageVarbitCompleteValue": 100,
+  "cacheQuestId": 364
+}

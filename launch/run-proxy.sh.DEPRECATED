@@ -1,0 +1,17 @@
+#!/bin/bash
+# =============================================================================================
+#  ⚠️ DEPRECATED — login MITM proxy launcher (moved out of the active launch path).
+#
+#  darkan-3-undercut replaces this with the Undercut engine's in-process `TcpIn` network sniffer
+#  (no network redirection needed — see launch/run-undercut.sh and CLAUDE.md → "Proxy Deprecation").
+#
+#  Kept ONLY so captures can still be regenerated until the engine sniffer's capture-export mode
+#  produces the capture/<session>/ format consumed by the :tools framingRegression /
+#  wireFormatVerify gates. To run it anyway (advanced/legacy), remove the guard below.
+# =============================================================================================
+echo "run-proxy.sh is DEPRECATED — use launch/run-undercut.sh (injected TcpIn sniffer) instead." >&2
+echo "If you really need the legacy proxy, edit this script to remove the guard." >&2
+exit 1
+
+# Legacy command (the login MITM proxy in :tools):
+./gradlew :tools:run -PmainClass=org.darkan.tools.loginproxy.LoginProxyKt
