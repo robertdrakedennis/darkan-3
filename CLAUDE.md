@@ -22,7 +22,7 @@ that patches the client (Darkan-3) **and** injects the engine (Undercut) in a si
 ```
 darkan-3-undercut/
 ├── core/        lobby/   world/   tools/    # Darkan-3 server (Gradle modules)
-├── client/                                  # Rust launcher (bolt-rs3) + LD_PRELOAD/DLL/dylib patchers
+├── client/                                  # Rust launcher (darkan-launcher) + LD_PRELOAD/DLL/dylib patchers
 ├── engine/                                  # Undercut injection engine == :engine Gradle module
 │   ├── src/main/kotlin/com/undercut/…       #   cache, game/nxt, hooks, mcp, script, ui, scene, …
 │   ├── native-bootstrap/                    #   C++20 bootstrap (funchook + imgui submodules)
@@ -65,7 +65,7 @@ documentation produced by the reverse-engineering agent (now stored in `re-resou
 | **ghidra-reverse-engineer** | Reverse engineers `rs2client` via Ghidra MCP | Ghidra DB (renames, structs, prototypes, comments) | Protocol docs, format specs, packet layouts, struct/offset definitions |
 | **networking-protocol-engineer** | Server networking layer | `org.darkan.core.net`, codecs, handlers, login, JS5 | Network code byte-compatible with the NXT client |
 | **cache-library-engineer** | Cache read/write/serve | `world.gregs.voidps` (buffer, cache, type) | Cache library, definition decoders, JS5 provider, compression |
-| **client-launcher-engineer** | Launcher, patching, injection | `client/launcher/` (Rust `bolt-rs3`) | Launcher UI, OAuth, client download, LD_PRELOAD/DLL patching, **engine injection** |
+| **client-launcher-engineer** | Launcher, patching, injection | `client/launcher/` (Rust `darkan-launcher`) | Launcher UI, OAuth, client download, LD_PRELOAD/DLL patching, **engine injection** |
 | **js5-server-engineer** | JS5 file serving | JS5 listener/protocol | JS5 server (framing, compression, caching) |
 
 RE **commands** (`.claude/commands/`): `/re-analyze`, `/re-identify`, `/re-overview`,
@@ -251,7 +251,7 @@ Yield `0x01702f80`, Error `0x01701dc0`. (Offsets are build-specific — re-verif
 - Encryption: **ISAAC** (opcode cipher), **RSA** (login + JS5), **XTEA/tinyKey** (data blocks).
 
 ### Client Launcher & Patching
-- The launcher is a **Rust app** (`bolt-rs3`, `client/launcher/`) using **tao** + **wry** webview.
+- The launcher is a **Rust app** (`darkan-launcher`, `client/launcher/`) using **tao** + **wry** webview.
 - Handles **Jagex OAuth2/PKCE**, session management, client download/update from the Jagex CDN.
 - **LD_PRELOAD** (Linux `libdarkan_patcher.so`) / **DLL injection** (Windows) / **dylib** (macOS)
   patch the running client: **RSA key replacement**, **server URL redirection**, **JS5 URL
@@ -279,14 +279,14 @@ Flags: `--no-engine` (server-only), `--no-patch` (inject into a live client).
 
 Darkan-3's login proxy (`tools/.../loginproxy`, `run-proxy.sh`) is **DEPRECATED**. The Undercut
 engine's injected `TcpIn` hook reads the protocol directly from client memory — **no network
-redirection** is needed. The proxy code is retained (not deleted) until the sniffer's
-**capture-export mode** writes the `capture/<session>/` format (`raw-c2s.bin`, `raw-s2c.bin`,
-`isaac-keys.txt`) that the `:tools` `framingRegression` / `wireFormatVerify` HARD gates consume.
-The format-exact writer + feed API already exist — `engine/src/main/kotlin/com/undercut/game/net/capture/CaptureExport.kt`
-(env-gated `UNDERCUT_CAPTURE_EXPORT=1`). What remains is THREE individually-verified hooks to feed
-it: raw socket recv (`raw-s2c`, captured *before* TcpIn's ISAAC opcode-decode), raw socket send
-(`raw-c2s`), and the 4 ISAAC seeds at login. These require live-client RE — **do not ship
-unverified hooks** (wrong offsets crash the client). Until they land, the proxy regenerates captures.
+redirection** is needed. The proxy code is retained (not deleted) for ad-hoc capture but is no
+longer part of any build.
+
+The old capture-regression pipeline has been **removed**: the `:tools` `framingRegression` /
+`wireFormatVerify` HARD gates and the engine's `CaptureExport` writer (env-gated
+`UNDERCUT_CAPTURE_EXPORT=1`) are gone, along with their dependency on the `capture/<session>/`
+format (`raw-c2s.bin`, `raw-s2c.bin`, `isaac-keys.txt`). Wire-format correctness is no longer
+asserted on `check`/`build`.
 
 ---
 

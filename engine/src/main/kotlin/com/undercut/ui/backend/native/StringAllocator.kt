@@ -50,6 +50,14 @@ object StringAllocator {
         }, CLEANUP_INITIAL_DELAY_MS, CLEANUP_INTERVAL_MS, TimeUnit.MILLISECONDS)
     }
     
+    /** Stops the cleanup scheduler thread and releases cached segments. For engine teardown/reload. */
+    fun shutdown() {
+        isShutdown.set(true)
+        cleanupInterrupt.set(true)
+        cleanupExecutor.shutdownNow()
+        stringMap.clear()
+    }
+
     private fun tryRunCleanup() {
         // Coordinate with frame operations using read lock
         // Frame operations use write lock, so this ensures mutual exclusion

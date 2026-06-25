@@ -1,51 +1,50 @@
 package com.undercut.game.net
 
-import com.undercut.game.net.decode.ClientPacketDecoder
-import com.undercut.game.net.decode.ServerPacketDecoder
-import com.undercut.game.net.model.ClientPacket
-import com.undercut.game.net.model.ServerPacket
+import kotlinx.coroutines.runBlocking
+import kotlinx.io.Buffer
+import kotlinx.io.write
+import org.darkan.core.net.prot.Codec
+import org.darkan.core.net.prot.revision.rev948.register948
 import java.io.BufferedWriter
 import java.io.File
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
+/**
+ * Packet dump pipeline. Opcode names, sizes and structured decoders all come from the shared
+ * `:core` protocol ([register948]) — the engine no longer carries its own opcode tables.
+ *
+ * - **C->S**: named + structurally decoded via core's rev948 client decoders (falls back to raw
+ *   hex when an opcode has no decoder, e.g. keepalives or not-yet-mapped opcodes).
+ * - **S->C**: named + raw body. Core only ships server *encoders* (decoding S->C is server-side
+ *   only), so there is no structured decode for incoming packets here — by design.
+ * - **Raw**: the login/RSA handshake (pre-prot, ISAAC not yet meaningful) is dumped byte-for-byte
+ *   via [logRaw].
+ */
 object PacketLogger {
+    private val codec: Codec = register948()
     private var writer: BufferedWriter? = null
     private val timeFmt = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
 
     data class PacketEntry(
         val time: String,
-        val direction: Char,
+        val direction: Char,   // 'S' (server->client), 'C' (client->server), 'R' (raw login)
         val name: String,
-        val opcode: Int,
+        val opcode: Int,       // -1 for raw chunks with no opcode
         val size: Int,
         val hex: String,
-        val decoded: String?,
-        val category: String?
+        val decoded: String?,  // structured fields (C->S with a decoder), else null
+        val category: String? = null,
     )
 
-    /** Callback for the UI packets tab. Set by PacketsTab.registerCallback(). */
+    /** Callback for the UI packets tab. Set by PacketsTab. */
     var onPacketLogged: ((PacketEntry) -> Unit)? = null
-
-    // 947-3 opcodes — filter high-frequency spam packets from file log
-    private val filteredServerOpcodes = setOf(
-        216,        // NO_TIMEOUT (keepalive)
-        171,        // SERVER_TICK_END
-        27,         // PLAYER_INFO (main sync)
-        78, 180,    // PLAYER_INFO_DECODE / _2
-        12, 205,    // NPC_INFO / NPC_INFO_THUNK
-    )
-
-    // 947-3: Most client opcodes are UNKNOWN — filter nothing until identified.
-    // Once event/camera/mouse opcodes are confirmed, add them here.
-    private val filteredClientOpcodes = setOf<Int>()
 
     fun init() {
         val logDir = File(System.getProperty("user.home"), ".undercut/logs")
         logDir.mkdirs()
-        val date = LocalDate.now().toString()
-        val logFile = File(logDir, "packets-$date.log")
+        val logFile = File(logDir, "packets-${LocalDate.now()}.log")
         writer = logFile.bufferedWriter(Charsets.UTF_8, bufferSize = 8192).also {
             it.write("# Packet log started at ${LocalTime.now().format(timeFmt)}\n")
             it.flush()
@@ -55,77 +54,58 @@ object PacketLogger {
 
     fun close() {
         writer?.let {
-            it.write("# Packet log closed at ${LocalTime.now().format(timeFmt)}\n")
-            it.flush()
-            it.close()
+            runCatching {
+                it.write("# Packet log closed at ${LocalTime.now().format(timeFmt)}\n")
+                it.flush()
+                it.close()
+            }
         }
         writer = null
     }
 
-    fun logServerPacket(opcode: Int, size: Int, payload: ByteArray) {
-        val prot = ServerProt.forOpcode(opcode)
-        val name = prot?.name ?: "UNKNOWN_$opcode"
-        val hex = PacketReader.hexDump(payload)
-        val time = LocalTime.now().format(timeFmt)
+    fun logServerPacket(opcode: Int, size: Int, payload: ByteArray) =
+        emit('S', codec.serverProtName(opcode), opcode, size, payload, decoded = null)
 
-        val decoded = if (prot != null) {
-            val d = ServerPacketDecoder.decode(prot, payload)
-            if (d != null && d !is ServerPacket.Raw) d.toString() else null
-        } else null
+    fun logClientPacket(opcode: Int, size: Int, payload: ByteArray) =
+        emit('C', codec.clientProtName(opcode), opcode, size, payload, decoded = decodeClient(opcode, payload))
 
-        // Push to UI callback (all packets, before file filter)
-        try {
-            onPacketLogged?.invoke(PacketEntry(time, 'S', name, opcode, size, hex, decoded, prot?.category?.name))
-        } catch (_: Throwable) {}
+    /** Raw on-the-wire bytes (login/RSA handshake, before prots/ISAAC carry meaning). */
+    fun logRaw(direction: Char, bytes: ByteArray) =
+        emit(direction, "RAW", opcode = -1, size = bytes.size, payload = bytes, decoded = null)
 
-        // File logging (filtered)
-        if (opcode in filteredServerOpcodes) return
-
-        val sb = StringBuilder(128)
-        sb.append("[$time] [S] $name($opcode) size=$size")
-        if (payload.isNotEmpty()) sb.append(" | $hex")
-        if (decoded != null) sb.append("\n\t-> $decoded")
-
-        writeLine(sb.toString())
+    private fun decodeClient(opcode: Int, payload: ByteArray): String? {
+        val decoder = codec.clientProtsByOpcode[opcode]?.decoder ?: return null
+        return runCatching {
+            val source = Buffer().apply { write(payload) }
+            runBlocking { decoder.invoke(source, payload.size) }.toString()
+        }.getOrNull()
     }
 
-    fun logClientPacket(opcode: Int, size: Int, payload: ByteArray) {
-        val prot = ClientProt.forOpcode(opcode)
-        val name = prot?.name ?: "UNKNOWN_$opcode"
-        val hex = PacketReader.hexDump(payload)
+    private fun emit(direction: Char, name: String, opcode: Int, size: Int, payload: ByteArray, decoded: String?) {
         val time = LocalTime.now().format(timeFmt)
+        val hex = hexDump(payload)
+        runCatching { onPacketLogged?.invoke(PacketEntry(time, direction, name, opcode, size, hex, decoded)) }
 
-        val decoded = if (prot != null) {
-            val d = ClientPacketDecoder.decode(prot, payload)
-            if (d != null && d !is ClientPacket.Raw) d.toString() else null
-        } else null
-
-        // Push to UI callback (all packets, before file filter)
-        try {
-            onPacketLogged?.invoke(PacketEntry(time, 'C', name, opcode, size, hex, decoded, prot?.category?.name))
-        } catch (_: Throwable) {}
-
-        // File logging (filtered)
-        if (opcode in filteredClientOpcodes) return
-
-        val sb = StringBuilder(128)
-        sb.append("[$time] [C] $name($opcode) size=$size")
-        if (payload.isNotEmpty()) sb.append(" | $hex")
-        if (decoded != null) sb.append("\n\t-> $decoded")
-
+        val sb = StringBuilder(96)
+        sb.append('[').append(time).append("] ").append(direction).append("> ").append(name)
+        if (opcode >= 0) sb.append(" (op=").append(opcode).append(", ").append(size).append("B)")
+        else sb.append(" (").append(size).append("B)")
+        if (decoded != null) sb.append("\n    ").append(decoded)
+        if (payload.isNotEmpty()) sb.append("\n    hex: ").append(hex)
         writeLine(sb.toString())
     }
 
     @Synchronized
     private fun writeLine(line: String) {
-        try {
+        runCatching {
             writer?.let {
                 it.write(line)
                 it.newLine()
                 it.flush()
             }
-        } catch (e: Exception) {
-            // Silently ignore write failures to avoid impacting game
         }
     }
+
+    private fun hexDump(bytes: ByteArray): String =
+        bytes.joinToString(" ") { "%02x".format(it.toInt() and 0xFF) }
 }

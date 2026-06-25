@@ -45,6 +45,11 @@ object OFunctions {
     const val INTERFACEMANAGER_DRAWSLOTCHILDREN = 0x002b3210L   //948-5 (was 0x002b3020 in 948-2-2) — jag::InterfaceManager::DrawSlotChildren
     const val CLIENTPROT_SENDEVENTMOUSECLICK = 0x00180730L      //948-5 (was 0x001805b0 in 948-2-2) — jag::ClientProt::SendEventMouseClick
     const val CLIENTERROR_REPORTERROR = 0x006ef050L            //948-5 — jag::game::ClientError::ReportError (single crash/error telemetry funnel → libcurl POST to nxtclienterror.ws)
+    // Raw socket byte funnels (sig: ulong(this, buf, len)). Verified 948-5: Read called from
+    // TcpIn/ReadBytes/MainLogic; Write from FlushClientMessages/MainLogic. Used by the raw login
+    // dump (RawLoginDump) to capture the RSA/handshake bytes the decoded prot hooks can't see.
+    const val CLIENTSTREAM_READ = 0x0090d060L                  //948-5 — jag::ClientStream::Read (socket→buffer)
+    const val CLIENTSTREAM_WRITE = 0x0090c870L                 //948-5 — jag::ClientStream::Write (buffer→socket)
 }
 
 object OClient {
@@ -560,10 +565,16 @@ object OHintTrailList {
 }
 
 object OServerConnection {
+    const val CLIENT_STREAM = 0x08L   // ptr to jag::ClientStream (the raw TCP socket wrapper)
     const val CURRENT_OPCODE = 0x2CL
     const val RESOLVED_SIZE = 0x30L
     const val ISAAC_PTR = 0x2B8L
     const val PACKET_BASE = 0x2C0L
     const val BUF_DATA = 0x2D0L
     const val BUF_POS = 0x2D8L
+}
+
+object OConnectionManager {
+    const val GAME_CONNECTION = 0x18L    // ServerConnection* (active when LOGGED_IN / mainState 30)
+    const val LOGIN_CONNECTION = 0x28L   // ServerConnection* (active during login states)
 }

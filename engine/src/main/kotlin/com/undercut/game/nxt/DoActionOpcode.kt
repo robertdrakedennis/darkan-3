@@ -14,7 +14,6 @@ import com.undercut.profiling.PlayerProfiles
 import com.undercut.script.api.localPlayer
 import com.undercut.util.componentIdFromHash
 import com.undercut.util.interfaceIdFromHash
-import java.lang.foreign.Arena
 import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout.*
@@ -70,9 +69,9 @@ enum class DoActionOpcode(val id: Int, val actionName: String, val callback: Lon
     }
 
     private val action: MethodHandle = NativeAccess.BASE_ADDR.asSlice(callback, 8).toFunctionHandle(FunctionDescriptor.ofVoid(ADDRESS, ADDRESS))
-    private val clientFakePtr: MemorySegment = Arena.global().allocate(0x8)
-    private val fakeMiniMenuEntrySharedPtr: MemorySegment = Arena.global().allocate(0x10)
-    private val fakeMiniMenuEntry: MemorySegment = Arena.global().allocate(0x128)
+    private val clientFakePtr: MemorySegment = NativeAccess.engineArena.allocate(0x8)
+    private val fakeMiniMenuEntrySharedPtr: MemorySegment = NativeAccess.engineArena.allocate(0x10)
+    private val fakeMiniMenuEntry: MemorySegment = NativeAccess.engineArena.allocate(0x128)
 
     fun fire(param1: Int, param2: Int, param3: Int) {
         if (Bootstrap.client.mainState != MainState.LOGGED_IN && this != COMPONENT) return

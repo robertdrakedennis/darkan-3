@@ -37,6 +37,11 @@ object EGLSwapBuffers {
         symbol = "eglSwapBuffers"
     )
     fun eglSwapBuffersHook(display: MemorySegment, surface: MemorySegment): MemorySegment {
+        // During teardown become a pure passthrough so the render thread never touches ImGui state
+        // while it is being shut down. The native ImGui shutdown happens AFTER this is uninstalled.
+        if (Bootstrap.stopping) {
+            return HookManager.trampoline(::eglSwapBuffersHook.name).invokeExact(display, surface) as MemorySegment
+        }
         var frameStarted = false
         try {
             if (!initialized) {

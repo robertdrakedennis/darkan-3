@@ -3,9 +3,7 @@ package com.undercut.game.hooks.impl
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.hooks.Hook
 import com.undercut.game.hooks.HookManager
-import com.undercut.game.net.ClientProt
 import com.undercut.game.net.PacketLogger
-import com.undercut.game.net.intercept.PacketInterceptorChain
 import com.undercut.game.nxt.OFunctions
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout.ADDRESS
@@ -40,7 +38,6 @@ object SendClientMessage {
                 val fixedSize = objectPtr.get(JAVA_INT, 4)
                 val bufData = objectPtr.get(ADDRESS, 0x18)    // buffer data pointer
                 val bufWritePos = objectPtr.get(JAVA_LONG, 0x20).toInt()
-                val prot = ClientProt.forOpcode(opcode)
 
                 // Calculate how many bytes to skip (opcode encoding + optional size prefix)
                 val opcodeBytes = if (opcode >= 128) 2 else 1
@@ -60,7 +57,6 @@ object SendClientMessage {
                 }
 
                 PacketLogger.logClientPacket(opcode, payloadSize, payload)
-                if (!PacketInterceptorChain.processClientPacket(prot, opcode, payload)) return
             } catch (_: Throwable) {
                 // Fail open: send the packet if anything goes wrong
             }

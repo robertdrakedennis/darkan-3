@@ -192,6 +192,14 @@ extern "C" {
     void Undercut_ImGui_Init(void* sdl_window, void* gl_context) {
         imgui_log_message("Initializing ImGui with SDL window: %p, GL context: %p\n", sdl_window, gl_context);
 
+        // Idempotent for hot-reload: a reloaded engine reuses the existing ImGui context + GL
+        // backend (the game's GL context is unchanged), so creating a second context here would
+        // corrupt state and break texture creation. The engine never calls Shutdown on reload.
+        if (ImGui::GetCurrentContext()) {
+            imgui_log_message("Undercut_ImGui_Init: context already exists; reusing (hot-reload).\n");
+            return;
+        }
+
         // Only the SDL window is strictly required by the SDL2 backend. The GL context pointer
         // is unused by the backend in master branch and may be null when the application uses EGL.
         if (!sdl_window) {

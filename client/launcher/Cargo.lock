@@ -145,32 +145,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bolt-rs3"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ar",
- "base64",
- "bytes",
- "directories",
- "env_logger",
- "fs2",
- "log",
- "rand 0.9.2",
- "reqwest",
- "rust-embed",
- "serde",
- "serde_json",
- "sha2",
- "tao",
- "tar",
- "tokio",
- "url",
- "wry",
- "xz2",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -382,6 +356,32 @@ checksum = "13b588ba4ac1a99f7f2964d24b3d896ddc6bf847ee3855dbd4366f058cfcd331"
 dependencies = [
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "darkan-launcher"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ar",
+ "base64",
+ "bytes",
+ "directories",
+ "env_logger",
+ "fs2",
+ "log",
+ "rand 0.9.2",
+ "reqwest",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tao",
+ "tar",
+ "tokio",
+ "url",
+ "wry",
+ "xz2",
 ]
 
 [[package]]

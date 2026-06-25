@@ -6,8 +6,6 @@ import com.undercut.game.hooks.HookManager
 import com.undercut.game.memory.NativeAccess.deref
 import com.undercut.game.memory.NativeAccess.getInt
 import com.undercut.game.net.PacketLogger
-import com.undercut.game.net.ServerProt
-import com.undercut.game.net.intercept.PacketInterceptorChain
 import com.undercut.game.nxt.OClient
 import com.undercut.game.nxt.OFunctions
 import com.undercut.game.nxt.OServerConnection
@@ -41,7 +39,6 @@ object ServerPacketCapture {
             try {
                 val opcode = protEntry.reinterpret(8).get(JAVA_INT, 0)
                 val size = payloadSize.address().toInt()
-                val prot = ServerProt.forOpcode(opcode)
 
                 val payload = if (size > 0) {
                     val client = Bootstrap.client.ptr
@@ -58,9 +55,6 @@ object ServerPacketCapture {
                 }
 
                 PacketLogger.logServerPacket(opcode, size, payload)
-                // Run interceptors for observation only — always call trampoline
-                // (dropping server packets would crash TcpIn's handler dispatch)
-                PacketInterceptorChain.processServerPacket(prot, opcode, payload)
             } catch (e: Throwable) {
                 System.err.println("[ServerPacketCapture] Error: ${e.message}")
             }

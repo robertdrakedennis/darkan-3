@@ -36,6 +36,12 @@ fn main() -> Result<()> {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
 
+    // One-time rebrand migration: relocate the launcher's data dir from the old
+    // `bolt-rs3` ProjectDirs path to the new `darkan-launcher` path. Must run
+    // before any data-dir access (Paths::new resolves the NEW dir). Best-effort:
+    // never blocks launch.
+    migrate_data_dir();
+
     // Setup paths and acquire lockfile
     let paths = Arc::new(Paths::new().context("Failed to initialize paths")?);
     paths.ensure_dirs()?;
@@ -69,7 +75,7 @@ fn main() -> Result<()> {
     let state = Arc::new(IpcState::new(cfg.clone(), creds, paths.clone(), cmd_tx, sessions));
 
     let main_window = WindowBuilder::new()
-        .with_title("Bolt RS3")
+        .with_title("Darkan Launcher")
         .with_inner_size(tao::dpi::LogicalSize::new(520.0, 640.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(400.0, 500.0))
         .build(&event_loop)
@@ -82,7 +88,7 @@ fn main() -> Result<()> {
     // latency and races JS readiness). Instead the frontend posts a `ready` IPC
     // message once app.js boots, and `IpcState::handle_message` responds with
     // Init — see IpcMessage::Ready. This guarantees the payload lands after the
-    // page's __bolt_callback is installed.
+    // page's __darkan_callback is installed.
 
     // Auth window state
     let mut auth_window: Option<tao::window::Window> = None;
@@ -286,4 +292,120 @@ async fn refresh_saved_sessions(
 
     let _ = config::save_credentials(&paths.creds_file, &creds);
     creds
+}
+
+/// One-time rebrand migration (Bolt RS3 → Darkan Launcher).
+///
+/// The launcher's ProjectDirs application name changed from `bolt-rs3` to
+/// `darkan-launcher`, which moves the data dir (e.g. on Linux
+/// `~/.local/share/bolt-rs3/` → `~/.local/share/darkan-launcher/`). That dir
+/// holds live state — `creds.json` (OAuth login), the downloaded `Jagex/`
+/// client, `libdarkan_patcher.so`, webview storage — so without migrating it the
+/// user would be silently logged out and re-download the whole client.
+///
+/// If the NEW data dir is missing or empty AND the OLD one exists with content,
+/// move old → new (rename, falling back to a recursive copy across filesystems).
+/// Idempotent and best-effort: any failure logs a warning and lets launch
+/// continue (a fresh data dir is still usable, just unmigrated).
+fn migrate_data_dir() {
+    use directories::ProjectDirs;
+
+    let old_dirs = match ProjectDirs::from("", "", "bolt-rs3") {
+        Some(d) => d,
+        None => return,
+    };
+    let new_dirs = match ProjectDirs::from("", "", "darkan-launcher") {
+        Some(d) => d,
+        None => return,
+    };
+
+    let old_data = old_dirs.data_dir();
+    let new_data = new_dirs.data_dir();
+
+    // Nothing to migrate, or already migrated, or both resolve to the same path.
+    if old_data == new_data || !dir_has_contents(old_data) {
+        return;
+    }
+    if dir_has_contents(new_data) {
+        log::info!(
+            "Skipping data-dir migration: {} already has data",
+            new_data.display()
+        );
+        return;
+    }
+
+    log::info!(
+        "Migrating launcher data dir {} -> {} (Bolt RS3 -> Darkan Launcher rebrand)",
+        old_data.display(),
+        new_data.display()
+    );
+
+    // Ensure the new parent exists so a cross-dir rename can land.
+    if let Some(parent) = new_data.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            log::warn!(
+                "Data-dir migration: failed to create {}: {}. Continuing without migration.",
+                parent.display(),
+                e
+            );
+            return;
+        }
+    }
+
+    match std::fs::rename(old_data, new_data) {
+        Ok(()) => log::info!("Data-dir migration complete (renamed)."),
+        Err(rename_err) => {
+            // rename() fails across filesystems (EXDEV) — fall back to copy+remove.
+            log::info!(
+                "Data-dir rename failed ({}); falling back to recursive copy.",
+                rename_err
+            );
+            match copy_dir_recursive(old_data, new_data) {
+                Ok(()) => {
+                    if let Err(e) = std::fs::remove_dir_all(old_data) {
+                        log::warn!(
+                            "Data-dir migration: copied to {} but failed to remove old {}: {}",
+                            new_data.display(),
+                            old_data.display(),
+                            e
+                        );
+                    } else {
+                        log::info!("Data-dir migration complete (copied).");
+                    }
+                }
+                Err(e) => log::warn!(
+                    "Data-dir migration: recursive copy failed: {}. Continuing without migration.",
+                    e
+                ),
+            }
+        }
+    }
+}
+
+/// True if `dir` exists and contains at least one entry. A missing dir or an
+/// empty dir both count as "no contents" (treat as needing/eligible-for migration).
+fn dir_has_contents(dir: &std::path::Path) -> bool {
+    match std::fs::read_dir(dir) {
+        Ok(mut entries) => entries.next().is_some(),
+        Err(_) => false,
+    }
+}
+
+/// Recursively copy `src` into `dst`, creating directories as needed. Used as a
+/// cross-filesystem fallback when `std::fs::rename` fails with EXDEV.
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else {
+            // Covers regular files and symlinks (copies the target contents).
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
 }

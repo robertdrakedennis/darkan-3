@@ -328,3 +328,118 @@ footer {
   border-top: 1px solid var(--border);
   text-align: right;
 }
+
+/* Clients panel */
+.clients-panel {
+  max-width: 440px;
+  text-align: left;
+  align-self: flex-start;
+  width: 100%;
+}
+
+.clients-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.clients-header h2 {
+  font-size: 16px;
+}
+
+.clients-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.clients-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+
+.clients-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 24px 0;
+}
+
+.client-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.client-info {
+  min-width: 0;
+}
+
+.client-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.client-pid {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.client-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.client-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+/* State badges */
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-active {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--success);
+}
+
+.badge-unloaded {
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+
+.badge-not-injected {
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+
+.badge-error {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+}

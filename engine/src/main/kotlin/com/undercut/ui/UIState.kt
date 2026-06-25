@@ -90,6 +90,9 @@ object UIState {
     val buffsDebuffsEnabled = boolState(false)
     val packetCaptureEnabled = boolState(true)
     val packetAutoScroll = boolState(true)
+    // Raw login/RSA handshake byte dump (RawLoginDump). Off by default — it hooks the per-byte
+    // socket funnels, so only enable while capturing a login.
+    val rawLoginDumpEnabled = boolState(false)
     val showSceneObjects = boolState(false)
     val showNpcs = boolState(false)
     val showPlayers = boolState(false)
@@ -174,6 +177,7 @@ object UIState {
         buffsDebuffsEnabled.close()
         packetCaptureEnabled.close()
         packetAutoScroll.close()
+        rawLoginDumpEnabled.close()
         packetDirFilter.close()
         packetSearchText.close()
 

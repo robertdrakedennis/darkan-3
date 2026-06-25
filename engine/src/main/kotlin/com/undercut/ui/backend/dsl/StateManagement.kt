@@ -1,6 +1,6 @@
 package com.undercut.ui.backend.dsl
 
-import java.lang.foreign.Arena
+import com.undercut.game.memory.NativeAccess
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
@@ -57,8 +57,8 @@ abstract class ImGuiState<T> : AutoCloseable {
 }
 
 class BooleanState(initialValue: Boolean) : ImGuiState<Boolean>() {
-    // Use persistent buffer that C++ can write to directly
-    override val buffer: MemorySegment = Arena.global().allocate(ValueLayout.JAVA_BOOLEAN)
+    // Persistent buffer C++ writes to directly; freed when the engine unloads (per-load arena).
+    override val buffer: MemorySegment = NativeAccess.engineArena.allocate(ValueLayout.JAVA_BOOLEAN)
     
     init {
         // Set initial value in buffer
@@ -88,8 +88,8 @@ class BooleanState(initialValue: Boolean) : ImGuiState<Boolean>() {
 }
 
 class IntState(initialValue: Int) : ImGuiState<Int>() {
-    // Use persistent buffer that C++ can write to directly
-    override val buffer: MemorySegment = Arena.global().allocate(ValueLayout.JAVA_INT)
+    // Persistent buffer C++ writes to directly; freed when the engine unloads (per-load arena).
+    override val buffer: MemorySegment = NativeAccess.engineArena.allocate(ValueLayout.JAVA_INT)
     
     init {
         // Set initial value in buffer
@@ -138,8 +138,8 @@ class FloatState(initialValue: Float) : ImGuiState<Float>() {
 }
 
 class StringState(initialValue: String, private val maxLength: Int) : ImGuiState<String>() {
-    // Use global arena for persistent state but add safety checks
-    override val buffer: MemorySegment = Arena.global().allocate(maxLength.toLong())
+    // Persistent buffer C++ writes to directly; freed when the engine unloads (per-load arena).
+    override val buffer: MemorySegment = NativeAccess.engineArena.allocate(maxLength.toLong())
 
     override var value: String = initialValue
         get() {

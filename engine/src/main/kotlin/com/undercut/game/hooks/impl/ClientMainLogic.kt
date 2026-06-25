@@ -26,6 +26,13 @@ object ClientMainLogic {
     @JvmStatic
     @Hook(OFunctions.CLIENT_MAINLOGIC, priority = Priority.LAST)
     fun clientMainLogicHook(clientBaseAddr: MemorySegment, unkByte: Byte) {
+        // During teardown become a pure passthrough (no engine logic, no lock) so a frame landing
+        // mid-shutdown can't run against half-torn state. Checked before taking Bootstrap.lock,
+        // which the teardown holds while quiescing.
+        if (Bootstrap.stopping) {
+            HookManager.trampoline(::clientMainLogicHook.name).invoke(clientBaseAddr, 1.toByte())
+            return
+        }
         synchronized(Bootstrap.lock) {
             try {
                 MainLogicTickQueue.drain()

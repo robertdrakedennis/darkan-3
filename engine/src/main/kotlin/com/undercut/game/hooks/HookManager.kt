@@ -5,7 +5,7 @@ import com.undercut.game.memory.NativeAccess
 import com.undercut.game.memory.NativeAccess.pointerAtOffset
 import com.undercut.game.memory.NativeAccess.toDescriptor
 import com.undercut.game.memory.NativeAccess.toFunctionHandle
-import com.undercut.game.memory.NativeAccess.toGlobalArenaPtr
+import com.undercut.game.memory.NativeAccess.toEngineUpcallStub
 import io.github.classgraph.ClassGraph
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout.ADDRESS
@@ -70,7 +70,7 @@ object HookManager {
     @JvmStatic
     fun hookFunction(originalFunction: MemorySegment, hookMethod: Method) {
         val hookHandle = getFunctionHandle(hookMethod)
-        val jptr = hookHandle.toGlobalArenaPtr()
+        val jptr = hookHandle.toEngineUpcallStub()
         val targetFuncPtrSegment = Funchook.addHook(hookMethod.name, originalFunction, jptr)
         val trampolineAddress = targetFuncPtrSegment.getAtIndex(ADDRESS, 0).reinterpret(8)
         val trampolineFunctionSegment = trampolineAddress.pointerAtOffset(0x0L, 0x0L)

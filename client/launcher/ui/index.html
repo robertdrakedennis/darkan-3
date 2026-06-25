@@ -3,20 +3,22 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bolt RS3</title>
+  <title>Darkan Launcher</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app">
     <header>
-      <h1>Bolt RS3</h1>
+      <h1>Darkan Launcher</h1>
       <div class="header-actions">
+        <button id="btn-clients" class="icon-btn" title="Clients (Undercut engine)">&#128268;</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
         <button id="btn-theme" class="icon-btn" title="Toggle theme">&#9790;</button>
       </div>
     </header>
 
     <main>
+      <div id="play-view">
       <div id="no-accounts" class="panel">
         <p>Sign in with your Jagex account to play.</p>
         <button id="btn-login" class="btn btn-primary">Sign In</button>
@@ -29,10 +31,6 @@
             <div class="mode-option">
               <label><input type="radio" name="mode" value="Live" checked> Official</label>
               <small>Play on Jagex servers</small>
-            </div>
-            <div class="mode-option">
-              <label><input type="radio" name="mode" value="Proxy"> Proxy</label>
-              <small>Route traffic through local proxy</small>
             </div>
             <div class="mode-option">
               <label><input type="radio" name="mode" value="Custom"> Private Server</label>
@@ -70,6 +68,24 @@
       </div>
 
       <button id="btn-play" class="btn btn-play" style="display:none">&#9654; Play</button>
+      </div>
+
+      <div id="clients-view" class="panel clients-panel" style="display:none">
+        <div class="clients-header">
+          <h2>Clients</h2>
+          <div class="clients-header-actions">
+            <button id="btn-refresh-clients" class="btn btn-secondary btn-sm" title="Refresh">&#10227; Refresh</button>
+            <button id="btn-close-clients" class="icon-btn" title="Back">&times;</button>
+          </div>
+        </div>
+        <p class="clients-hint">
+          Running NXT clients and their Undercut engine state. Inject performs the
+          first GDB injection (may prompt for sudo); uninject/reinject use the
+          engine's control socket.
+        </p>
+        <div id="clients-list"></div>
+        <div id="clients-empty" class="clients-empty">No running clients found.</div>
+      </div>
     </main>
 
     <footer>
@@ -90,6 +106,13 @@
             <input type="checkbox" id="chk-close-after">
             Close launcher after game starts
           </label>
+        </div>
+        <div class="field" id="field-auto-inject">
+          <label>
+            <input type="checkbox" id="chk-auto-inject">
+            Auto-inject Undercut on startup
+          </label>
+          <small>Linux only. Injects the Undercut engine into the client after launch (may prompt for sudo).</small>
         </div>
         <div class="field">
           <label for="inp-launch-cmd">Custom launch command</label>

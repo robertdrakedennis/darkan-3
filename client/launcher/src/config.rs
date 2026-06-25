@@ -6,16 +6,37 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub enum ServerMode {
     Live,
-    Proxy,
     Custom,
 }
 
 impl Default for ServerMode {
     fn default() -> Self {
         ServerMode::Live
+    }
+}
+
+/// Deserialize `ServerMode` leniently so configs written by older launcher
+/// builds keep loading. The removed `Proxy` variant (deprecated in favour of the
+/// Undercut engine's in-process sniffer) and any unknown future string both fall
+/// back to `Live` rather than failing the whole config parse.
+impl<'de> Deserialize<'de> for ServerMode {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Ok(match raw.as_str() {
+            "Custom" => ServerMode::Custom,
+            "Live" => ServerMode::Live,
+            // "Proxy" (removed) and anything unrecognised → safe default.
+            other => {
+                log::warn!("Unknown server_mode {:?} in config; defaulting to Live", other);
+                ServerMode::Live
+            }
+        })
     }
 }
 
@@ -37,6 +58,12 @@ pub struct Config {
     pub custom_config_uri: Option<String>,
     #[serde(default)]
     pub custom_rsa_modulus: Option<String>,
+    /// When true (Linux only), after the launcher spawns `rs2client` it injects
+    /// the Undercut engine (`libundercutbootstrap.so`) via GDB-`dlopen`, the same
+    /// mechanism as `launch/run-undercut.sh`. Best-effort: a failure never blocks
+    /// or kills the client launch.
+    #[serde(default)]
+    pub auto_inject_undercut: bool,
 }
 
 fn default_true() -> bool {
@@ -54,6 +81,7 @@ impl Default for Config {
             custom_server_port: None,
             custom_config_uri: None,
             custom_rsa_modulus: None,
+            auto_inject_undercut: false,
         }
     }
 }
@@ -94,7 +122,7 @@ pub struct Paths {
 
 impl Paths {
     pub fn new() -> Result<Self> {
-        let dirs = ProjectDirs::from("", "", "bolt-rs3")
+        let dirs = ProjectDirs::from("", "", "darkan-launcher")
             .context("Failed to determine project directories")?;
 
         let config_dir = dirs.config_dir().to_path_buf();

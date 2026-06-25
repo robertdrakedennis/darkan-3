@@ -1,6 +1,7 @@
 package com.undercut.game.memory
 
 import com.undercut.game.nxt.types.SharedPointer
+import java.io.File
 import java.lang.foreign.*
 import java.lang.foreign.ValueLayout.*
 import java.lang.invoke.MethodHandle
@@ -15,10 +16,31 @@ object NativeAccess {
     private val lookups = mutableMapOf<String, SymbolLookup>()
     private val linker = Linker.nativeLinker()
 
+    /**
+     * Per-engine-load native arena for hook upcall stubs + every other allocation whose lifetime is
+     * exactly one engine load (funchook target slots, UI state buffers, DoAction scratch). Fresh per
+     * classloader, closed in [teardown] AFTER funchook uninstall+quiesce. The upcall stubs hold
+     * MethodHandles bound to the engine's hook methods; on Arena.global they would pin this
+     * classloader's metaspace forever, so a hot-reload could never reclaim it. Closing this arena on
+     * unload releases the stubs, letting the old classloader (and its classes) be GC'd.
+     */
+    val engineArena: Arena = Arena.ofShared()
+
     fun init(baseAddr: MemorySegment) {
         BASE_ADDR = baseAddr
-        System.loadLibrary("undercutbootstrap")
+        // Resolve the already-resident bootstrap .so by absolute path rather than
+        // System.loadLibrary: the latter throws UnsatisfiedLinkError when a *second*
+        // classloader (a hot-reload) loads the same library in the process. libraryLookup
+        // just dlopen()s the already-loaded .so (RTLD_NODELETE), valid from any loader.
+        addLookup("undercutbootstrap", bootstrapLookup())
         addLookup("loaderLookup", SymbolLookup.loaderLookup())
+    }
+
+    private fun bootstrapLookup(): SymbolLookup {
+        val dir = System.getenv("UNDERCUT_HOME_DIR")
+            ?: System.getProperty("java.library.path")?.split(File.pathSeparator)?.firstOrNull()
+            ?: "."
+        return SymbolLookup.libraryLookup("$dir/libundercutbootstrap.so", Arena.global())
     }
 
     fun addLookup(name: String, lookup: SymbolLookup) {
@@ -62,8 +84,20 @@ object NativeAccess {
         return linker.downcallHandle(this, desc)
     }
 
-    fun MethodHandle.toGlobalArenaPtr(): MemorySegment {
-        return Linker.nativeLinker().upcallStub(this, this.type().toDescriptor(), Arena.global())
+    fun MethodHandle.toEngineUpcallStub(): MemorySegment {
+        return Linker.nativeLinker().upcallStub(this, this.type().toDescriptor(), engineArena)
+    }
+
+    /**
+     * Release every per-engine-load native allocation so this classloader can be GC'd on hot-reload.
+     * MUST be called only AFTER [Funchook.uninstall] + a quiesce + [Funchook.destroy]: closing the
+     * arena frees the hook upcall stubs, which is fatal if any game thread is still executing one.
+     */
+    fun teardown() {
+        runCatching { engineArena.close() }
+        symbols.clear()
+        functions.clear()
+        lookups.clear()
     }
 
     fun MethodType.toDescriptor(): FunctionDescriptor {

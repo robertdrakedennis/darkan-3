@@ -1,6 +1,5 @@
 package com.undercut.game.memory
 
-import java.lang.foreign.Arena
 import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout.*
@@ -15,7 +14,7 @@ object Funchook {
     }
 
     fun addHook(name: String, src: MemorySegment, dst: MemorySegment): MemorySegment {
-        val targetFuncPtrSegment = Arena.global().allocate(0x8)
+        val targetFuncPtrSegment = NativeAccess.engineArena.allocate(0x8)
         targetFuncPtrSegment.setAtIndex(JAVA_LONG, 0, src.address())
         val addFuncHandle = NativeAccess.getFunction("funchook_prepare") { FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS) }
         val result = addFuncHandle.invokeExact(funchook, targetFuncPtrSegment, dst) as Int

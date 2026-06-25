@@ -20,6 +20,10 @@ pub struct LaunchParams<'a> {
 ///     which spawns the target suspended and remote-LoadLibraryW's
 ///     `darkan_patcher.dll` into it before resuming. The injector inherits the
 ///     env block we set here, and the DLL is env-gated on `DARKAN_RSA_MODULUS`.
+///
+/// Returns the spawned process id on success so callers can drive follow-up work
+/// against the exact child (e.g. Undercut engine injection) rather than scanning
+/// `/proc`.
 pub fn launch_rs3(
     binary: &Path,
     config_uri: &str,
@@ -28,11 +32,10 @@ pub fn launch_rs3(
     custom_command: Option<&str>,
     rsa_modulus: Option<&str>,
     working_dir: Option<&Path>,
-    proxy_mode: bool,
-) -> Result<()> {
+) -> Result<u32> {
     let binary_str = binary.to_string_lossy().to_string();
     let data_dir_str = data_dir.to_string_lossy().to_string();
-    let needs_patcher = rsa_modulus.is_some() || proxy_mode;
+    let needs_patcher = rsa_modulus.is_some();
 
     // Decide on the program + args to run. On a normal launch we run the
     // target binary directly with `--configURI <uri>`. A custom_command
@@ -55,16 +58,15 @@ pub fn launch_rs3(
     // (LD_PRELOAD + DARKAN_* on Linux when the .so is found, DARKAN_* always
     // on Windows when the injector is found — preserves historical gating).
     #[cfg(windows)]
-    let mut cmd = build_windows_command(&target_argv, needs_patcher, rsa_modulus, proxy_mode);
+    let mut cmd = build_windows_command(&target_argv, needs_patcher, rsa_modulus);
     #[cfg(target_os = "macos")]
-    let mut cmd = build_macos_command(&target_argv, binary, needs_patcher, rsa_modulus, proxy_mode);
+    let mut cmd = build_macos_command(&target_argv, binary, needs_patcher, rsa_modulus);
     #[cfg(all(unix, not(target_os = "macos")))]
-    let mut cmd = build_unix_command(&target_argv, binary, needs_patcher, rsa_modulus, proxy_mode);
+    let mut cmd = build_unix_command(&target_argv, binary, needs_patcher, rsa_modulus);
     #[cfg(not(any(windows, unix)))]
     let mut cmd = {
         let _ = needs_patcher;
         let _ = rsa_modulus;
-        let _ = proxy_mode;
         let mut c = Command::new(&target_argv[0]);
         for a in &target_argv[1..] {
             c.arg(a);
@@ -103,9 +105,10 @@ pub fn launch_rs3(
     cmd.stdin(Stdio::null());
 
     let child = cmd.spawn().context("Failed to spawn RS3 process")?;
-    log::info!("Spawned RS3 process with pid {}", child.id());
+    let pid = child.id();
+    log::info!("Spawned RS3 process with pid {}", pid);
 
-    Ok(())
+    Ok(pid)
 }
 
 /// Linux command construction. Spawns the target argv directly and, if the
@@ -113,16 +116,15 @@ pub fn launch_rs3(
 /// DARKAN_* env vars the .so reads. The env var propagates to the
 /// rs3linux→rs2client child chain via the dynamic linker.
 ///
-/// Preserves the historical gating exactly: DARKAN_RSA_MODULUS and
-/// DARKAN_PROXY_MODE are only set when the patcher library is found, so
-/// behavior is unchanged for any existing Linux deploy.
+/// Preserves the historical gating exactly: DARKAN_RSA_MODULUS is only set when
+/// the patcher library is found, so behavior is unchanged for any existing Linux
+/// deploy.
 #[cfg(all(unix, not(target_os = "macos")))]
 fn build_unix_command(
     target_argv: &[String],
     binary: &Path,
     needs_patcher: bool,
     rsa_modulus: Option<&str>,
-    proxy_mode: bool,
 ) -> Command {
     let mut cmd = Command::new(&target_argv[0]);
     for arg in &target_argv[1..] {
@@ -134,9 +136,6 @@ fn build_unix_command(
             cmd.env("LD_PRELOAD", &patcher_path);
             if let Some(modulus) = rsa_modulus {
                 cmd.env("DARKAN_RSA_MODULUS", modulus);
-            }
-            if proxy_mode {
-                cmd.env("DARKAN_PROXY_MODE", "1");
             }
         } else {
             log::warn!(
@@ -169,7 +168,6 @@ fn build_macos_command(
     binary: &Path,
     needs_patcher: bool,
     rsa_modulus: Option<&str>,
-    proxy_mode: bool,
 ) -> Command {
     let mut cmd = Command::new(&target_argv[0]);
     for arg in &target_argv[1..] {
@@ -185,9 +183,6 @@ fn build_macos_command(
             cmd.env("DYLD_FORCE_FLAT_NAMESPACE", "1");
             if let Some(modulus) = rsa_modulus {
                 cmd.env("DARKAN_RSA_MODULUS", modulus);
-            }
-            if proxy_mode {
-                cmd.env("DARKAN_PROXY_MODE", "1");
             }
         } else {
             log::warn!(
@@ -212,7 +207,6 @@ fn build_windows_command(
     target_argv: &[String],
     needs_patcher: bool,
     rsa_modulus: Option<&str>,
-    proxy_mode: bool,
 ) -> Command {
     if needs_patcher {
         if let Some(injector) = find_injector_exe() {
@@ -242,9 +236,6 @@ fn build_windows_command(
             // run from the DLL's perspective even if injection succeeded.
             if let Some(modulus) = rsa_modulus {
                 cmd.env("DARKAN_RSA_MODULUS", modulus);
-            }
-            if proxy_mode {
-                cmd.env("DARKAN_PROXY_MODE", "1");
             }
             return cmd;
         } else {
@@ -407,8 +398,8 @@ pub fn find_patcher_library(_client_binary: &Path) -> Option<std::path::PathBuf>
 /// logs every slot we tried so the user can see where to drop the binary.
 ///
 /// Slot order:
-/// 1. Next to the running bolt-rs3 launcher executable (release deploy layout)
-/// 2. The launcher's data dir (ProjectDirs root for `bolt-rs3`)
+/// 1. Next to the running darkan-launcher executable (release deploy layout)
+/// 2. The launcher's data dir (ProjectDirs root for `darkan-launcher`)
 /// 3. `<data_dir>\Jagex\launcher\` (matches Jagex's installed-launcher layout)
 /// 4. `%APPDATA%\Darkan3\`
 /// 5. `%LOCALAPPDATA%\Darkan3\`
@@ -468,7 +459,7 @@ fn injector_search_slots(name: &str) -> Vec<std::path::PathBuf> {
 
     // 2 & 3. ProjectDirs-based slots (matches what config.rs uses for the
     // launcher's own data dir).
-    if let Some(dirs) = directories::ProjectDirs::from("", "", "bolt-rs3") {
+    if let Some(dirs) = directories::ProjectDirs::from("", "", "darkan-launcher") {
         slots.push(dirs.data_dir().join(name));
         slots.push(dirs.data_dir().join("Jagex").join("launcher").join(name));
     }
@@ -489,7 +480,7 @@ fn injector_search_slots(name: &str) -> Vec<std::path::PathBuf> {
     if dev_enabled {
         if let Ok(exe) = std::env::current_exe() {
             if let Some(parent) = exe.parent() {
-                // Typical dev layout: <repo>\client\launcher\target\<profile>\bolt-rs3.exe
+                // Typical dev layout: <repo>\client\launcher\target\<profile>\darkan-launcher.exe
                 // so go up to <repo>\client\launcher\ then into patcher-win\target\release.
                 slots.push(
                     parent

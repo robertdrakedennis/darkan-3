@@ -122,6 +122,11 @@ object ScriptExecutor {
 
     fun stopAll() = _activeScripts.values.toList().forEach { it.stop() }
 
+    /** Stops engine-internal scripts not tracked in [_activeScripts] (e.g. the AFK keepalive). */
+    fun stopInternalTasks() {
+        StayloggedInTask.stop()
+    }
+
     fun getScriptRuntimeFormatted(scriptClass: Class<*>): String? {
         val start = scriptStartTimes[scriptClass.name] ?: return null
         val elapsedMillis = System.currentTimeMillis() - start

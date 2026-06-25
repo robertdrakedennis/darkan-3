@@ -442,8 +442,9 @@ void* initialize_undercut(void* base_address) {
     JavaVMInitArgs vm_args;
     JavaVMOption options[16];
 
-    jclass bootstrapClass = nullptr;
-    jmethodID initializeMethod = nullptr;
+    jclass supervisorClass = nullptr;
+    jmethodID startMethod = nullptr;
+    jstring engineHomeStr = nullptr;
 
     const char* classpath_dir = std::getenv("UNDERCUT_HOME_DIR");
     if (classpath_dir == nullptr) {
@@ -462,8 +463,13 @@ void* initialize_undercut(void* base_address) {
 
     log_message("Initializing Project Undercut JVM bootstrap with classpath at %s\n", classpath_dir);
 
+    // System classpath = the tiny pure-Java supervisor jar ONLY. The engine shadow jar must NOT be
+    // here, or the supervisor's child URLClassLoader would parent-delegate to stale classes and a
+    // rebuilt engine jar would never take effect on reinject. The supervisor resolves + loads the
+    // engine shadow jar from UNDERCUT_HOME_DIR itself.
     char classpath_option[2048];
-    find_and_expand_jarfiles(classpath_dir, classpath_option, sizeof(classpath_option));
+    std::snprintf(classpath_option, sizeof(classpath_option),
+                  "-Djava.class.path=%s/undercut-supervisor.jar", classpath_dir);
 
     char librarypath_option[512];
     std::snprintf(librarypath_option, sizeof(librarypath_option), "-Djava.library.path=%s", classpath_dir);
@@ -554,29 +560,29 @@ void* initialize_undercut(void* base_address) {
 
     register_forensics_natives(env);
 
-    log_message("Finding Bootstrap class...\n");
+    log_message("Finding Supervisor class...\n");
 
-    bootstrapClass = env->FindClass("com/undercut/game/bootstrap/Bootstrap");
-    if (bootstrapClass == nullptr) {
-        log_message("Failed to find class com.undercut.game.bootstrap.Bootstrap\n");
+    supervisorClass = env->FindClass("com/undercut/supervisor/Supervisor");
+    if (supervisorClass == nullptr) {
+        log_message("Failed to find class com.undercut.supervisor.Supervisor\n");
         goto destroy;
     }
 
-    log_message("Found Bootstrap class (%p). Finding initialize method...\n", static_cast<void*>(bootstrapClass));
+    log_message("Found Supervisor class (%p). Finding start method...\n", static_cast<void*>(supervisorClass));
 
-    initializeMethod = env->GetStaticMethodID(bootstrapClass, "initialize", "(J)V");
-    if (initializeMethod == nullptr) {
-        log_message("Failed to find method initialize in class Bootstrap\n");
+    startMethod = env->GetStaticMethodID(supervisorClass, "start", "(JLjava/lang/String;)V");
+    if (startMethod == nullptr) {
+        log_message("Failed to find method start in class Supervisor\n");
         goto destroy;
     }
 
-    log_message("Found initialize method (%p). Calling initialize method...\n", reinterpret_cast<void*>(initializeMethod));
+    log_message("Found start method (%p). Calling Supervisor.start with base %p, home %s\n",
+                reinterpret_cast<void*>(startMethod), base_address, classpath_dir);
 
-    log_message("Executing initialize with base address at %p\n", base_address);
-
-    env->CallStaticVoidMethod(bootstrapClass, initializeMethod, reinterpret_cast<jlong>(base_address));
+    engineHomeStr = env->NewStringUTF(classpath_dir);
+    env->CallStaticVoidMethod(supervisorClass, startMethod, reinterpret_cast<jlong>(base_address), engineHomeStr);
     if (env->ExceptionOccurred()) {
-        log_message("Exception occurred calling initialize:\n");
+        log_message("Exception occurred calling Supervisor.start:\n");
         env->ExceptionDescribe();
         env->ExceptionClear();
     }

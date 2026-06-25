@@ -247,15 +247,12 @@ object UI {
                 }
             }
 
-            backgroundDrawList {
-                watermark(
-                    ImGuiTexture.fromPath("/icons/logo_alpha.png")!!,
-                    Corner.TopRight,
-                    paddingX = 48f,
-                    paddingY = 4f,
-                    alpha = 0.5f,
-                    scale = 0.3f,
-                )
+            // Decorative watermark — best-effort. A texture that fails to (re)create (e.g. on a
+            // hot-reload) must never abort the whole render and blank the overlay.
+            ImGuiTexture.fromPath("/icons/logo_alpha.png")?.let { logo ->
+                backgroundDrawList {
+                    watermark(logo, Corner.TopRight, paddingX = 48f, paddingY = 4f, alpha = 0.5f, scale = 0.3f)
+                }
             }
 
             // Only show the main control window if visible (Kotlin-side state)
@@ -265,9 +262,12 @@ object UI {
                 setNextWindowSize(520f, 800f, ImGuiCond.FirstUseEver)
 
                 window("Project Undercut", WindowFlags.NoTitleBar) {
-                    watermark(Sprite.get(18026).getTexture(SpriteRotation.R0), Corner.BottomLeft, scale = 1.5f)
-                    watermark(Sprite.get(18026).getTexture(SpriteRotation.R270), Corner.BottomRight, scale = 1.5f)
-                    applyBackgroundOverlay(getNoiseTexture(), 0.25f)
+                    // Best-effort decorations — never let a failed texture abort the window content.
+                    runCatching {
+                        watermark(Sprite.get(18026).getTexture(SpriteRotation.R0), Corner.BottomLeft, scale = 1.5f)
+                        watermark(Sprite.get(18026).getTexture(SpriteRotation.R270), Corner.BottomRight, scale = 1.5f)
+                        applyBackgroundOverlay(getNoiseTexture(), 0.25f)
+                    }
 
                     child("nav-sidebar", width = 140f, height = 0f, childFlags = ImGuiChildFlags.Borders) {
                         Category.entries.forEachIndexed { index, category ->

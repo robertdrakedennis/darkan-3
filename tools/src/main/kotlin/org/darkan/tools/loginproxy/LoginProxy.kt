@@ -7,9 +7,8 @@
  * client memory after injection — NO network redirection required. See CLAUDE.md
  * ("Unified Launcher & Injection" → "Proxy Deprecation").
  *
- * Retained (not deleted) ONLY until the engine sniffer's capture-export mode writes the
- * capture/<session>/ format consumed by the :tools framingRegression / wireFormatVerify gates.
- * Do not build new functionality on this; prefer the injected sniffer.
+ * Retained (not deleted) for ad-hoc protocol capture only. Do not build new functionality on
+ * this; prefer the injected sniffer.
  */
 package org.darkan.tools.loginproxy
 

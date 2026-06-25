@@ -26,6 +26,21 @@ application {
 // repositories are declared centrally by the root `allprojects {}` block (mavenLocal + mavenCentral).
 
 dependencies {
+    // Shared networking protocol (packet opcodes/sizes/names + structured codecs + Isaac) lives in
+    // :core — the engine consumes it instead of duplicating it. The server-only transitive deps
+    // (MongoDB driver, embedded mongod, argon2) are excluded: the engine never touches the DB/auth
+    // layer, so they would only bloat the dlopen-injected shadow JAR.
+    implementation(project(":core")) {
+        exclude(group = "org.mongodb")
+        exclude(group = "de.flapdoodle.embed")
+        exclude(group = "de.mkammerer")
+    }
+
+    // EngineHandle (the hot-reload boundary type) is provided at runtime by the supervisor jar on
+    // the system classpath — compileOnly so it is NOT bundled into the shadow jar, otherwise the
+    // child URLClassLoader would define its own copy and the (EngineHandle) cast would fail.
+    compileOnly(project(":engine-supervisor"))
+
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("io.github.classgraph:classgraph:4.8.177")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
@@ -50,49 +65,26 @@ tasks.withType<Test> {
     jvmArgs("--enable-preview")
 }
 
-val isWindows: Boolean
-    get() = System.getProperty("os.name").contains("Windows", ignoreCase = true)
-
-val wslHome: String by lazy {
-    "wsl echo ~".runCommand().trim()
-}
-
-fun String.runCommand(): String {
-    return ProcessBuilder(*this.split(" ").toTypedArray())
-        .redirectErrorStream(true)
-        .start()
-        .inputStream
-        .bufferedReader()
-        .readText()
-}
-
 val javaHomeProvider = providers.environmentVariable("JAVA_HOME")
     .orElse(providers.systemProperty("java.home"))
 
 tasks.register<Exec>("configureNativeBootstrap") {
-    onlyIf { !isWindows }
-    // Invokes cmake via Exec and feeds JAVA_HOME (for the JNI headers). External-process tasks
-    // aren't configuration-cache cacheable; this only disables the cache when the task is actually
-    // SCHEDULED, so server-module builds (which merely configure :engine) keep their cache.
-    // JAVA_HOME is read through the providers API so even configuring this task doesn't break
-    // those builds' configuration cache.
-    notCompatibleWithConfigurationCache("invokes cmake via Exec with a JAVA_HOME environment")
+    // Invokes cmake via Exec, feeding JAVA_HOME (for the JNI headers) read through the providers
+    // API so the value becomes a configuration-cache input rather than a captured script reference.
     workingDir = file("./native-bootstrap")
     commandLine = listOf("cmake", "-B", "build", "-DCMAKE_BUILD_TYPE=Debug")
     environment("JAVA_HOME", javaHomeProvider.get())
 }
 
 tasks.register<Exec>("buildNativeBootstrap") {
-    onlyIf { !isWindows }
-    notCompatibleWithConfigurationCache("runs the cmake native build via Exec and streams to System.out")
     dependsOn("configureNativeBootstrap")
     workingDir = file("./native-bootstrap/build")
 
     commandLine = listOf("cmake", "--build", ".", "--target", "all")
 
+    // Exec streams cmake output to the console by default; assigning System.out/err here would
+    // capture non-serializable PrintStreams and force the configuration cache to be discarded.
     isIgnoreExitValue = true
-    standardOutput = System.out
-    errorOutput = System.err
 }
 
 tasks.named("buildNativeBootstrap") {
@@ -118,25 +110,6 @@ tasks.named("startShadowScripts") {
     dependsOn("copyNativeLibToBuild")
 }
 
-tasks.register("copyToWSLHome") {
-    onlyIf { isWindows && wslHome.isNotEmpty() }
-    notCompatibleWithConfigurationCache("Windows/WSL copy via ProcessBuilder")
-    doLast {
-        val sourceDir = "build/libs/com.undercut-1.0.0-all.jar"
-        val targetDir = "$wslHome/"
-        ProcessBuilder("wsl", "cp", sourceDir, targetDir)
-            .inheritIO()
-            .start()
-            .waitFor()
-        println("Copied files to WSL directory: $targetDir")
-    }
-}
-
-tasks.named("build") {
-    //dependsOn("buildNativeBootstrap")
-    finalizedBy("copyToWSLHome")
-}
-
 tasks.register<JavaExec>("dumpQuestVarbits") {
     group = "build"
     description = "Dump per-quest MasterQuestVar data from the cache to developer-info/quest-varbits-dump.txt"
@@ -160,4 +133,26 @@ tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar> {
     from("src/main/resources") {
         include("**/*")
     }
+    // EngineHandle must exist ONLY in the supervisor jar (the shared parent loader). If the shadow
+    // jar also carried it, the child loader would define a second copy → ClassCastException on the
+    // (EngineHandle) cast in Supervisor.
+    exclude("com/undercut/supervisor/**")
 }
+
+// Place the pure-Java supervisor jar next to the engine shadow jar (UNDERCUT_HOME_DIR) under a
+// fixed name so the native bootstrap can put it (and only it) on the JVM system classpath.
+// Declare a precise single-file output (NOT a Copy into build/libs, which would claim the whole
+// dir as output and trip Gradle's implicit-dependency check against startScripts/dist tasks that
+// read the engine jars from the same dir).
+val supervisorJarFile = project(":engine-supervisor").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+tasks.register("copySupervisorJar") {
+    val src = supervisorJarFile
+    val dst = layout.buildDirectory.file("libs/undercut-supervisor.jar")
+    inputs.file(src)
+    outputs.file(dst)
+    doLast {
+        src.get().asFile.copyTo(dst.get().asFile.apply { parentFile.mkdirs() }, overwrite = true)
+    }
+}
+
+tasks.named("assemble") { dependsOn("copySupervisorJar") }

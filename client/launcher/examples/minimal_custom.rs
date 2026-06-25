@@ -24,12 +24,12 @@ fn main() {
 
     let _webview = WebViewBuilder::new()
         .with_html(r#"<html><body style="background:#1a1a2e;color:white;padding:40px;font-family:sans-serif">
-            <h1>Bolt RS3</h1>
+            <h1>Darkan Launcher</h1>
             <p>If you can see this, the webview works!</p>
             <button onclick="window.ipc.postMessage('hello')">Test IPC</button>
             <div id="log"></div>
             <script>
-                window.__bolt_callback = function(data) {
+                window.__darkan_callback = function(data) {
                     document.getElementById('log').innerHTML += '<p>' + JSON.stringify(data) + '</p>';
                 };
             </script>
@@ -50,7 +50,7 @@ fn main() {
             } => *control_flow = ControlFlow::Exit,
             Event::UserEvent(UserEvent::Test(msg)) => {
                 println!("UserEvent received: {}", msg);
-                let _ = _webview.evaluate_script("window.__bolt_callback({type:'reply', msg:'hello from rust'})");
+                let _ = _webview.evaluate_script("window.__darkan_callback({type:'reply', msg:'hello from rust'})");
             }
             _ => {}
         }

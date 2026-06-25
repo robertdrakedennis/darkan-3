@@ -66,7 +66,13 @@ object ImGuiRenderManager {
                     
                     for (classInfo in classInfoList) {
                         try {
-                            val clazz = classInfo.loadClass()
+                            // Load via THIS classloader, not ClassGraph's detected one. After a
+                            // hot-reload the old (leaked) classloader is still reachable, and
+                            // classInfo.loadClass() can bind the render method to it — then its DSL
+                            // emissions go to the old CommandRenderer.captureSink instead of the new
+                            // build()'s target, so nothing renders. Class.forName(name) uses the
+                            // current engine loader (same fix HookManager already relies on).
+                            val clazz = Class.forName(classInfo.name, true, javaClass.classLoader)
                             compileClassMethods(clazz, methods)
                         } catch (e: Exception) {
                             println("[OptimizedImGuiRenderManager] Failed to load class ${classInfo.name}: ${e.message}")

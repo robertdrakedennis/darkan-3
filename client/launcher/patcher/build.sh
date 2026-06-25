@@ -7,7 +7,7 @@
 #   locations that exists (next to the launcher exe, next to the client binary,
 #   ~/darkan-3/, the dev build dir). If ANY of those holds a stale copy, it
 #   shadows a fresh build. A stale March-23 build (still searching for the old
-#   947 login-key prefix 8f389edb) once sat in ~/.local/share/bolt-rs3/ and was
+#   947 login-key prefix 8f389edb) once sat in ~/.local/share/darkan-launcher/ and was
 #   loaded over a current build, so the client was never patched. This script
 #   makes "build the patcher" atomically refresh every deploy slot so stale
 #   copies can never win again.
@@ -80,11 +80,11 @@ green "    built OK: $BUILT_SO"
 # and the two launch flows in ui/ipc.rs (custom = ~/darkan-3, live = data dir),
 # plus run-client.sh (HOME=~/.darkan3). ALL $HOME-relative.
 DEST_PATHS=(
-    # Launcher data-dir root (ProjectDirs "bolt-rs3" => $XDG_DATA_HOME or ~/.local/share).
+    # Launcher data-dir root (ProjectDirs "darkan-launcher" => $XDG_DATA_HOME or ~/.local/share).
     # find_patcher_library hits this as "next to client binary" in LIVE mode. THE one that went stale.
-    "$HOME/.local/share/bolt-rs3/$LIB_NAME"
+    "$HOME/.local/share/darkan-launcher/$LIB_NAME"
     # Next to the downloaded client binary (rs2client) in the launcher data dir.
-    "$HOME/.local/share/bolt-rs3/Jagex/launcher/$LIB_NAME"
+    "$HOME/.local/share/darkan-launcher/Jagex/launcher/$LIB_NAME"
     # Alternate data dir used by run-client.sh (it sets HOME=~/.darkan3).
     "$HOME/.darkan3/$LIB_NAME"
     "$HOME/.darkan3/Jagex/launcher/$LIB_NAME"

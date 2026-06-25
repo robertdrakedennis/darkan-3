@@ -51,6 +51,14 @@ object SettingsTab {
 
         separator()
 
+        text("Packet Dump:")
+        checkbox("Raw login/RSA dump", UIState.rawLoginDumpEnabled)
+        text("Captures the raw handshake bytes (RSA block + server preamble) during login,")
+        text("which the decoded packet hooks can't see. Enable before logging in.")
+        text("Decoded packets: Packets tab. File: ~/.undercut/logs/packets-<date>.log")
+
+        separator()
+
         text("Discord Notifications:")
         checkbox("Enable Discord Notifications", UIState.discordEnabled)
 

@@ -55,6 +55,7 @@ object TileMarkerStore {
     @Volatile private var lastChangeNanos = 0L
     private const val IDLE_FLUSH_NANOS = 750_000_000L
     private val flusher by lazy { startFlusher() }
+    @Volatile private var flusherThread: Thread? = null
 
     private const val MAX_UNDO = 50
     private val undoStack = ArrayDeque<List<MarkerGroup>>()
@@ -299,6 +300,12 @@ object TileMarkerStore {
     /** Forces an immediate write if there are unsaved edits. Safe to call from any thread. */
     fun flush() = writeToDisk()
 
+    /** Final flush + stop the flusher daemon (only if it was ever started). For engine teardown. */
+    fun stopFlusher() {
+        flush()
+        flusherThread?.interrupt()
+    }
+
     private fun startFlusher(): Thread = Thread({
         while (!Thread.currentThread().isInterrupted) {
             try {
@@ -310,7 +317,7 @@ object TileMarkerStore {
                 println("[TileMarkerStore] flusher error: ${t.message}")
             }
         }
-    }, "tile-marker-flush").apply { isDaemon = true; start() }
+    }, "tile-marker-flush").apply { isDaemon = true; flusherThread = this; start() }
 
     private fun writeToDisk() {
         if (!dirty.compareAndSet(true, false)) return

@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 
 use crate::auth::types::{Account, Session};
 use crate::config::{Config, Credentials, Paths, SavedSession};
+use crate::game::control::ClientStatus;
 use crate::game::process::LaunchParams;
 
 /// Messages from JS to Rust
@@ -14,7 +15,7 @@ use crate::game::process::LaunchParams;
 #[serde(tag = "type")]
 pub enum IpcMessage {
     /// Sent once by app.js when the frontend has booted and installed
-    /// `window.__bolt_callback`. We reply with `Init` (no startup sleep/race).
+    /// `window.__darkan_callback`. We reply with `Init` (no startup sleep/race).
     #[serde(rename = "ready")]
     Ready,
     #[serde(rename = "login")]
@@ -34,6 +35,18 @@ pub enum IpcMessage {
     Close,
     #[serde(rename = "open_url")]
     OpenUrl { url: String },
+    /// Discover running rs2client processes + their engine state (Clients panel).
+    #[serde(rename = "list_clients")]
+    ListClients,
+    /// First-inject the engine into a specific rs2client pid (GDB-dlopen path).
+    #[serde(rename = "inject_client")]
+    InjectClient { pid: u32 },
+    /// Uninject the engine from a pid via the control socket (no elevation).
+    #[serde(rename = "uninject_client")]
+    UninjectClient { pid: u32 },
+    /// Reinject (unload + reload the rebuilt jar) via the control socket.
+    #[serde(rename = "reinject_client")]
+    ReinjectClient { pid: u32 },
 }
 
 /// Events from Rust to JS
@@ -57,6 +70,16 @@ pub enum IpcEvent {
     LaunchError { message: String },
     #[serde(rename = "config_saved")]
     ConfigSaved,
+    /// The current list of discovered rs2client processes + their engine state.
+    #[serde(rename = "clients_list")]
+    ClientsList { clients: Vec<ClientStatus> },
+    /// Result of an inject/uninject/reinject action on a specific pid.
+    #[serde(rename = "client_control_result")]
+    ClientControlResult {
+        pid: u32,
+        ok: bool,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -65,6 +88,14 @@ pub struct SessionInfo {
     pub display_name: String,
     pub accounts: Vec<Account>,
     pub session_id: String,
+}
+
+/// Which control action the Clients panel requested for a given pid.
+#[derive(Debug, Clone, Copy)]
+enum ClientAction {
+    Inject,
+    Uninject,
+    Reinject,
 }
 
 /// Commands sent from IPC handler to the main event loop
@@ -78,15 +109,15 @@ pub enum AppCommand {
 /// spawned launch tasks so the JS-callback formatting lives in one place.
 fn send_webview_event(cmd_tx: &mpsc::UnboundedSender<AppCommand>, event: &IpcEvent) {
     let js = format!(
-        "window.__bolt_callback({})",
+        "window.__darkan_callback({})",
         serde_json::to_string(event).unwrap()
     );
     let _ = cmd_tx.send(AppCommand::SendToWebview(js));
 }
 
-/// Launch the live/proxy client and report the result to the webview. Dedupes
-/// the two identical launch call sites in `handle_launch` (the normal path and
-/// the "package check failed, launch existing binary" fallback).
+/// Launch the live client and report the result to the webview. Dedupes the two
+/// identical launch call sites in `handle_launch` (the normal path and the
+/// "package check failed, launch existing binary" fallback).
 #[allow(clippy::too_many_arguments)]
 fn do_launch_live(
     cmd_tx: &mpsc::UnboundedSender<AppCommand>,
@@ -96,7 +127,7 @@ fn do_launch_live(
     data_dir: &Path,
     custom_cmd: Option<&str>,
     rsa_modulus: Option<&str>,
-    proxy_mode: bool,
+    auto_inject: bool,
     close_after: bool,
 ) {
     match crate::game::process::launch_rs3(
@@ -106,16 +137,18 @@ fn do_launch_live(
         data_dir,
         custom_cmd,
         rsa_modulus,
-        None, // no working_dir for live/proxy mode
-        proxy_mode,
+        None, // no working_dir for live mode
     ) {
-        Ok(()) => {
+        Ok(pid) => {
             send_webview_event(
                 cmd_tx,
                 &IpcEvent::LaunchStatus {
                     message: "Game launched!".to_string(),
                 },
             );
+            if auto_inject {
+                crate::game::inject::maybe_inject_undercut(pid);
+            }
             if close_after {
                 let _ = cmd_tx.send(AppCommand::CloseWindow);
             }
@@ -216,9 +249,72 @@ impl IpcState {
             IpcMessage::OpenUrl { ref url } => {
                 let _ = crate::game::process::open_url(url);
             }
+            IpcMessage::ListClients => {
+                self.handle_list_clients();
+            }
+            IpcMessage::InjectClient { pid } => {
+                self.handle_client_control(pid, ClientAction::Inject);
+            }
+            IpcMessage::UninjectClient { pid } => {
+                self.handle_client_control(pid, ClientAction::Uninject);
+            }
+            IpcMessage::ReinjectClient { pid } => {
+                self.handle_client_control(pid, ClientAction::Reinject);
+            }
         }
 
         Ok(())
+    }
+
+    /// Discover clients off the UI thread (the `/proc` scan + per-pid STATUS socket
+    /// round-trips are blocking) and emit a `ClientsList` event.
+    fn handle_list_clients(&self) {
+        let cmd_tx = self.cmd_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            let clients = crate::game::control::discover_clients();
+            send_webview_event(&cmd_tx, &IpcEvent::ClientsList { clients });
+        });
+    }
+
+    /// Run an inject/uninject/reinject for `pid` off the UI thread, emit a
+    /// `ClientControlResult`, then re-emit the refreshed `ClientsList`.
+    ///
+    /// Inject is the GDB-`dlopen` first-injection (may block on a pkexec/sudo
+    /// prompt); uninject/reinject are plain control-socket commands.
+    fn handle_client_control(&self, pid: u32, action: ClientAction) {
+        let cmd_tx = self.cmd_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = match action {
+                // Inject re-enables the engine. If the .so is already mapped (the
+                // engine was previously injected then UNINJECTed -> "unloaded"
+                // state), re-enable it via the supervisor's socket INJECT. Only a
+                // truly fresh process needs the GDB-dlopen first injection.
+                ClientAction::Inject => {
+                    if crate::game::control::is_injected(pid) {
+                        crate::game::control::send_command(pid, "INJECT")
+                    } else {
+                        crate::game::control::inject_pid(pid)
+                            .map(|()| format!("Injected engine into pid {}", pid))
+                    }
+                }
+                ClientAction::Uninject => crate::game::control::send_command(pid, "UNINJECT"),
+                ClientAction::Reinject => crate::game::control::send_command(pid, "REINJECT"),
+            };
+
+            let (ok, message) = match result {
+                Ok(msg) => (true, msg),
+                Err(e) => (false, format!("{}", e)),
+            };
+
+            send_webview_event(
+                &cmd_tx,
+                &IpcEvent::ClientControlResult { pid, ok, message },
+            );
+
+            // Refresh the list so the UI reflects the new state immediately.
+            let clients = crate::game::control::discover_clients();
+            send_webview_event(&cmd_tx, &IpcEvent::ClientsList { clients });
+        });
     }
 
     fn handle_logout(&self, user_id: &str) {
@@ -298,7 +394,7 @@ impl IpcState {
         let cmd_tx = self.cmd_tx.clone();
         let close_after = config.close_after_launch;
         let custom_cmd = config.custom_launch_command.clone();
-        let is_proxy = matches!(config.server_mode, crate::config::ServerMode::Proxy);
+        let auto_inject = config.auto_inject_undercut;
         let config_uri = config
             .custom_config_uri
             .clone()
@@ -350,19 +446,9 @@ impl IpcState {
                 }
             };
 
-            // In proxy mode, fetch the proxy's jav_config to extract RSA modulus
-            let proxy_rsa_modulus = if is_proxy {
-                send_status("Proxy mode: fetching config from proxy...");
-                match crate::game::rs3::fetch_jav_config_params(&client, &config_uri).await {
-                    Ok(params) => crate::game::rs3::extract_rsa_modulus(&params),
-                    Err(e) => {
-                        send_error(&format!("Failed to fetch proxy jav_config: {}", e));
-                        return;
-                    }
-                }
-            } else {
-                None
-            };
+            // Live mode connects to official Jagex servers with an unmodified
+            // client — no RSA patch.
+            let rsa_modulus: Option<String> = None;
 
             // Check for updates
             send_status("Checking for updates...");
@@ -385,8 +471,8 @@ impl IpcState {
                             &params,
                             &paths.data_dir,
                             custom_cmd.as_deref(),
-                            proxy_rsa_modulus.as_deref(),
-                            is_proxy,
+                            rsa_modulus.as_deref(),
+                            auto_inject,
                             close_after,
                         );
                     } else {
@@ -458,15 +544,15 @@ impl IpcState {
                 &params,
                 &paths.data_dir,
                 custom_cmd.as_deref(),
-                proxy_rsa_modulus.as_deref(),
-                is_proxy,
+                rsa_modulus.as_deref(),
+                auto_inject,
                 close_after,
             );
         });
     }
 
     fn handle_launch_custom(&self) {
-        // Reject re-entrant launches (shares the flag with live/proxy launches).
+        // Reject re-entrant launches (shares the flag with live launches).
         let guard = match self.try_begin_launch() {
             Some(g) => g,
             None => {
@@ -481,6 +567,7 @@ impl IpcState {
         let cmd_tx = self.cmd_tx.clone();
         let close_after = config.close_after_launch;
         let custom_cmd = config.custom_launch_command.clone();
+        let auto_inject = config.auto_inject_undercut;
 
         // Build config URI from custom settings
         let host = config
@@ -663,10 +750,12 @@ impl IpcState {
                 custom_cmd.as_deref(),
                 rsa_modulus.as_deref(),
                 Some(&darkan_dir), // CWD = ~/darkan-3
-                false, // not proxy mode — full patching for private server
             ) {
-                Ok(()) => {
+                Ok(pid) => {
                     send_status("Game launched!");
+                    if auto_inject {
+                        crate::game::inject::maybe_inject_undercut(pid);
+                    }
                     if close_after {
                         let _ = cmd_tx.send(AppCommand::CloseWindow);
                     }
@@ -687,7 +776,7 @@ impl IpcState {
 
     pub fn send_event(&self, event: &IpcEvent) {
         let js = format!(
-            "window.__bolt_callback({})",
+            "window.__darkan_callback({})",
             serde_json::to_string(event).unwrap()
         );
         let _ = self.cmd_tx.send(AppCommand::SendToWebview(js));
