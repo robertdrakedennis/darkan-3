@@ -82,10 +82,15 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
         out.writeShort(port2)
     }
 
-    // SWITCH_WORLD (op 213, varByte) — was op 179 in 947-3. Triggers lobby→world transfer.
+    // SWITCH_WORLD (op 213, varByte) — was op 179 in 947-3. Writes the WORLD-node target
+    // (WorldSwitcher+0x20) and triggers the reconnect to host:port2.
+    // FIELD ORDER (handler 0x001aeba0, binary-verified): worldId FIRST, then host — op213 is
+    // worldId-first, UNLIKE op212 (host-first). Writing host-first made the client read worldId from
+    // the host bytes and the host from the remainder ("calhost") → connect to a garbage host → crash.
+    // port2 (+0x2a) is the port the client actually connects on; flag must be 1 (world target).
     serverProt<SwitchWorld>(opcode = 213, size = ProtSize.VarByte) { out ->
-        out.writeRSString(hostname)
         out.writeShort(worldId)
+        out.writeRSString(hostname)
         out.writeShort(port1)
         out.writeShort(port2)
         out.writeByte(pendingFlag)

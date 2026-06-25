@@ -5,6 +5,7 @@ import org.darkan.core.EnvVars
 import org.darkan.core.Logger
 import org.darkan.core.mongo.Accounts
 import org.darkan.core.mongo.MongoManager
+import org.darkan.core.net.login.WorldLoginTokens
 import org.darkan.core.net.prot.handler.PacketHandlers
 import org.darkan.core.net.prot.revision.rev948.register948
 import org.darkan.world.server.WorldServer
@@ -21,7 +22,10 @@ fun main() {
 
     // Initialize MongoDB
     MongoManager.init()
-    runBlocking { Accounts.ensureIndexes() }
+    runBlocking {
+        Accounts.ensureIndexes()
+        WorldLoginTokens.ensureIndexes()
+    }
 
     // Register protocol codec
     register948()

@@ -16,7 +16,7 @@ import org.darkan.core.Logger.logTrace
 import org.darkan.core.Logger.logWarn
 import org.darkan.core.formatForProtocol
 import org.darkan.core.net.*
-import org.darkan.core.net.login.LoginToken
+import org.darkan.core.net.login.WorldLoginTokens
 import org.darkan.core.net.prot.*
 import org.darkan.core.net.prot.handler.PacketHandlers
 import org.darkan.core.net.session.GameSession
@@ -39,18 +39,18 @@ import java.util.concurrent.Executors
 /**
  * Minimal world server that accepts lobby-to-world transfer connections.
  *
- * Handles the NXT world login handshake:
+ * Handles the NXT world login handshake (loginType RECONNECT 2):
  * 1. Connection type CONNECT_LOGIN (14) already read by the accept loop
- * 2. Sends JS5_SYNC response byte (0)
- * 3. Client sends login opcode (16=RECONNECT or 18=LOGIN)
- * 4. RSA decrypt -> ISAAC keys + LoginToken
+ * 2. Sends the 9-byte exchange data: status byte (0) + 8-byte session key (client reads 9 — Phase 5)
+ * 3. Client sends login opcode (16=LOGIN or 18=RECONNECT)
+ * 4. RSA decrypt -> ISAAC keys (session-nonce slot is NOT rejected; reconnect carries one)
  * 5. XTEA decrypt -> username, display mode, screen size, machine info
- * 6. Verifies the LoginToken issued by the lobby
+ * 6. Validates the lobby-issued session authorization by username (WorldLoginTokens, cross-process)
  * 7. Loads account from MongoDB
  * 8. Creates GameSession with ISAAC ciphers
  * 9. Sends WorldLoginDetails (pre-ISAAC)
  * 10. Notifies lobby of player online via SocialClient
- * 11. Enters session loop
+ * 11. Enters session loop (in-game ClientProts op52/op98/op51 are framed + drained, never blocking)
  */
 object WorldServer {
     private lateinit var job: Job
@@ -63,6 +63,7 @@ object WorldServer {
 
     private val worldRsaMod = BigInteger(EnvVars.worldRsaModulus)
     private val worldRsaExp = BigInteger(EnvVars.worldRsaExponent)
+    private val secureRandom = java.security.SecureRandom()
 
     private val pendingLogins = ConcurrentHashMap.newKeySet<String>()
     private val playersByUsername = ConcurrentHashMap<String, GameSession>()
@@ -154,8 +155,15 @@ object WorldServer {
     }
 
     private suspend fun initWorldLogin(input: ByteReadChannel, output: ByteWriteChannel, ip: String) {
-        // Step 1: Send exchange data (JS5_SYNC = 0)
-        output.respond(ResponseOpcode.JS5_SYNC)
+        // Step 1: Send the 9-byte exchange-data response — status byte (0) + 8-byte session key —
+        // IDENTICAL to the lobby login. The client's login state machine (LoginManager
+        // WAITING_FIRST_RESPONSE / step 30, login-protocol.md Phase 5) reads exactly 9 bytes here
+        // for BOTH the lobby and the world reconnect; if it gets only 1, it blocks forever waiting
+        // for the 8-byte session key and the world login never progresses. (The previous
+        // single-byte respond() was the silent stall.)
+        output.writeByte(ResponseOpcode.JS5_SYNC)
+        output.writeFully(ByteArray(8).also { secureRandom.nextBytes(it) })
+        output.flush()
 
         // Step 2: Read login opcode
         val opcode = input.readByte().toInt()
@@ -203,15 +211,20 @@ object WorldServer {
 
         val isaacKeys = IntArray(4) { sensitiveData.readInt() }
 
-        if (sensitiveData.readLong().toInt() != 0) {
-            logTrace("RSA session check non-zero from $ip")
-            return output.finish(ResponseOpcode.BAD_SESSION_ID)
+        // Session-nonce slot (LoginManager+0x138). A RECONNECT (loginType 2) carries a NON-ZERO
+        // session nonce here, so we must NOT reject on it — that was a hard blocker for every world
+        // reconnect. Mirrors the lobby login, which only logs this value. The world authorization is
+        // validated below by username via WorldLoginTokens, not by this nonce.
+        val sessionNonce = sensitiveData.readLong()
+        if (sessionNonce != 0L) {
+            logTrace("World login session nonce non-zero ($sessionNonce) from $ip — reconnect, continuing")
         }
 
-        // The password/token slot contains the HMAC-signed LoginToken from the lobby
-        val lobbyAuthToken = sensitiveData.readRSString()
-        sensitiveData.readLong() // padding
-        sensitiveData.readLong() // padding
+        // Remaining RSA-block tail (legacy auth-token slot + two session-token longs). The exact
+        // reconnect layout is not yet fully RE'd; none of these bytes gate the login (auth is by
+        // username via WorldLoginTokens), so a tail misparse here is harmless — the XTEA section is
+        // read from the main packet, independently of this decrypted RSA block.
+        sensitiveData.readRSString() // legacy auth-token slot (unused by the world token bridge)
 
         // Step 6: XTEA decrypt
         val xtea = packet.decryptXtea(isaacKeys)
@@ -251,16 +264,23 @@ object WorldServer {
             return output.finish(ResponseOpcode.LOGIN_LIMIT_EXCEEDED)
 
         try {
-            // Step 8: Verify LoginToken
-            // TODO: Lobby needs to issue a real LoginToken and embed it in lobby data.
-            // For now, skip verification — the XTEA-encrypted username is trusted.
-            val verified = LoginToken.verify(lobbyAuthToken, System.currentTimeMillis(), EnvVars.worldLoginTokenSecret)
-            if (verified != null && verified.username != username) {
-                logError("LoginToken username mismatch: token=${verified.username} login=$username")
-                return output.finish(ResponseOpcode.INVALID_CREDENTIALS)
+            // Step 8: Validate the lobby-issued session authorization (cross-process token bridge).
+            // The lobby wrote a TTL'd, signed authorization for this username at login-success; the
+            // world confirms it here. This is the auth for the world login — there is no second
+            // password/credential exchange (loginType RECONNECT 2). See WorldLoginTokens.
+            val authorized = try {
+                WorldLoginTokens.validate(username, EnvVars.worldLoginTokenSecret)
+            } catch (e: Exception) {
+                logError("World login token validation error for $username", e)
+                false
             }
-            if (verified == null) {
-                logWarn("LoginToken verify failed for $username (token not issued by lobby yet — allowing anyway)")
+            if (authorized) {
+                logInfo("World login authorized for '$username' via lobby session token")
+            } else if (EnvVars.debug) {
+                logWarn("World login for '$username' has no valid lobby authorization — ALLOWING (debug). The lobby issues one at login-success; check Mongo connectivity / token TTL.")
+            } else {
+                logError("World login REJECTED for '$username': no valid lobby authorization (token bridge)")
+                return output.finish(ResponseOpcode.INVALID_CREDENTIALS)
             }
 
             // Step 9: Load account

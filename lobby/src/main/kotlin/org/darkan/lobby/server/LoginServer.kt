@@ -16,6 +16,8 @@ import org.darkan.core.net.Isaac
 import org.darkan.core.net.RequestOpcode
 import org.darkan.core.net.ResponseOpcode
 import org.darkan.core.net.Session
+import org.darkan.core.net.login.IssuedWorldLogin
+import org.darkan.core.net.login.WorldLoginTokens
 import org.darkan.core.model.Account
 import org.darkan.core.model.IFEvents
 import org.darkan.core.model.Vars
@@ -221,11 +223,24 @@ class LoginServer {
         for (i in outKeys.indices) outKeys[i] += EnvVars.ISAAC_DELTA
         val outCipher = Isaac(outKeys)
 
+        // Issue the cross-process world-login authorization the client will carry to :world.
+        // The returned session-token longs go into the login-data block below; the world validates
+        // the authorization (by username) on the reconnect, so no second credential exchange is
+        // needed. See WorldLoginTokens for the token-bridge rationale.
+        val issuedWorldLogin = try {
+            WorldLoginTokens.issue(account.username, EnvVars.worldLoginTokenTtlMs, EnvVars.worldLoginTokenSecret)
+        } catch (e: Exception) {
+            logError("Failed to issue world-login token for ${account.username}", e)
+            // Degrade gracefully: still let the client into the lobby. The world will fall back to
+            // its debug-allow path (or reject in production) if the authorization is missing.
+            IssuedWorldLogin(0L, 0L, "")
+        }
+
         // Send login result: byte 2 (SUCCESS)
         output.writeByte(ResponseOpcode.SUCCESS)
 
         // Send lobby data length + lobby data
-        val lobbyData = buildLobbyData(account)
+        val lobbyData = buildLobbyData(account, issuedWorldLogin)
         output.writeByte(lobbyData.size.toByte())
         output.writeFully(lobbyData)
         output.flush()
@@ -255,8 +270,14 @@ class LoginServer {
 
     /**
      * Build the lobby login data blob using real account data.
+     *
+     * The world target (worldId/serverHostname/gamePort/httpsPort) + sessionToken1/2 at the tail are
+     * what the client commits as its default world target and carries into the world login block
+     * (`LoginStepHandleLoginData` -> `WorldSwitcher::CommitWorldTargetFromLogin`). Per the wire spec
+     * the client connects to the world on **port2 (httpsPort)**, so both ports are set to the world
+     * port. The session tokens are the lobby-issued [IssuedWorldLogin] (no longer dummy constants).
      */
-    private fun buildLobbyData(account: Account): ByteArray {
+    private fun buildLobbyData(account: Account, issuedWorldLogin: IssuedWorldLogin): ByteArray {
         val buf = BufferWriter(128)
         val nowMs = System.currentTimeMillis()
 
@@ -287,10 +308,10 @@ class LoginServer {
         buf.writeInt(0)                           // #25 unknown10
         buf.writeShort(EnvVars.worldId)               // #26 worldId
         buf.writePrefixedString(EnvVars.worldHost)    // #27 serverHostname
-        buf.writeShort(EnvVars.worldPort)             // #28 gamePort (43595 — world server, NOT lobby)
-        buf.writeShort(443)                           // #29 httpsPort
-        buf.writeLong(0x4461726B616E3333L)        // #30 sessionToken1 = "Darkan33"
-        buf.writeLong(0x5365727665723033L)        // #31 sessionToken2 = "Server03"
+        buf.writeShort(EnvVars.worldPort)             // #28 gamePort (port1) — world server
+        buf.writeShort(EnvVars.worldPort)             // #29 httpsPort (port2) — client connects HERE for world login
+        buf.writeLong(issuedWorldLogin.sessionId1)    // #30 sessionToken1 (lobby-issued world-login authorization)
+        buf.writeLong(issuedWorldLogin.sessionId2)    // #31 sessionToken2 (lobby-issued world-login authorization)
 
         return buf.toArray()
     }
