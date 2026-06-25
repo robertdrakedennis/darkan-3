@@ -279,10 +279,14 @@ Flags: `--no-engine` (server-only), `--no-patch` (inject into a live client).
 
 Darkan-3's login proxy (`tools/.../loginproxy`, `run-proxy.sh`) is **DEPRECATED**. The Undercut
 engine's injected `TcpIn` hook reads the protocol directly from client memory — **no network
-redirection** is needed. The proxy code is retained (not deleted) only until the sniffer's
-**capture-export mode** writes the `capture/<session>/` format (isaac-keys + packet logs) that the
-`:tools` `framingRegression` / `wireFormatVerify` HARD gates consume. Until then, the proxy may
-still be used to regenerate captures, but it is not part of the active launch path.
+redirection** is needed. The proxy code is retained (not deleted) until the sniffer's
+**capture-export mode** writes the `capture/<session>/` format (`raw-c2s.bin`, `raw-s2c.bin`,
+`isaac-keys.txt`) that the `:tools` `framingRegression` / `wireFormatVerify` HARD gates consume.
+The format-exact writer + feed API already exist — `engine/src/main/kotlin/com/undercut/game/net/capture/CaptureExport.kt`
+(env-gated `UNDERCUT_CAPTURE_EXPORT=1`). What remains is THREE individually-verified hooks to feed
+it: raw socket recv (`raw-s2c`, captured *before* TcpIn's ISAAC opcode-decode), raw socket send
+(`raw-c2s`), and the 4 ISAAC seeds at login. These require live-client RE — **do not ship
+unverified hooks** (wrong offsets crash the client). Until they land, the proxy regenerates captures.
 
 ---
 
