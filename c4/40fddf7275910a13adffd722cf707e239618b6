@@ -1,0 +1,22 @@
+.gitignore
+  s_efeb96aafc6d9f::t_9b04fa39c40345 72-75
+  s_efeb96aafc6d9f::t_97f0d42925060b 76-78
+world/src/main/kotlin/org/darkan/world/net/SceneMapCacheDiagnostics.kt
+  s_efeb96aafc6d9f::t_de73682b2708ad 1-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "c440fddf7275910a13adffd722cf707e239618b6",
+  "prompts": {},
+  "sessions": {
+    "s_efeb96aafc6d9f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0117-eef3-7f11-ad58-1e260789f22b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
