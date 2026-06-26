@@ -1,6 +1,6 @@
 package com.undercut.game.nxt.entity
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.memory.NativeAccess.deref
 import com.undercut.game.memory.NativeAccess.pointerAtOffset
 import com.undercut.game.memory.NativeAccess.readByte

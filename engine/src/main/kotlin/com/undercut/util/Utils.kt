@@ -1,6 +1,6 @@
 package com.undercut.util
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.profiling.PlayerProfiles
 import java.security.SecureRandom
 import java.text.NumberFormat

@@ -1,7 +1,7 @@
 package com.undercut.ui.backend.dsl.scopes
 
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.math.Vector2f
 import com.undercut.game.math.Vector3f
 import com.undercut.game.math.WorldToScreen.worldToScreen

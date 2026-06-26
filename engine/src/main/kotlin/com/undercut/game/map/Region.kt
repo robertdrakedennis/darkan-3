@@ -1,10 +1,14 @@
 package com.undercut.game.map
 
-import com.undercut.game.Tile
 import com.undercut.game.scene.CachedSceneObject
 import com.undercut.pathfinder.WorldCollision
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.definition.data.RegionDefinition
+import world.gregs.voidps.cache.definition.data.RegionNpcSpawn
+import world.gregs.voidps.cache.definition.data.RegionWaterPatch
+import world.gregs.voidps.map.ObjectShape
+import world.gregs.voidps.map.RenderFlag
+import world.gregs.voidps.type.Tile
 import java.lang.foreign.MemorySegment
 
 class Region(val regionId: Int, load: Boolean = true) {
@@ -21,8 +25,8 @@ class Region(val regionId: Int, load: Boolean = true) {
 
     var objects: Array<Array<Array<Array<CachedSceneObject?>>>>? = null
     var objectList: MutableList<CachedSceneObject>? = null
-    var npcSpawns: List<NPCSpawn>? = null
-    var waterPatches: List<WaterPatch>? = null
+    var npcSpawns: List<RegionNpcSpawn>? = null
+    var waterPatches: List<RegionWaterPatch>? = null
     private var loaded = false
 
     init {
@@ -40,10 +44,8 @@ class Region(val regionId: Int, load: Boolean = true) {
             val regionY = regionId and 0xff
             decodeTiles(definition.tileFlags, regionX, regionY)
             decodeObjects(definition, regionX, regionY)
-            npcSpawns = definition.npcSpawns.map { NPCSpawn(it.typeId, it.localX, it.localY, it.plane) }
-            waterPatches = definition.waterPatches.map {
-                WaterPatch(it.posX, it.posZ, it.posY, it.extentX, it.extentZ, it.qx, it.qy, it.qz, it.qw, it.waterTypeId, it.scale1, it.scale2, it.waterMeshId)
-            }
+            npcSpawns = definition.npcSpawns
+            waterPatches = definition.waterPatches
         } catch (t: Throwable) {
             loaded = true
             return false

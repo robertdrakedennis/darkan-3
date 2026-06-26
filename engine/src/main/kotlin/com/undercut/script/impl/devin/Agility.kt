@@ -1,7 +1,7 @@
 package com.undercut.script.impl.devin
 
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.script.ConfigurableScript
 import com.undercut.script.OptionsConfigItem
 import com.undercut.script.Script

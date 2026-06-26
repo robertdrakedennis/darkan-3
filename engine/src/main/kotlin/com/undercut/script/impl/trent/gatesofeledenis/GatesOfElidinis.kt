@@ -1,13 +1,14 @@
 package com.undercut.script.impl.trent.gatesofeledenis
+import com.undercut.game.tileOfLocal
 
-import com.undercut.game.map.ObjectShape
-import com.undercut.game.Tile
+import world.gregs.voidps.map.ObjectShape
+import world.gregs.voidps.type.Tile
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.game.interfaces.InstanceSystem
 import com.undercut.game.interfaces.effects.Effect
 import com.undercut.game.nxt.entity.location.SceneObject
 import com.undercut.game.nxt.entity.npc.NPC
-import com.undercut.pathfinder.collision.CollisionStrategyType
+import world.gregs.voidps.collision.CollisionStrategies
 import com.undercut.pathfinder.routedDestination
 import com.undercut.script.BooleanConfigItem
 import com.undercut.script.ScriptDescription
@@ -68,7 +69,7 @@ class GatesOfElidinis : StateMachineScript<GatesOfElidinis>() {
 
     val pillarTimeOffset: Long
         get() {
-            val dist = Tile.ofLocal(31, 28, 2).getDistance(localPlayer.tile)
+            val dist = tileOfLocal(31, 28, 2).getDistance(localPlayer.tile)
             return 7200L + when {
                 dist <= 5 -> 0L
                 dist <= 8 -> 2000L
@@ -118,8 +119,8 @@ class StartFight() : State<GatesOfElidinis>() {
                 delayUntil(5000) { dialogueOptionVisible("Yes.") }
             return
         }
-        if (localPlayer.tile != Tile.ofLocal(39, 8, 2)) {
-            walkTo(Tile.ofLocal(39, 8, 2), false)
+        if (localPlayer.tile != tileOfLocal(39, 8, 2)) {
+            walkTo(tileOfLocal(39, 8, 2), false)
             waitThenDelayUntil(1200, 2500) { !localPlayer.isAniMoving }
             return
         }
@@ -150,7 +151,7 @@ object GatherFragments : State<GatesOfElidinis>() {
 
     override suspend fun GatesOfElidinis.stateLoop() {
         val moonstone = findClosestObjectToTile(
-            if (attacksBeforeSpec <= 0 || attacksBeforeSpec >= 10) Tile.ofLocal(
+            if (attacksBeforeSpec <= 0 || attacksBeforeSpec >= 10) tileOfLocal(
                 38,
                 9,
                 2
@@ -217,7 +218,7 @@ private suspend fun GatesOfElidinis.findAndGatherNode(
 
 private suspend fun GatesOfElidinis.gatherNode(option: String, node: SceneObject, wasInDanger: Boolean) {
     currentTarget = node
-    val targetTile = routedDestination(localPlayer.tile, node, collision = CollisionStrategyType.NOCLIP)
+    val targetTile = routedDestination(localPlayer.tile, node, collision = CollisionStrategies.NOCLIP)
     if (targetTile?.let { inAoe(it) } == true) return delay(100)
     node.interact(option)
     delayUntil(10000) {
@@ -275,7 +276,7 @@ class DunkAndHeal() : State<GatesOfElidinis>() {
     override suspend fun GatesOfElidinis.stateLoop() {
         killAkhs()
         if (!dunked) {
-            val nearPillars = Tile.ofLocal(31, 25, 2)
+            val nearPillars = tileOfLocal(31, 25, 2)
             if (findClosestObject(130994, range = 8) == null && nearPillars.getDistance(localPlayer.tile) > 3) {
                 if (walkTo(nearPillars.randomize(1), false))
                     waitThenDelayUntil(1500, pollingDelayMillis = 600) { !localPlayer.isAniMoving || findClosestObject(130994, range = 8) != null }
@@ -290,7 +291,7 @@ class DunkAndHeal() : State<GatesOfElidinis>() {
             return
         }
         if (!tanked && !localPlayer.isAnimating) {
-            val safeTile = Tile.ofLocal(31, 14, 2)
+            val safeTile = tileOfLocal(31, 14, 2)
             if (localPlayer.tile != safeTile && !madeIt) {
                 if (dive(localPlayer.tile.transform(0, -random(10, 13)))) {
                     delay(125, 100)
@@ -310,8 +311,8 @@ class DunkAndHeal() : State<GatesOfElidinis>() {
             } else
                 madeIt = true
             if (madeIt) {
-                val node = findClosestNode("Corrupt shard of Elidinis", Tile.ofLocal(33, 13, 2)) ?: return
-                if (node.tile == Tile.ofLocal(33, 13, 2)) {
+                val node = findClosestNode("Corrupt shard of Elidinis", tileOfLocal(33, 13, 2)) ?: return
+                if (node.tile == tileOfLocal(33, 13, 2)) {
                     node.interact("Transmute")
                     delayUntil(10000) { !chargingLaser }
                 }

@@ -1,6 +1,4 @@
-package com.undercut.pathfinder.collision
-
-import com.undercut.pathfinder.flag.CollisionFlag
+package world.gregs.voidps.collision
 
 interface CollisionStrategy {
     fun canMove(tileFlag: Int, blockFlag: Int): Boolean
@@ -19,13 +17,12 @@ class IndoorsFlagCollision : CollisionStrategy {
 }
 
 class OutdoorsFlagCollision : CollisionStrategy {
-
     override fun canMove(tileFlag: Int, blockFlag: Int): Boolean {
         return (tileFlag and (blockFlag or CollisionFlag.ROOF)) == 0
     }
 }
 
-class BlockedFlagCollision() : CollisionStrategy {
+class BlockedFlagCollision : CollisionStrategy {
     override fun canMove(tileFlag: Int, blockFlag: Int): Boolean {
         val flag = blockFlag and CollisionFlag.FLOOR.inv()
         return (tileFlag and flag) == 0 && (tileFlag and CollisionFlag.FLOOR) != 0

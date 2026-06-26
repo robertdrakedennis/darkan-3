@@ -1,6 +1,6 @@
 package com.undercut.script.impl.bp.thieving.safecracking
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.script.api.varps
 
 enum class Safe(val realId: Int, val tile: Tile, val numLocks: Int, val crackingStateVarbit: Int) {

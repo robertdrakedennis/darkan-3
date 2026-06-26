@@ -1,6 +1,6 @@
 package com.undercut.mcp.tools
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.nxt.ItemStackNode
 import com.undercut.game.nxt.entity.GroundItem

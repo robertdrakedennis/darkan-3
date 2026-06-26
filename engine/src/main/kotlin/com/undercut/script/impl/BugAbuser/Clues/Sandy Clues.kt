@@ -1,6 +1,6 @@
 package com.undercut.script.impl.BugAbuser.Clues
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.script.Script
 import com.undercut.script.ScriptDescription

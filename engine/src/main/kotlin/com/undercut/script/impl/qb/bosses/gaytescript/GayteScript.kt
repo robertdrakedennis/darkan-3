@@ -1,15 +1,16 @@
 package com.undercut.script.impl.qb.bosses.gaytescript
+import com.undercut.game.tileOfLocal
 
-import com.undercut.game.map.ObjectShape
+import world.gregs.voidps.map.ObjectShape
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.interfaces.Ability
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.game.interfaces.InstanceSystem
 import com.undercut.game.interfaces.effects.Effect
 import com.undercut.game.nxt.entity.location.SceneObject
 import com.undercut.game.nxt.entity.npc.NPC
-import com.undercut.pathfinder.collision.CollisionStrategyType
+import world.gregs.voidps.collision.CollisionStrategies
 import com.undercut.pathfinder.routedDestination
 import com.undercut.script.BooleanConfigItem
 import com.undercut.script.ScriptDescription
@@ -75,7 +76,7 @@ class GayteScript : StateMachineScript<GayteScript>(), ConfigurableScript {
 
 	val pillarTimeOffset: Long
 		get() {
-			val dist = Tile.ofLocal(31, 28, 2).getDistance(localPlayer.tile)
+			val dist = tileOfLocal(31, 28, 2).getDistance(localPlayer.tile)
 			return 7200L + when {
 				dist <= 5 -> 0L
 				dist <= 8 -> 2000L
@@ -160,8 +161,8 @@ class StartFight() : State<GayteScript>() {
 			if (interactClosestNPC("Icthlarin", "Leave", 60)) delayUntil(5000) { dialogueOptionVisible("Yes.") }
 			return
 		}
-		if (localPlayer.tile != Tile.ofLocal(39, 8, 2)) {
-			walkTo(Tile.ofLocal(39, 8, 2), false)
+		if (localPlayer.tile != tileOfLocal(39, 8, 2)) {
+			walkTo(tileOfLocal(39, 8, 2), false)
 			waitThenDelayUntil(1200, 2500) { !localPlayer.isAniMoving }
 			return
 		}
@@ -220,7 +221,7 @@ object GatherFragments : State<GayteScript>() {
 			item?.click("Activate")
 		}
 		val moonstone = findClosestObjectToTile(
-			if (attacksBeforeSpec <= 0 || attacksBeforeSpec >= 10) Tile.ofLocal(
+			if (attacksBeforeSpec <= 0 || attacksBeforeSpec >= 10) tileOfLocal(
 				38, 9, 2
 			) else localPlayer.tile
 		) {
@@ -297,7 +298,7 @@ private suspend fun GayteScript.findAndGatherNode(
 
 private suspend fun GayteScript.gatherNode(option: String, node: SceneObject, wasInDanger: Boolean) {
 	currentTarget = node
-	val targetTile = routedDestination(localPlayer.tile, node, collision = CollisionStrategyType.NOCLIP)
+	val targetTile = routedDestination(localPlayer.tile, node, collision = CollisionStrategies.NOCLIP)
 	if (targetTile?.let { inAoe(it) } == true) return delay(100)
 	node.interact(option)
 	delayUntil {
@@ -357,7 +358,7 @@ class DunkAndHeal() : State<GayteScript>() {
 	override suspend fun GayteScript.stateLoop() {
 		killAkhs()
 		if (!dunked) {
-			val nearPillars = Tile.ofLocal(31, 25, 2)
+			val nearPillars = tileOfLocal(31, 25, 2)
 			if (findClosestObject(130994, range = 8) == null && nearPillars.getDistance(localPlayer.tile) > 3) {
 				if (walkTo(nearPillars.randomize(1), false)) waitThenDelayUntil(1500, pollingDelayMillis = 600) {
 					!localPlayer.isAniMoving || findClosestObject(
@@ -375,7 +376,7 @@ class DunkAndHeal() : State<GayteScript>() {
 		if (bossHealthCurrent <= 0 && openChest.value) return
 
 		if (!tanked && !localPlayer.isAnimating) {
-			val safeTile = Tile.ofLocal(31, 14, 2)
+			val safeTile = tileOfLocal(31, 14, 2)
 			if (localPlayer.tile != safeTile && !madeIt) {
 				if (dive(localPlayer.tile.transform(0, -random(10, 13)))) {
 					delay(125, 100)
@@ -402,16 +403,16 @@ class DunkAndHeal() : State<GayteScript>() {
 				} else delay(100)
 			} else madeIt = true
 			if (madeIt) {
-				var node = findClosestNode("Corrupt shard of Elidinis", Tile.ofLocal(33, 13, 2))
+				var node = findClosestNode("Corrupt shard of Elidinis", tileOfLocal(33, 13, 2))
 				if (node != null) {
-					if (node.tile == Tile.ofLocal(33, 13, 2)) {
+					if (node.tile == tileOfLocal(33, 13, 2)) {
 						node.interact("Transmute")
 						delayUntil(10000) { !chargingLaser }
 					}
 				} else {
-					node = findClosestNode("Cleansed shard of Elidinis", Tile.ofLocal(33, 13, 2))
+					node = findClosestNode("Cleansed shard of Elidinis", tileOfLocal(33, 13, 2))
 					if (node != null) {
-						if (node.tile == Tile.ofLocal(33, 13, 2)) {
+						if (node.tile == tileOfLocal(33, 13, 2)) {
 							node.interact("Mine")
 							delayUntil(10000) { !chargingLaser }
 						}

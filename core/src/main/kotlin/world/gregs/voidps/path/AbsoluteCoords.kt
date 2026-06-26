@@ -1,8 +1,5 @@
-package com.undercut.pathfinder
+package world.gregs.voidps.path
 
-/**
- * @author Kris | 16/03/2022
- */
 @Suppress("MemberVisibilityCanBePrivate")
 @JvmInline
 value class AbsoluteCoords(val packedCoord: Int) {

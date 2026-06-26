@@ -1,5 +1,7 @@
 package world.gregs.voidps.type
 
+import kotlin.math.atan2
+
 enum class Direction(deltaX: Int, deltaY: Int) {
     NORTH_WEST(-1, 1),
     NORTH(0, 1),
@@ -12,6 +14,24 @@ enum class Direction(deltaX: Int, deltaY: Int) {
     NONE(0, 0);
 
     val delta = Delta(deltaX, deltaY)
+
+    /** Clockwise index matching the engine's Direction numbering (NORTH=0 .. NORTHWEST=7); -1 for [NONE]. */
+    val id: Int
+        get() = when (this) {
+            NORTH -> 0
+            NORTH_EAST -> 1
+            EAST -> 2
+            SOUTH_EAST -> 3
+            SOUTH -> 4
+            SOUTH_WEST -> 5
+            WEST -> 6
+            NORTH_WEST -> 7
+            NONE -> -1
+        }
+
+    /** Compass angle (0..0x3fff), matching the engine's getAngleTo formula. */
+    val angle: Int
+        get() = (atan2(-delta.x.toDouble(), -delta.y.toDouble()) * 2607.5945876176133).toInt() and 0x3fff
 
     fun isDiagonal() = delta.isHorizontal() && delta.isVertical()
 
@@ -71,5 +91,44 @@ enum class Direction(deltaX: Int, deltaY: Int) {
         fun of(deltaX: Int, deltaY: Int): Direction {
             return all.firstOrNull { it.delta.equals(deltaX, deltaY) } ?: NONE
         }
+
+        /** Engine-compatible lookup by clockwise [id] (NORTH=0 .. NORTHWEST=7); unknown ids fall back to [SOUTH]. */
+        @JvmStatic
+        fun getById(id: Int): Direction = when (id) {
+            0 -> NORTH
+            1 -> NORTH_EAST
+            2 -> EAST
+            3 -> SOUTH_EAST
+            4 -> SOUTH
+            5 -> SOUTH_WEST
+            6 -> WEST
+            7 -> NORTH_WEST
+            else -> SOUTH
+        }
+
+        /**
+         * Engine-compatible direction for a raw (possibly non-unit) delta using sign thresholds;
+         * returns null when both deltas are zero.
+         */
+        @JvmStatic
+        fun forDelta(dx: Int, dy: Int): Direction? = when {
+            dy >= 1 && dx >= 1 -> NORTH_EAST
+            dy <= -1 && dx >= 1 -> SOUTH_EAST
+            dy <= -1 && dx <= -1 -> SOUTH_WEST
+            dy >= 1 && dx <= -1 -> NORTH_WEST
+            dy >= 1 -> NORTH
+            dx >= 1 -> EAST
+            dy <= -1 -> SOUTH
+            dx <= -1 -> WEST
+            else -> null
+        }
+
+        /** Engine-compatible direction from [from] toward [to]; null when the tiles coincide on the x/y plane. */
+        @JvmStatic
+        fun getDirectionBetween(from: Tile, to: Tile): Direction? = forDelta(to.x - from.x, to.y - from.y)
+
+        /** Engine-compatible clockwise rotation of [dir] by [rotation] eighth-turns. */
+        @JvmStatic
+        fun rotateClockwise(dir: Direction, rotation: Int): Direction = dir.rotate(rotation)
     }
 }

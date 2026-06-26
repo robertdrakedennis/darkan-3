@@ -1,7 +1,7 @@
 package com.undercut.script.impl.trent.aiowoodcutting
 
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.nxt.entity.location.SceneObject
 import com.undercut.script.ScriptDescription
 import com.undercut.script.State

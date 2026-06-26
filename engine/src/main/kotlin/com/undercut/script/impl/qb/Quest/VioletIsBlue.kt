@@ -1,6 +1,6 @@
 package com.undercut.script.impl.qb.Quest
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.nxt.entity.location.SceneObject
 import com.undercut.script.Script
 import com.undercut.script.State
@@ -112,9 +112,9 @@ class VioletIsBlue : State<DebugScript>() {
 					val snow: SceneObject? = allObjects.filter { it.name() == "Icy snow" }
 						.minByOrNull { it.tile.getDistance(localPlayer.tile) }
 					if (snow != null) {
-						val snowx: Int = snow.tile.getX()
-						val snowy: Int = snow.tile.getY()
-						if (localPlayer.tile.getX() == snowx - 2 && localPlayer.tile.getY() == snowy + 1) {
+						val snowx: Int = snow.tile.x
+						val snowy: Int = snow.tile.y
+						if (localPlayer.tile.x == snowx - 2 && localPlayer.tile.y == snowy + 1) {
 							if (!localPlayer.isMoving) {
 								headlesspeople()
 							}
@@ -519,40 +519,40 @@ class VioletIsBlue : State<DebugScript>() {
 		if (start == null) {
 			start = player
 		}
-		val spot1violet: Tile = Tile.of(start!!.getX(), start!!.getY() + 1, start!!.plane.toInt())
-		val spot1me: Tile = Tile.of(start!!.getX(), start!!.getY(), start!!.plane.toInt())
-		val spot2violet: Tile = Tile.of(start!!.getX(), start!!.getY() + 5, start!!.plane.toInt())
-		val spot2me: Tile = Tile.of(start!!.getX(), start!!.getY() + 4, start!!.plane.toInt())
-		val spot3me: Tile = Tile.of(start!!.getX() + 5, start!!.getY() + 4, start!!.plane.toInt())
-		val spot4me: Tile = Tile.of(start!!.getX() + 5, start!!.getY() + 5, start!!.plane.toInt())
-		val spot5me: Tile = Tile.of(start!!.getX() + 1, start!!.getY() + 5, start!!.plane.toInt())
-		val spot5violet: Tile = Tile.of(start!!.getX(), start!!.getY() + 5, start!!.plane.toInt())
-		val spot6me: Tile = Tile.of(start!!.getX() - 4, start!!.getY() + 5, start!!.plane.toInt())
-		val spot7me: Tile = Tile.of(start!!.getX() - 4, start!!.getY(), start!!.plane.toInt())
-		val spot8me: Tile = Tile.of(start!!.getX() - 5, start!!.getY() + 1, start!!.plane.toInt())
-		val spot9me: Tile = Tile.of(start!!.getX() - 5, start!!.getY() + 4, start!!.plane.toInt())
-		val spot9violt: Tile = Tile.of(start!!.getX() - 5, start!!.getY() + 5, start!!.plane.toInt())
-		val spot10me: Tile = Tile.of(start!!.getX() - 5, start!!.getY() + 9, start!!.plane.toInt())
-		val spot11me: Tile = Tile.of(start!!.getX() - 8, start!!.getY() + 9, start!!.plane.toInt())
-		val spot12me: Tile = Tile.of(start!!.getX() - 6, start!!.getY() + 7, start!!.plane.toInt())
-		val spot13me: Tile = Tile.of(start!!.getX() - 6, start!!.getY() + 10, start!!.plane.toInt())
-		val spot13violt: Tile = Tile.of(start!!.getX() - 5, start!!.getY() + 10, start!!.plane.toInt())
-		val spot14me: Tile = Tile.of(start!!.getX() + 2, start!!.getY() + 10, start!!.plane.toInt())
-		val spot15me: Tile = Tile.of(start!!.getX() + 2, start!!.getY() + 7, start!!.plane.toInt())
-		val spot16me: Tile = Tile.of(start!!.getX() + 5, start!!.getY() + 7, start!!.plane.toInt())
-		val spot17me: Tile = Tile.of(start!!.getX() + 3, start!!.getY() + 9, start!!.plane.toInt())
-		val spot17violt: Tile = Tile.of(start!!.getX() + 3, start!!.getY() + 10, start!!.plane.toInt())
-		val spot18me: Tile = Tile.of(start!!.getX() + 3, start!!.getY() + 12, start!!.plane.toInt())
-		val spot19me: Tile = Tile.of(start!!.getX() + 4, start!!.getY() + 12, start!!.plane.toInt())
-		val spot20me: Tile = Tile.of(start!!.getX() + 4, start!!.getY() + 15, start!!.plane.toInt())
-		val spot21me: Tile = Tile.of(start!!.getX() + 8, start!!.getY() + 15, start!!.plane.toInt())
-		val spot22me: Tile = Tile.of(start!!.getX() + 8, start!!.getY() + 13, start!!.plane.toInt())
-		val spot23me: Tile = Tile.of(start!!.getX() + 4, start!!.getY() + 13, start!!.plane.toInt())
-		val spot23violt: Tile = Tile.of(start!!.getX() + 3, start!!.getY() + 13, start!!.plane.toInt())
-		val spot24me: Tile = Tile.of(start!!.getX(), start!!.getY() + 9, start!!.plane.toInt())
-		val spot25me: Tile = Tile.of(start!!.getX(), start!!.getY() + 12, start!!.plane.toInt())
-		val spot25violt: Tile = Tile.of(start!!.getX(), start!!.getY() + 13, start!!.plane.toInt())
-		val spot26me: Tile = Tile.of(start!!.getX(), start!!.getY() + 20, start!!.plane.toInt())
+		val spot1violet: Tile = Tile.of(start!!.x, start!!.y + 1, start!!.plane.toInt())
+		val spot1me: Tile = Tile.of(start!!.x, start!!.y, start!!.plane.toInt())
+		val spot2violet: Tile = Tile.of(start!!.x, start!!.y + 5, start!!.plane.toInt())
+		val spot2me: Tile = Tile.of(start!!.x, start!!.y + 4, start!!.plane.toInt())
+		val spot3me: Tile = Tile.of(start!!.x + 5, start!!.y + 4, start!!.plane.toInt())
+		val spot4me: Tile = Tile.of(start!!.x + 5, start!!.y + 5, start!!.plane.toInt())
+		val spot5me: Tile = Tile.of(start!!.x + 1, start!!.y + 5, start!!.plane.toInt())
+		val spot5violet: Tile = Tile.of(start!!.x, start!!.y + 5, start!!.plane.toInt())
+		val spot6me: Tile = Tile.of(start!!.x - 4, start!!.y + 5, start!!.plane.toInt())
+		val spot7me: Tile = Tile.of(start!!.x - 4, start!!.y, start!!.plane.toInt())
+		val spot8me: Tile = Tile.of(start!!.x - 5, start!!.y + 1, start!!.plane.toInt())
+		val spot9me: Tile = Tile.of(start!!.x - 5, start!!.y + 4, start!!.plane.toInt())
+		val spot9violt: Tile = Tile.of(start!!.x - 5, start!!.y + 5, start!!.plane.toInt())
+		val spot10me: Tile = Tile.of(start!!.x - 5, start!!.y + 9, start!!.plane.toInt())
+		val spot11me: Tile = Tile.of(start!!.x - 8, start!!.y + 9, start!!.plane.toInt())
+		val spot12me: Tile = Tile.of(start!!.x - 6, start!!.y + 7, start!!.plane.toInt())
+		val spot13me: Tile = Tile.of(start!!.x - 6, start!!.y + 10, start!!.plane.toInt())
+		val spot13violt: Tile = Tile.of(start!!.x - 5, start!!.y + 10, start!!.plane.toInt())
+		val spot14me: Tile = Tile.of(start!!.x + 2, start!!.y + 10, start!!.plane.toInt())
+		val spot15me: Tile = Tile.of(start!!.x + 2, start!!.y + 7, start!!.plane.toInt())
+		val spot16me: Tile = Tile.of(start!!.x + 5, start!!.y + 7, start!!.plane.toInt())
+		val spot17me: Tile = Tile.of(start!!.x + 3, start!!.y + 9, start!!.plane.toInt())
+		val spot17violt: Tile = Tile.of(start!!.x + 3, start!!.y + 10, start!!.plane.toInt())
+		val spot18me: Tile = Tile.of(start!!.x + 3, start!!.y + 12, start!!.plane.toInt())
+		val spot19me: Tile = Tile.of(start!!.x + 4, start!!.y + 12, start!!.plane.toInt())
+		val spot20me: Tile = Tile.of(start!!.x + 4, start!!.y + 15, start!!.plane.toInt())
+		val spot21me: Tile = Tile.of(start!!.x + 8, start!!.y + 15, start!!.plane.toInt())
+		val spot22me: Tile = Tile.of(start!!.x + 8, start!!.y + 13, start!!.plane.toInt())
+		val spot23me: Tile = Tile.of(start!!.x + 4, start!!.y + 13, start!!.plane.toInt())
+		val spot23violt: Tile = Tile.of(start!!.x + 3, start!!.y + 13, start!!.plane.toInt())
+		val spot24me: Tile = Tile.of(start!!.x, start!!.y + 9, start!!.plane.toInt())
+		val spot25me: Tile = Tile.of(start!!.x, start!!.y + 12, start!!.plane.toInt())
+		val spot25violt: Tile = Tile.of(start!!.x, start!!.y + 13, start!!.plane.toInt())
+		val spot26me: Tile = Tile.of(start!!.x, start!!.y + 20, start!!.plane.toInt())
 
 
 		println(start)
@@ -742,8 +742,8 @@ class VioletIsBlue : State<DebugScript>() {
 			//inside instance
 			val portalcord: Tile = portal.tile
 			println(localPlayer.toString())
-			val bottomright: Tile = Tile((portalcord.x - 1).toShort(), portalcord.y, portalcord.plane)
-			val topright: Tile = Tile((portalcord.x - 6).toShort(), (portalcord.y + 57).toShort(), portalcord.plane)
+			val bottomright: Tile = Tile((portalcord.x - 1), portalcord.y, portalcord.plane)
+			val topright: Tile = Tile((portalcord.x - 6), (portalcord.y + 57), portalcord.plane)
 			val area: Area = Area.Rectangular(bottomright, topright)
 
 			//x-3 ceneter
@@ -758,8 +758,8 @@ class VioletIsBlue : State<DebugScript>() {
 				}
 			}
 			val playerfakecord: Tile =
-				Tile(localPlayer.tile.x, (localPlayer.tile.y + 4).toShort(), localPlayer.tile.plane)
-			val middle: Tile = Tile((portalcord.x - 3).toShort(), localPlayer.tile.y, localPlayer.tile.plane)
+				Tile(localPlayer.tile.x, (localPlayer.tile.y + 4), localPlayer.tile.plane)
+			val middle: Tile = Tile((portalcord.x - 3), localPlayer.tile.y, localPlayer.tile.plane)
 			val violet =
 				npcs.values.filter { it.name() == "Violet" }.minByOrNull { it.tile.getDistance(localPlayer.tile) }
 			if (violet != null) {
@@ -778,9 +778,9 @@ class VioletIsBlue : State<DebugScript>() {
 				val x3: Int = snowball.tile.x.toInt()
 				if (localPlayer.tile.x.toInt() == x1 || localPlayer.tile.x.toInt() == x2 || localPlayer.tile.x.toInt() == x3) {
 					val moveright: Tile =
-						Tile((snowball.tile.x + 3).toShort(), (playerfakecord.y).toShort(), playerfakecord.plane)
+						Tile((snowball.tile.x + 3), (playerfakecord.y), playerfakecord.plane)
 					val moveleft: Tile =
-						Tile((snowball.tile.x - 3).toShort(), (playerfakecord.y).toShort(), playerfakecord.plane)
+						Tile((snowball.tile.x - 3), (playerfakecord.y), playerfakecord.plane)
 
 
 					if (moveright.getDistance(middle) < moveleft.getDistance(middle)) {

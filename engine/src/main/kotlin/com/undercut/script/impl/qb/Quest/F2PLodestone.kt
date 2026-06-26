@@ -1,6 +1,6 @@
 package com.undercut.script.impl.qb.Quest
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.script.*
 import com.undercut.script.api.*
@@ -349,7 +349,7 @@ private val handleUM
 			fallback = { useLodestone(Lodestone.DRAYNOR_VILLAGE) },
 			reached = { localPlayer.tile.getDistance(midStep.last()) < 5 }
 		)
-		interactObj(127139, "Enter") { localPlayer.tile.getPlane() == 1 }
+		interactObj(127139, "Enter") { localPlayer.tile.plane == 1 }
 		chebychevPath(
 			localPlayer.tile,
 			pathToUM,

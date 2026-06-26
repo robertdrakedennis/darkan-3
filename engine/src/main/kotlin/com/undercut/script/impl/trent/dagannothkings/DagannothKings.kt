@@ -1,6 +1,7 @@
 package com.undercut.script.impl.trent.dagannothkings
+import com.undercut.game.tileOfLocal
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.chat.MessageType
 import com.undercut.game.interfaces.Ability
 import com.undercut.game.interfaces.InstanceSystem
@@ -27,8 +28,8 @@ private val PRIORITY_LOOT =
 private val warsRetreat = Tile.of(3295, 10146, 0)
 private val atWarsRetreat get() = warsRetreat.withinDistance(localPlayer.tile, 50)
 
-private val aggroTile get() = Tile.ofLocal(44, 22, localPlayer.tile.plane.toInt())
-private val safeTile get() = Tile.ofLocal(48, 27, localPlayer.tile.plane.toInt())
+private val aggroTile get() = tileOfLocal(44, 22, localPlayer.tile.plane.toInt())
+private val safeTile get() = tileOfLocal(48, 27, localPlayer.tile.plane.toInt())
 
 private val REX_IDS = intArrayOf(2883, 30977)
 private val SUPREME_IDS = intArrayOf(2881, 30975)

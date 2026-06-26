@@ -1,8 +1,8 @@
 @file:Suppress("MemberVisibilityCanBePrivate")
 
-package com.undercut.pathfinder
+package world.gregs.voidps.path
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -50,7 +50,7 @@ fun Route.toTiles(plane: Int = 0): List<Tile> {
     if (coords.isEmpty()) return emptyList()
     if (coords.size == 1) {
         val coord = coords.first()
-        return listOf(Tile(coord.x.toShort(), coord.y.toShort(), plane.toByte()))
+        return listOf(Tile(coord.x, coord.y, plane))
     }
 
     val tiles = mutableListOf<Tile>()
@@ -68,7 +68,7 @@ fun Route.toTiles(plane: Int = 0): List<Tile> {
             for (step in 0..steps) {
                 val interpolatedX = (current.x + xIncrement * step).roundToInt()
                 val interpolatedY = (current.y + yIncrement * step).roundToInt()
-                tiles.add(Tile(x = interpolatedX.toShort(), y = interpolatedY.toShort(), plane = plane.toByte()))
+                tiles.add(Tile(x = interpolatedX, y = interpolatedY, level = plane))
             }
         }
     }

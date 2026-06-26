@@ -1,6 +1,6 @@
 package com.undercut.game.input
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.math.WorldToScreen
 import com.undercut.game.nxt.Client

@@ -1,8 +1,8 @@
-package com.undercut.pathfinder.bound
+package world.gregs.voidps.path.bound
 
-import com.undercut.pathfinder.flag.CollisionFlag
-import com.undercut.pathfinder.getIndexInZone
-import com.undercut.pathfinder.getZoneIndex
+import world.gregs.voidps.collision.CollisionFlag
+import world.gregs.voidps.path.getIndexInZone
+import world.gregs.voidps.path.getZoneIndex
 
 internal fun reachWallDeco(
     flags: Array<IntArray?>,

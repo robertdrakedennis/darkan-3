@@ -1,6 +1,6 @@
 package com.undercut.script.impl.qb.Quest
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.script.*
 import com.undercut.script.api.*
 import com.undercut.traversal.Traversal.Companion.traversal

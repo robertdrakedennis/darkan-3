@@ -1,6 +1,6 @@
 package com.undercut.script.event.impl
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 
 /**
  * [ManualDoAction] target for a ground-item interaction. Unlike [ManualItemTarget]

@@ -339,23 +339,29 @@ object WorldServer {
                 // is true at construction), so the avatar lands inside the scene the client just built.
                 player.tile = Tile(SPAWN_TILE_X, SPAWN_TILE_Y, SPAWN_PLANE)
 
-                // Step 13: Send WorldLoginDetails (pre-ISAAC, via noIsaac=true)
-                session.send(
-                    WorldLoginDetails(
-                        rights = if (EnvVars.debug) 2 else account.rights,
-                        modLevel = 0,
-                        quickChat = false,
-                        verifiedEmail = false,
-                        aBool7322 = false,
-                        quickChatOnly = false,
-                        playerIndex = playerIndex,
-                        members = EnvVars.worldMembers,
-                        dob = 0,
-                        memberWorld = EnvVars.worldMembers,
-                        worldName = EnvVars.worldName,
-                    ),
-                    noIsaac = true,
-                )
+                // Step 13: Send the world login-success data as a RAW [length][body] block,
+                // mirroring the lobby's framing (LoginServer.handleLogin / buildLobbyData). It must
+                // NOT go through serverProt: that prepends opcode 2 + its own varByte length, which
+                // the client's login parser reads as the block length → it consumes 2 bytes and
+                // desyncs the entire login response → the client hangs on "loading" then times out.
+                // Body is byte-identical to the former WorldLoginDetails(op2) encoder (booleans as
+                // 0/1 bytes, worldName null-terminated CP1252); only the framing changed.
+                val loginData = BufferWriter(64).apply {
+                    writeByte(if (EnvVars.debug) 2 else account.rights) // rights
+                    writeByte(0)                                        // modLevel
+                    writeByte(0)                                        // quickChat
+                    writeByte(0)                                        // verifiedEmail
+                    writeByte(0)                                        // aBool7322
+                    writeByte(0)                                        // quickChatOnly
+                    writeShort(playerIndex)                             // playerIndex
+                    writeByte(if (EnvVars.worldMembers) 1 else 0)       // members
+                    writeMedium(0)                                      // dob
+                    writeByte(if (EnvVars.worldMembers) 1 else 0)       // memberWorld
+                    EnvVars.worldName.forEach { writeByte(it.code and 0xFF) } // worldName (CP1252)
+                    writeByte(0)                                        // NUL terminator
+                }.toArray()
+                output.writeByte(loginData.size.toByte())
+                output.writeFully(loginData)
                 session.flush()
 
                 // Step 14: Send world init packets

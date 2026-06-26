@@ -1,6 +1,9 @@
 package com.undercut.game.hooks.impl
+import com.undercut.game.localizeScene
+import com.undercut.game.tileOfSceneLocal
+import com.undercut.game.tileOfLocal
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.hooks.Hook
 import com.undercut.game.hooks.HookManager
@@ -44,10 +47,10 @@ object DoAction {
                 when(knownAction) {
                     DoActionOpcode.WALK -> {
                         val tile = Tile.of(entry.param2, entry.param3, localPlayer.plane)
-                        println("\tMinimap: ${entry.param1} Tile.of(${tile.x}, ${tile.y}, ${tile.plane}) local: Tile.ofLocal(${tile.xInRegion}, ${tile.yInRegion}, ${tile.plane})")
+                        println("\tMinimap: ${entry.param1} Tile.of(${tile.x}, ${tile.y}, ${tile.plane}) local: tileOfLocal(${tile.xInRegion}, ${tile.yInRegion}, ${tile.plane})")
                         val sceneLocal = tile.localizeScene()
                         if (sceneLocal != null)
-                            println("\tsceneLocal: Tile.ofSceneLocal(${sceneLocal.x}, ${sceneLocal.y}, ${tile.plane})")
+                            println("\tsceneLocal: tileOfSceneLocal(${sceneLocal.x}, ${sceneLocal.y}, ${tile.plane})")
                         ScriptExecutor.pushEvent(ManualDoAction(knownAction, Tile.of(entry.param2, entry.param3, localPlayer.plane)))
                     }
                     DoActionOpcode.COMPONENT, DoActionOpcode.COMPONENT_SIXPLUS -> {

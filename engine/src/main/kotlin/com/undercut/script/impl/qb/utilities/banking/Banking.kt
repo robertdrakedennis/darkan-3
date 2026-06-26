@@ -1,6 +1,6 @@
 package com.undercut.script.impl.qb.utilities.banking
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.nxt.entity.player.Player
 import com.undercut.script.api.Area
 import com.undercut.script.api.Area.Rectangular

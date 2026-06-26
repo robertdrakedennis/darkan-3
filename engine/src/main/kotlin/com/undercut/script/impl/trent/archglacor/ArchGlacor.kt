@@ -1,6 +1,7 @@
 package com.undercut.script.impl.trent.archglacor
+import com.undercut.game.tileOfLocal
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.interfaces.Ability
 import com.undercut.script.ConfigurableScript
 import com.undercut.script.ScriptDescription
@@ -15,7 +16,7 @@ private const val ENTRANCE_PORTAL = 121338
 private const val EXIT_PORTAL = 121339
 
 private val isOutside get() = Tile.of(1751, 1104, 0).withinDistance(localPlayer.tile, 20)
-private val centerTile get() = Tile.ofLocal(34, 44, 1)
+private val centerTile get() = tileOfLocal(34, 44, 1)
 private val centerWars = Tile.of(3295, 10146, 0)
 private val atWarsRetreat get() = Tile.of(3295, 10146, 0).withinDistance(localPlayer.tile, 50)
 

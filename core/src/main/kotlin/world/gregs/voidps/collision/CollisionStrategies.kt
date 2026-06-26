@@ -1,8 +1,8 @@
 @file:Suppress("unused")
 
-package com.undercut.pathfinder.collision
+package world.gregs.voidps.collision
 
-object CollisionStrategyType {
+object CollisionStrategies {
     val NORMAL = NormalBlockFlagCollision()
     val WATER = BlockedFlagCollision()
     val FLY = LineOfSightBlockFlagCollision()

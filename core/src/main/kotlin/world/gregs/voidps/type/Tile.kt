@@ -2,6 +2,7 @@ package world.gregs.voidps.type
 
 import world.gregs.voidps.type.area.Cuboid
 import java.security.SecureRandom
+import kotlin.math.sqrt
 
 class Tile(val id: Int) : Coordinate3D<Tile> {
 
@@ -57,47 +58,80 @@ class Tile(val id: Int) : Coordinate3D<Tile> {
     /** Overload without level delta for Java callers. */
     fun transform(dx: Int, dy: Int): Tile = transform(dx, dy, 0)
 
-    /** Alias for [within] with a default distance of 14 tiles. */
+    /** Alias for [within] — Chebyshev box check, plane-aware (false if planes differ). */
     fun withinDistance(other: Tile, distance: Int) = within(other, distance)
 
-    /** Overload with default distance of 14 for Java callers. */
-    fun withinDistance(other: Tile) = withinDistance(other, 14)
+    /** Overload with default distance of 20 (matches engine default) for Java callers. */
+    fun withinDistance(other: Tile) = withinDistance(other, 20)
+
+    /** Euclidean (straight-line) distance, truncated to an Int. Plane-agnostic, matching engine semantics. */
+    fun getDistance(other: Tile): Int {
+        val dx = other.x - x
+        val dy = other.y - y
+        return sqrt((dx * dx + dy * dy).toDouble()).toInt()
+    }
 
     /** Alias for [level] — backward compatibility with legacy code that uses 'plane'. */
     val plane: Int get() = level
 
-    /** Returns the packed [Region.id] for this tile's region. */
-    fun getRegionId() = region.id
+    /** Region X (x / 64). */
+    val regionX: Int
+        get() = x shr 6
 
-    /** Returns the packed [Zone.id] for this tile's zone (chunk). */
-    fun getChunkId() = zone.id
+    /** Region Y (y / 64). */
+    val regionY: Int
+        get() = y shr 6
 
-    /** Returns the packed tile hash (same as [id]). */
-    fun getTileHash() = id
+    /** Chunk X (x / 8). */
+    val chunkX: Int
+        get() = x shr 3
 
-    /** Returns the local X coordinate within this tile's region (0-63). */
-    fun getXInRegion() = x and 63
+    /** Chunk Y (y / 8). */
+    val chunkY: Int
+        get() = y shr 3
 
-    /** Returns the local Y coordinate within this tile's region (0-63). */
-    fun getYInRegion() = y and 63
+    /** Local X within this tile's region (0-63). */
+    val xInRegion: Int
+        get() = x and 63
 
-    /** Returns the local X coordinate within this tile's chunk/zone (0-7). */
-    fun getXInChunk() = x and 7
+    /** Local Y within this tile's region (0-63). */
+    val yInRegion: Int
+        get() = y and 63
 
-    /** Returns the local Y coordinate within this tile's chunk/zone (0-7). */
-    fun getYInChunk() = y and 7
+    /** Local X within this tile's chunk (0-7). */
+    val xInChunk: Int
+        get() = x and 7
 
-    /** Returns the local hash within the chunk (encodes localX, localY, and plane). */
-    fun getChunkLocalHash() = (x and 7) or ((y and 7) shl 4) or (level shl 8)
+    /** Local Y within this tile's chunk (0-7). */
+    val yInChunk: Int
+        get() = y and 7
+
+    /** Packed region id: (regionX << 8) + regionY. */
+    val regionId: Int
+        get() = region.id
+
+    /** Region hash: regionY + (regionX << 8) + (plane << 16). */
+    val regionHash: Int
+        get() = regionY + (regionX shl 8) + (plane shl 16)
+
+    /** Packed tile hash (same as [id]). */
+    val tileHash: Int
+        get() = id
+
+    /**
+     * CHUNK-structure packed id: (chunkX << 11) | chunkY | (plane << 22).
+     * Replicates the engine's MapUtils.Structure.CHUNK encoding so cross-module
+     * code that keys maps by chunkId stays byte-identical.
+     */
+    val chunkId: Int
+        get() = (chunkX shl 11) or chunkY or (plane shl 22)
+
+    /** Local hash within the chunk: (xInChunk << 4) | yInChunk. */
+    val chunkLocalHash: Int
+        get() = (xInChunk shl 4) or yInChunk
 
     /** Equality check comparing packed ids. */
     fun matches(other: Tile) = id == other.id
-
-    /** Returns the chunk X (x / 8). */
-    fun getChunkX() = x shr 3
-
-    /** Returns the chunk Y (y / 8). */
-    fun getChunkY() = y shr 3
 
     /** Returns the X within scene for a given base chunk id. */
     fun getXInScene(baseChunkId: Int): Int {
@@ -123,15 +157,6 @@ class Tile(val id: Int) : Coordinate3D<Tile> {
         return (y shr 3) - baseChunkY
     }
 
-    /** Returns the region X (x / 64). */
-    fun getRegionX() = x shr 6
-
-    /** Returns the region Y (y / 64). */
-    fun getRegionY() = y shr 6
-
-    /** Returns the 18-bit region hash (plane << 16 | regionX << 8 | regionY). */
-    fun getRegionHash() = getRegionY() or (getRegionX() shl 8) or (plane shl 16)
-
     /** Returns the longest delta between this tile and another. */
     fun getLongestDelta(other: Tile): Int {
         val dx = Math.abs(x - other.x)
@@ -156,6 +181,19 @@ class Tile(val id: Int) : Coordinate3D<Tile> {
 
     /** Check if this tile is at the given x, y, level position. */
     fun isAt(x: Int, y: Int, level: Int) = this.x == x && this.y == y && this.level == level
+
+    /** Random tile within [range] tiles on each axis (same level). */
+    fun randomize(range: Int) = of(this, range)
+
+    /** Random tile offset on the X axis within [range] (same y, level). */
+    fun randomizeX(range: Int) = Tile(x + tileRandom.nextInt(range * 2 + 1) - range, y, level)
+
+    /** Random tile offset on the Y axis within [range] (same x, level). */
+    fun randomizeY(range: Int) = Tile(x, y + tileRandom.nextInt(range * 2 + 1) - range, level)
+
+    operator fun component1() = x
+    operator fun component2() = y
+    operator fun component3() = level
 
     override fun toString(): String {
         return "Tile($x, $y, $level)"
@@ -205,9 +243,18 @@ class Tile(val id: Int) : Coordinate3D<Tile> {
         @JvmStatic
         fun toInt(x: Int, y: Int, level: Int): Int = Tile(x, y, level).id
 
-        /** Legacy overload with 4 args: x, y, level, sub (sub is ignored). */
+        /**
+         * 4-arg factory applying a centre face-offset for an object/entity of the
+         * given [size], matching the engine's Tile.of(x, y, plane, size).
+         */
         @JvmStatic
-        fun of(x: Int, y: Int, level: Int, @Suppress("UNUSED_PARAMETER") sub: Int) = Tile(x, y, level)
+        fun of(x: Int, y: Int, level: Int, size: Int) = Tile(getCoordFaceX(x, size, size, -1), getCoordFaceY(y, size, size, -1), level)
+
+        @JvmStatic
+        fun getCoordFaceX(x: Int, sizeX: Int, sizeY: Int, rotation: Int) = x + ((if (rotation == 1 || rotation == 3) sizeY else sizeX) - 1) / 2
+
+        @JvmStatic
+        fun getCoordFaceY(y: Int, sizeX: Int, sizeY: Int, rotation: Int) = y + ((if (rotation == 1 || rotation == 3) sizeX else sizeY) - 1) / 2
 
         /** Java-friendly factory: create a Tile from a packed id. */
         @JvmStatic

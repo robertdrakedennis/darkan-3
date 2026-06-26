@@ -1,5 +1,9 @@
-package com.undercut.game.map
+package world.gregs.voidps.map
 
+/**
+ * Interprets the raw per-tile flag byte from
+ * [world.gregs.voidps.cache.definition.data.RegionDefinition.tileFlags].
+ */
 enum class RenderFlag(val flag: Int) {
     CLIPPED(0x1),
     LOWER_OBJECTS_TO_OVERRIDE_CLIPPING(0x2),
@@ -9,7 +13,7 @@ enum class RenderFlag(val flag: Int) {
 
     companion object {
         fun getFlags(value: Int): List<RenderFlag> {
-            return RenderFlag.entries.filter { value and it.flag != 0 }
+            return entries.filter { value and it.flag != 0 }
         }
 
         fun flagged(value: Int, vararg flags: RenderFlag): Boolean {

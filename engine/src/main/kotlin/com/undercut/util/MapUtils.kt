@@ -1,6 +1,6 @@
 package com.undercut.util
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 
 object MapUtils {
 
@@ -108,8 +108,8 @@ object MapUtils {
         }
 
         fun within(tile: Tile): Boolean {
-            return tile.getX() in getMapX()..(getMapX() + getMapWidth()) &&
-                    tile.getY() in getMapY()..(getMapY() + getMapHeight())
+            return tile.x in getMapX()..(getMapX() + getMapWidth()) &&
+                    tile.y in getMapY()..(getMapY() + getMapHeight())
         }
 
         override fun hashCode(): Int {
@@ -135,7 +135,7 @@ object MapUtils {
     }
 
     fun getArea(min: Tile, max: Tile): Area {
-        return getArea(Structure.TILE, min.getX(), min.getY(), max.getX(), max.getY())
+        return getArea(Structure.TILE, min.x, min.y, max.x, max.y)
     }
 
     fun getArea(minX: Int, minY: Int, maxX: Int, maxY: Int): Area {

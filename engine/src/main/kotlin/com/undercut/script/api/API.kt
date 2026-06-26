@@ -1,7 +1,8 @@
 package com.undercut.script.api
+import com.undercut.game.target
 
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.hooks.impl.SDLKeycode
 import com.undercut.game.hooks.impl.keyDown
@@ -950,8 +951,8 @@ fun calculateClosestSafeTile(
             val targetEndX = targetArea.tile.x + targetArea.sizeX - 1
             val targetEndY = targetArea.tile.y + targetArea.sizeY - 1
 
-            val closestX = tile.x.coerceIn(targetArea.tile.x, targetEndX.toShort())
-            val closestY = tile.y.coerceIn(targetArea.tile.y, targetEndY.toShort())
+            val closestX = tile.x.coerceIn(targetArea.tile.x, targetEndX)
+            val closestY = tile.y.coerceIn(targetArea.tile.y, targetEndY)
 
             val dx = tile.x - closestX
             val dy = tile.y - closestY
@@ -1025,18 +1026,14 @@ fun calculateClosestReachableSafeTile(
     dangerZones: List<DangerZone>,
     targetArea: TileArea = TileArea(currentPos, 1, 1),
     maxRadius: Int = 10
-): Tile? {
-    val pathFinder = PathFinder(flags = WorldCollision.allFlags, useRouteBlockerFlags = true, moveNear = false)
-
-    return pathFinder.findClosestSafeTile(
-        currentPos.x.toInt(),
-        currentPos.y.toInt(),
-        currentPos.plane.toInt(),
-        dangerZones,
-        targetArea,
-        maxRadius
-    )
-}
+): Tile? = findClosestSafeTile(
+    currentPos.x,
+    currentPos.y,
+    currentPos.plane,
+    dangerZones,
+    targetArea,
+    maxRadius
+)
 
 /** WORLD HOPPING/MISC **/
 

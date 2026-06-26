@@ -1,4 +1,4 @@
-package com.undercut.pathfinder.bound
+package world.gregs.voidps.path.bound
 
 internal fun reachRectangle(
     flags: Array<IntArray?>,

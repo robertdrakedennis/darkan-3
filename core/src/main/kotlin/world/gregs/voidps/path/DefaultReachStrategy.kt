@@ -1,9 +1,9 @@
-package com.undercut.pathfinder.reach
+package world.gregs.voidps.path
 
-import com.undercut.pathfinder.bound.reachExclusiveRectangle
-import com.undercut.pathfinder.bound.reachRectangle
-import com.undercut.pathfinder.bound.reachWall
-import com.undercut.pathfinder.bound.reachWallDeco
+import world.gregs.voidps.path.bound.reachExclusiveRectangle
+import world.gregs.voidps.path.bound.reachRectangle
+import world.gregs.voidps.path.bound.reachWall
+import world.gregs.voidps.path.bound.reachWallDeco
 
 private const val WALL_STRATEGY = 0
 private const val WALL_DECO_STRATEGY = 1

@@ -1,10 +1,10 @@
 package com.undercut.script.impl.qb.Quest
 
-import com.undercut.game.Tile
-import com.undercut.pathfinder.PathFinder
+import world.gregs.voidps.type.Tile
+import world.gregs.voidps.path.PathFinder
 import com.undercut.pathfinder.WorldCollision
-import com.undercut.pathfinder.collision.CollisionStrategyType
-import com.undercut.pathfinder.toTiles
+import world.gregs.voidps.collision.CollisionStrategies
+import world.gregs.voidps.path.toTiles
 import com.undercut.script.*
 import com.undercut.script.api.Lodestone
 import com.undercut.script.api.localPlayer
@@ -86,7 +86,7 @@ class DebugScript : StateMachineScript<DebugScript>(), ConfigurableScript, Sched
             location.x.toInt(),
             location.y.toInt(),
             localPlayer.tile.plane.toInt(),
-            collision = CollisionStrategyType.NORMAL,
+            collision = CollisionStrategies.NORMAL,
             srcSize = 2,
             destWidth = 1,
             destHeight = 1

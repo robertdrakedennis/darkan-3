@@ -1,12 +1,12 @@
 package com.undercut.script.impl.trent.aiomining
 
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.chat.MessageType
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.game.nxt.entity.location.SceneObject
-import com.undercut.pathfinder.ClipFlag
+import world.gregs.voidps.collision.ClipFlag
 import com.undercut.pathfinder.WorldCollision
 import com.undercut.pathfinder.routeToObject
 import com.undercut.script.ScriptDescription

@@ -1,7 +1,7 @@
 package com.undercut.script.impl.trent
 
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.script.Script
 import com.undercut.script.ScriptDescription
 import com.undercut.script.api.*

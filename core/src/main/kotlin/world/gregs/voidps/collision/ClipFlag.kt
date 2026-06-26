@@ -1,11 +1,10 @@
-package com.undercut.pathfinder
+package world.gregs.voidps.collision
 
 /**
  * BW = Actually blocks a tile when step is processed
  * BP = Blocks projectiles
  * PF = Pathfinder only takes these flags into consideration when generating a path
  * PFBW = Blocks tiles for both walk steps and the pathfinder
- * @author trent
  */
 enum class ClipFlag(val flag: Int) {
     EMPTY(-1),                // -1

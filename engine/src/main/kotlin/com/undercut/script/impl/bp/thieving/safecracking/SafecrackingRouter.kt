@@ -1,7 +1,7 @@
 package com.undercut.script.impl.bp.thieving.safecracking
 
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.game.nxt.entity.location.SceneObject
 import com.undercut.script.ScriptDescription
@@ -229,13 +229,13 @@ private val toArdougneSquareNorth
     get() = traversal(
         Safecracking(), { Safe.ARDOUGNE_SQUARE_NORTH.tile.withinDistance(localPlayer.tile, 3) }) {
         clickIFSlot(IFSlot(1461, 1, 45)) {
-            localPlayer.tile.plane == 0.toByte() && Area(2647, 3321, 2673, 3293).inside(
+            localPlayer.tile.plane == 0 && Area(2647, 3321, 2673, 3293).inside(
                 localPlayer.tile
             )
         }
         path(Tile.of(2660, 3302, 0), Door.ARDOUGNE_SQUARE_NORTH_LOWER.tileOutside)
         doorIn(Door.ARDOUGNE_SQUARE_NORTH_LOWER.toDoorInfo())
-        interactObj("Staircase", "Climb-up", 10) { localPlayer.tile.plane == 1.toByte() }
+        interactObj("Staircase", "Climb-up", 10) { localPlayer.tile.plane == 1 }
         doorIn(Door.ARDOUGNE_SQUARE_NORTH_UPPER.toDoorInfo())
         path(
             Door.ARDOUGNE_SQUARE_NORTH_UPPER.tileInside,
@@ -246,7 +246,7 @@ private val toArdougneSquareNorth
 private val toArdougneSquareSouthWest
     get() = traversal(Safecracking(), { Safe.ARDOUGNE_SQUARE_SOUTH_WEST.tile.withinDistance(localPlayer.tile, 2) }) {
         clickIFSlot(IFSlot(1461, 1, 45)) {
-            localPlayer.tile.plane == 0.toByte() && Area(2647, 3321, 2673, 3293).inside(
+            localPlayer.tile.plane == 0 && Area(2647, 3321, 2673, 3293).inside(
                 localPlayer.tile
             )
         }
@@ -254,7 +254,7 @@ private val toArdougneSquareSouthWest
             Door.ARDOUGNE_SQUARE_SOUTH_WEST_LOWER.tileOutside.addX(1).randomize(1)
         ) { Door.ARDOUGNE_SQUARE_SOUTH_WEST_LOWER.tileOutside.withinDistance(localPlayer.tile, 9) }
         doorIn(Door.ARDOUGNE_SQUARE_SOUTH_WEST_LOWER.toDoorInfo())
-        interactObj("Staircase", "Climb-up") { localPlayer.tile.plane == 1.toByte() }
+        interactObj("Staircase", "Climb-up") { localPlayer.tile.plane == 1 }
         doorIn(Door.ARDOUGNE_SQUARE_SOUTH_WEST_UPPER.toDoorInfo())
         path(
             Door.ARDOUGNE_SQUARE_SOUTH_WEST_UPPER.tileInside,
@@ -265,7 +265,7 @@ private val toArdougneSquareSouthWest
 private val toArdougneCastleNorth
     get() = traversal(Safecracking(), { Safe.ARDOUGNE_CASTLE_NORTH.tile.withinDistance(localPlayer.tile, 1) }) {
         clickIFSlot(IFSlot(1461, 1, 45)) {
-            localPlayer.tile.plane == 0.toByte() && Area(2647, 3321, 2673, 3293).inside(
+            localPlayer.tile.plane == 0 && Area(2647, 3321, 2673, 3293).inside(
                 localPlayer.tile
             )
         }
@@ -290,7 +290,7 @@ private val toArdougneCastleNorth
             )
         }
         doorIn(Door.ARDOUGNE_CASTLE_LOWER_NORTH.toDoorInfo())
-        interactObj("Staircase", "Climb-up", 10) { localPlayer.tile.plane == 1.toByte() }
+        interactObj("Staircase", "Climb-up", 10) { localPlayer.tile.plane == 1 }
         doorIn(Door.ARDOUGNE_CASTLE_UPPER_NORTH.toDoorInfo())
         path(
             Door.ARDOUGNE_CASTLE_UPPER_NORTH.tileInside,
@@ -336,7 +336,7 @@ private val toYanilleBar
             Door.YANILLE_BAR_DOOR.tileOutside
         ) { Door.YANILLE_BAR_DOOR.tileOutside.withinDistance(localPlayer.tile, 7) }
         doorIn(Door.YANILLE_BAR_DOOR.toDoorInfo())
-        interactObj("Ladder", "Climb-up", 10) { localPlayer.tile.plane == 1.toByte() }
+        interactObj("Ladder", "Climb-up", 10) { localPlayer.tile.plane == 1 }
         path(Tile.of(2555, 3081, 1), Safe.YANILLE_BAR_UPPER.tile.addY(1)) {
             Safe.YANILLE_BAR_UPPER.tile.withinDistance(
                 localPlayer.tile,

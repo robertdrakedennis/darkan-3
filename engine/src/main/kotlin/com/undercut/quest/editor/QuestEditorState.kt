@@ -8,7 +8,7 @@ import com.undercut.game.nxt.MainState
 import com.undercut.quest.data.Quest
 import com.undercut.quest.data.QuestLibrary
 import com.undercut.quest.runtime.ActiveQuestState
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.game.nxt.HeightMap
 import com.undercut.game.nxt.entity.location.SceneObject

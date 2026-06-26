@@ -1,6 +1,6 @@
 package com.undercut.game.math
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.nxt.MainState
 import com.undercut.ui.backend.native.NativeBridge

@@ -1,7 +1,7 @@
 package com.undercut.game.nxt.entity.location
 
-import com.undercut.game.Tile
-import com.undercut.game.map.ObjectShape
+import world.gregs.voidps.type.Tile
+import world.gregs.voidps.map.ObjectShape
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.memory.NativeAccess.deref
 import com.undercut.game.memory.NativeAccess.pointerAtOffset

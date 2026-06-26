@@ -1,6 +1,6 @@
 package com.undercut.mcp.tools
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.cs2.CS2Executor
 import com.undercut.game.hooks.impl.SDLKeycode

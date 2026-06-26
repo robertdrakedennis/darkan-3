@@ -1,15 +1,12 @@
-package com.undercut.pathfinder.bound
+package world.gregs.voidps.path.bound
 
-import com.undercut.pathfinder.flag.AccessBitFlag
-import com.undercut.pathfinder.flag.CollisionFlag
-import com.undercut.pathfinder.getIndexInZone
-import com.undercut.pathfinder.getZoneIndex
+import world.gregs.voidps.collision.AccessBitFlag
+import world.gregs.voidps.collision.CollisionFlag
+import world.gregs.voidps.path.getIndexInZone
+import world.gregs.voidps.path.getZoneIndex
 import kotlin.math.max
 import kotlin.math.min
 
-/**
- * @author Kris | 12/09/2021
- */
 object RectangleBoundaryUtils {
     fun collides(
         srcX: Int,

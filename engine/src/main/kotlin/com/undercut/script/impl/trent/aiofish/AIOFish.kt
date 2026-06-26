@@ -1,6 +1,6 @@
 package com.undercut.script.impl.trent.aiofish
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.script.ScriptDescription
 import com.undercut.script.State
 import com.undercut.script.StateMachineScript

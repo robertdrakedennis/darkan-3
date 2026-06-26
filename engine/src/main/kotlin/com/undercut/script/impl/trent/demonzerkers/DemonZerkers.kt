@@ -1,6 +1,6 @@
 package com.undercut.script.impl.trent.demonzerkers
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.script.Script
 import com.undercut.script.ScriptDescription
 import com.undercut.script.api.equipment

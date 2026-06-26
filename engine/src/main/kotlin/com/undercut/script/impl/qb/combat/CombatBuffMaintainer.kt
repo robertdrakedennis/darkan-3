@@ -24,7 +24,7 @@ import com.undercut.script.api.localPlayer
 import com.undercut.script.api.areaLoot
 import com.undercut.script.api.areaLootOpen
 import com.undercut.game.interfaces.IFSlot
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.script.api.interactClosestNPC
 import com.undercut.traversal.nodes.ChebychevNode
 

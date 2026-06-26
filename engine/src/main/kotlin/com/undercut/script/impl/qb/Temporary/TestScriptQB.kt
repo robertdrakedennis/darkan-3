@@ -128,7 +128,7 @@ println(localPlayer.tile.regionId)
 //            startingCoord.x.toInt(),
 //            startingCoord.y.toInt(),
 //            localPlayer.tile.plane.toInt(),
-//            collision = CollisionStrategyType.NORMAL,
+//            collision = CollisionStrategies.NORMAL,
 //            srcSize = 2,
 //            destWidth = 1,
 //            destHeight = 1

@@ -1,6 +1,7 @@
 package com.undercut.script.impl.qb.Temporary
+import com.undercut.game.tileOfLocal
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.interfaces.Ability
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.game.interfaces.effects.Effect
@@ -128,7 +129,7 @@ class Zuk : StateMachineScript<Zuk>(), ConfigurableScript {
 
     // Arena coordinates
     var safespotJad: Tile? = null
-    //var safespotNormal = Tile.ofLocal(44, 18, 0)
+    //var safespotNormal = tileOfLocal(44, 18, 0)
     var safespotNormal: Tile? = null
     var arenaMinX: Int = Int.MIN_VALUE
     var arenaMaxX: Int = Int.MAX_VALUE

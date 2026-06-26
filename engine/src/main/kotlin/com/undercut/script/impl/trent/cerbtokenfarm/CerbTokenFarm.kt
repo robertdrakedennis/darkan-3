@@ -1,7 +1,8 @@
 package com.undercut.script.impl.trent.cerbtokenfarm
+import com.undercut.game.tileOfSceneLocal
 
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.chat.MessageType
 import com.undercut.game.nxt.entity.npc.NPC
 import com.undercut.script.Script
@@ -91,16 +92,16 @@ class RunToCerb: State<CerbTokenFarm>() {
     var cerberus: NPC? = null
 
     override suspend fun CerbTokenFarm.checkNext(): State<CerbTokenFarm>? {
-        val cerbTile = Tile.ofSceneLocal(29, 71, 0) ?: return null
+        val cerbTile = tileOfSceneLocal(29, 71, 0) ?: return null
         return if (localPlayer.tile == cerbTile && cerberus != null) Kill(cerberus!!) else null
     }
 
     override suspend fun CerbTokenFarm.stateLoop() {
         // return if not detected in instanced scene yet
-        val prepTile = Tile.ofSceneLocal(0, 50, 0) ?: return
-        val surgeTile = Tile.ofSceneLocal(1, 51, 0) ?: return
-        val runTile = Tile.ofSceneLocal(29, 59, 0) ?: return
-        val cerbTile = Tile.ofSceneLocal(29, 71, 0) ?: return
+        val prepTile = tileOfSceneLocal(0, 50, 0) ?: return
+        val surgeTile = tileOfSceneLocal(1, 51, 0) ?: return
+        val runTile = tileOfSceneLocal(29, 59, 0) ?: return
+        val cerbTile = tileOfSceneLocal(29, 71, 0) ?: return
 
         if (localPlayer.tile != cerbTile) {
             moveLocalAndVerify(prepTile)
@@ -143,7 +144,7 @@ class Kill(val cerberus: NPC): State<CerbTokenFarm>() {
                 delayUntil(3000) { witch.currentHealth <= 0 || !witch.exists() }
             return
         }
-        val cerbTile = Tile.ofSceneLocal(29, 71, 0) ?: return
+        val cerbTile = tileOfSceneLocal(29, 71, 0) ?: return
         if (localPlayer.tile != cerbTile) {
             moveLocalAndVerify(cerbTile)
             return
@@ -159,7 +160,7 @@ object Exit: State<CerbTokenFarm>() {
     override suspend fun CerbTokenFarm.checkNext() = if (Tile.of(1761, 1343, 0).withinDistance(localPlayer.tile)) Enter else null
 
     override suspend fun CerbTokenFarm.stateLoop() {
-        val runTile = Tile.ofSceneLocal(0, 32, 0) ?: return
+        val runTile = tileOfSceneLocal(0, 32, 0) ?: return
         while(!Tile.of(1761, 1343, 0).withinDistance(localPlayer.tile) && findClosestObject { it.id == 124297 }?.tile?.withinDistance(localPlayer.tile, 20) != true) {
             if (walkTo(runTile.randomize(1), true))
                 delay(4300, 3000)

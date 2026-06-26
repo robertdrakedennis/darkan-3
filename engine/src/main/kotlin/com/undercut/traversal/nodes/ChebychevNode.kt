@@ -1,6 +1,6 @@
 package com.undercut.traversal.nodes
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.profiling.PlayerProfiles
 import com.undercut.script.Script

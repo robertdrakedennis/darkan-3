@@ -1,6 +1,7 @@
 package com.undercut.script.impl.trent.kalphiteking
+import com.undercut.game.tileOfLocal
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.chat.MessageType
 import com.undercut.game.interfaces.Ability
 import com.undercut.game.interfaces.effects.Effect
@@ -109,7 +110,7 @@ private fun inDanger(tile: Tile) = spotAnims.any {
     (DANGER_PROJECTILES.contains(it.id) && tile.withinDistance(it.tile, 2))
 }
 private val inDanger get() = inDanger(localPlayer.tile)
-val safeTile get() = Tile.ofLocal(32, 46, 1)
+val safeTile get() = tileOfLocal(32, 46, 1)
 
 class Fight : State<KalphiteKing>() {
     private var kk: NPC? = null
@@ -259,6 +260,6 @@ private fun findClosestSafeTile(target: Tile? = null): Tile? {
         .filter { DANGER_PROJECTILES.contains(it.id) }
         .map { DangerZone(it.tile, 0) }
 
-    val obstacles = listOf(TileArea(tile = Tile.ofLocal(0, 46, 1), sizeX = 100, sizeY = 40))
+    val obstacles = listOf(TileArea(tile = tileOfLocal(0, 46, 1), sizeX = 100, sizeY = 40))
     return calculateClosestSafeTile(playerPos, dangerZones, target?.let { TileArea(it, 1, 1) } ?: TileArea(playerPos, 1, 1), obstacles, checkObstacleLos = false)
 }

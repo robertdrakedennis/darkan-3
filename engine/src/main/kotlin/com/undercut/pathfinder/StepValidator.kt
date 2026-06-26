@@ -1,19 +1,19 @@
 package com.undercut.pathfinder
 
-import com.undercut.pathfinder.collision.CollisionStrategy
-import com.undercut.pathfinder.collision.CollisionStrategyType
-import com.undercut.pathfinder.flag.CollisionFlag.BLOCK_EAST
-import com.undercut.pathfinder.flag.CollisionFlag.BLOCK_NORTH
-import com.undercut.pathfinder.flag.CollisionFlag.BLOCK_NORTH_AND_SOUTH_EAST
-import com.undercut.pathfinder.flag.CollisionFlag.BLOCK_NORTH_AND_SOUTH_WEST
-import com.undercut.pathfinder.flag.CollisionFlag.BLOCK_NORTH_EAST
-import com.undercut.pathfinder.flag.CollisionFlag.BLOCK_NORTH_EAST_AND_WEST
-import com.undercut.pathfinder.flag.CollisionFlag.BLOCK_NORTH_WEST
-import com.undercut.pathfinder.flag.CollisionFlag.BLOCK_SOUTH
-import com.undercut.pathfinder.flag.CollisionFlag.BLOCK_SOUTH_EAST
-import com.undercut.pathfinder.flag.CollisionFlag.BLOCK_SOUTH_EAST_AND_WEST
-import com.undercut.pathfinder.flag.CollisionFlag.BLOCK_SOUTH_WEST
-import com.undercut.pathfinder.flag.CollisionFlag.BLOCK_WEST
+import world.gregs.voidps.collision.CollisionStrategy
+import world.gregs.voidps.collision.CollisionStrategies
+import world.gregs.voidps.collision.CollisionFlag.BLOCK_EAST
+import world.gregs.voidps.collision.CollisionFlag.BLOCK_NORTH
+import world.gregs.voidps.collision.CollisionFlag.BLOCK_NORTH_AND_SOUTH_EAST
+import world.gregs.voidps.collision.CollisionFlag.BLOCK_NORTH_AND_SOUTH_WEST
+import world.gregs.voidps.collision.CollisionFlag.BLOCK_NORTH_EAST
+import world.gregs.voidps.collision.CollisionFlag.BLOCK_NORTH_EAST_AND_WEST
+import world.gregs.voidps.collision.CollisionFlag.BLOCK_NORTH_WEST
+import world.gregs.voidps.collision.CollisionFlag.BLOCK_SOUTH
+import world.gregs.voidps.collision.CollisionFlag.BLOCK_SOUTH_EAST
+import world.gregs.voidps.collision.CollisionFlag.BLOCK_SOUTH_EAST_AND_WEST
+import world.gregs.voidps.collision.CollisionFlag.BLOCK_SOUTH_WEST
+import world.gregs.voidps.collision.CollisionFlag.BLOCK_WEST
 
 /**
  * @author Kris | 16/03/2022
@@ -28,7 +28,7 @@ class StepValidator(private val flags: Array<IntArray?>) {
         offsetY: Int,
         size: Int = 1,
         extraFlag: Int,
-        collision: CollisionStrategy = CollisionStrategyType.NORMAL,
+        collision: CollisionStrategy = CollisionStrategies.NORMAL,
     ): Boolean {
         val blocked = when {
             offsetX == 0 && offsetY == -1 -> isBlockedSouth(flags, level, x, y, size, extraFlag, collision)

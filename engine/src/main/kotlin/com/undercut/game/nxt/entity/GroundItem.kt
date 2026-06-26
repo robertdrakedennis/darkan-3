@@ -1,6 +1,6 @@
 package com.undercut.game.nxt.entity
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.game.nxt.DoActionOpcode
 import com.undercut.script.api.interfaces

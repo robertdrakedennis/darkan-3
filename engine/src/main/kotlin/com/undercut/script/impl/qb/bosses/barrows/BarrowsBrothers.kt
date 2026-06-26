@@ -1,6 +1,6 @@
 package com.undercut.script.impl.qb.bosses.barrows
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.interfaces.Ability
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.script.ConfigurableScript

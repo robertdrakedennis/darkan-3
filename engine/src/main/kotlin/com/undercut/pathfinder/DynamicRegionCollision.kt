@@ -1,9 +1,6 @@
 package com.undercut.pathfinder
 
-import com.undercut.game.Tile
 import com.undercut.game.bootstrap.Bootstrap
-import com.undercut.game.map.ObjectShape
-import com.undercut.game.map.RenderFlag
 import com.undercut.game.memory.NativeAccess.getOrNull
 import com.undercut.game.memory.NativeAccess.pointerAtOffset
 import com.undercut.game.memory.NativeAccess.readInt
@@ -17,6 +14,9 @@ import com.undercut.game.scene.CachedSceneObject
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.definition.data.RegionDefinition
 import world.gregs.voidps.cache.definition.data.RegionObject
+import world.gregs.voidps.map.ObjectShape
+import world.gregs.voidps.map.RenderFlag
+import world.gregs.voidps.type.Tile
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.lang.foreign.ValueLayout.JAVA_BYTE

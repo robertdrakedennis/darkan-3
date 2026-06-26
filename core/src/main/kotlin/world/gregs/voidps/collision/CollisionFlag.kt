@@ -1,6 +1,6 @@
 @file:Suppress("MemberVisibilityCanBePrivate", "unused")
 
-package com.undercut.pathfinder.flag
+package world.gregs.voidps.collision
 
 object CollisionFlag {
 

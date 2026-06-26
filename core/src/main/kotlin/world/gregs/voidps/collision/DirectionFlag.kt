@@ -1,4 +1,4 @@
-package com.undercut.pathfinder.flag
+package world.gregs.voidps.collision
 
 object DirectionFlag {
 

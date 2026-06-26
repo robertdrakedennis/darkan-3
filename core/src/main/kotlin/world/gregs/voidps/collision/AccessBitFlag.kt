@@ -1,8 +1,5 @@
-package com.undercut.pathfinder.flag
+package world.gregs.voidps.collision
 
-/**
- * @author Kris | 15/01/2022
- */
 object AccessBitFlag {
     const val BLOCK_NORTH: Int = 0x1
     const val BLOCK_EAST: Int = 0x2

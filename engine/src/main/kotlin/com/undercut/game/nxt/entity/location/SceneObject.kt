@@ -1,11 +1,11 @@
 package com.undercut.game.nxt.entity.location
 
-import com.undercut.game.Tile
-import com.undercut.game.map.ObjectShape
 import com.undercut.game.nxt.DoActionOpcode
 import com.undercut.game.nxt.entity.GraphNode
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.definition.data.ObjectDefinition
+import world.gregs.voidps.map.ObjectShape
+import world.gregs.voidps.type.Tile
 import java.lang.foreign.MemorySegment
 
 private val MENU_OPS = arrayOf(

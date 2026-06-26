@@ -1,19 +1,20 @@
 package com.undercut.pathfinder
 
-import com.undercut.game.Tile
 import com.undercut.game.bootstrap.Bootstrap
-import com.undercut.game.map.ObjectShape
 import com.undercut.game.map.Region
 import com.undercut.game.nxt.entity.location.SceneObject
 import com.undercut.script.api.inInstancedArea
-import com.undercut.util.MapUtils
-import world.gregs.voidps.cache.definition.data.ObjectDefinition
+import world.gregs.voidps.collision.ClipFlag
+import world.gregs.voidps.collision.CollisionMap
+import world.gregs.voidps.map.ObjectShape
+import world.gregs.voidps.type.Tile
 
 object WorldCollision {
-    private const val CHUNK_SIZE = 2048 //2048 chunk size = max capacity 16384x16384 tiles
+    private val map = CollisionMap()
     private val LOADED_REGIONS = mutableSetOf<Int>()
-    val allFlags: Array<IntArray?> = arrayOfNulls(CHUNK_SIZE * CHUNK_SIZE * 4)
     private val LOCK = Any()
+
+    val allFlags: Array<IntArray?> get() = map.allFlags
 
     var inDynamic = false
     var sceneBase: Tile? = null
@@ -21,11 +22,10 @@ object WorldCollision {
     @JvmStatic
     fun checkLoad() {
         try {
-
             val tile = Bootstrap.client.loggedInPlayer.self.tile
             val dynamicRegion = inInstancedArea
             if (dynamicRegion && !inDynamic) {
-                sceneBase = Tile.of(tile.regionX shl 6, tile.regionY shl 6, 0)
+                sceneBase = Tile(tile.regionX shl 6, tile.regionY shl 6, 0)
                 println("Entering dynamic region. SceneBase: ${sceneBase!!.x}, ${sceneBase!!.y}")
                 inDynamic = true
             } else if (!dynamicRegion && inDynamic) {
@@ -37,19 +37,14 @@ object WorldCollision {
             if (dynamicRegion) {
                 DynamicRegionCollision.loadInstanceCollision(tile)
             } else if (tile.x > 0) {
-                for (x in tile.regionX-4..tile.regionX+4)
-                    for (y in tile.regionY-4..tile.regionY+4)
+                for (x in tile.regionX - 4..tile.regionX + 4)
+                    for (y in tile.regionY - 4..tile.regionY + 4)
                         checkLoadRegion((x shl 8) + y)
             }
         } catch (e: Throwable) {
             e.printStackTrace()
         }
     }
-
-//    @JvmStatic
-//    fun regionExists(regionId: Int): Boolean {
-//        return Cache.get().exists(Index.MAPSV2.id, (regionId shr 8) or ((regionId and 0xff) shl 7))
-//    }
 
     @JvmStatic
     fun checkLoadRegion(regionId: Int) {
@@ -60,362 +55,84 @@ object WorldCollision {
     }
 
     @JvmStatic
-    fun clearChunk(chunkCollisionHash: Int) {
-        synchronized(LOCK) {
-            allFlags[chunkCollisionHash] = null
-        }
-    }
+    fun clearChunk(chunkCollisionHash: Int) = map.clearChunk(chunkCollisionHash)
 
     @JvmStatic
-    fun removeFlag(tile: Tile, vararg flags: ClipFlag) {
-        var flag = 0
-        for (f in flags) flag = flag or f.flag
-        removeFlag(tile, flag)
-    }
+    fun removeFlag(tile: Tile, vararg flags: ClipFlag) = map.removeFlag(tile, *flags)
 
     @JvmStatic
-    fun addFlag(tile: Tile, vararg flags: ClipFlag) {
-        var flag = 0
-        for (f in flags) flag = flag or f.flag
-        addFlag(tile, flag)
-    }
+    fun addFlag(tile: Tile, vararg flags: ClipFlag) = map.addFlag(tile, *flags)
 
     @JvmStatic
-    fun setFlags(tile: Tile, vararg flags: ClipFlag) {
-        var flag = 0
-        for (f in flags) flag = flag or f.flag
-        setFlags(tile, flag)
-    }
+    fun setFlags(tile: Tile, vararg flags: ClipFlag) = map.setFlags(tile, *flags)
 
     @JvmStatic
-    fun addBlockedTile(tile: Tile) {
-        addFlag(tile, ClipFlag.PFBW_FLOOR)
-    }
+    fun addBlockedTile(tile: Tile) = map.addBlockedTile(tile)
 
     @JvmStatic
-    fun removeBlockedTile(tile: Tile) {
-        removeFlag(tile, ClipFlag.PFBW_FLOOR)
-    }
+    fun removeBlockedTile(tile: Tile) = map.removeBlockedTile(tile)
 
     @JvmStatic
-    fun addBlockWalkAndProj(tile: Tile) {
-        addFlag(tile, ClipFlag.PFBW_GROUND_DECO)
-    }
+    fun addBlockWalkAndProj(tile: Tile) = map.addBlockWalkAndProj(tile)
 
     @JvmStatic
-    fun removeBlockWalkAndProj(tile: Tile) {
-        removeFlag(tile, ClipFlag.PFBW_GROUND_DECO)
-    }
+    fun removeBlockWalkAndProj(tile: Tile) = map.removeBlockWalkAndProj(tile)
 
     @JvmStatic
-    fun addClipNPC(tile: Tile) {
-        addFlag(tile, ClipFlag.BW_NPC)
-    }
+    fun addClipNPC(tile: Tile) = map.addClipNPC(tile)
 
     @JvmStatic
-    fun removeClipNPC(tile: Tile) {
-        removeFlag(tile, ClipFlag.BW_NPC)
-    }
+    fun removeClipNPC(tile: Tile) = map.removeClipNPC(tile)
 
     @JvmStatic
-    fun addClipPlayer(tile: Tile) {
-        addFlag(tile, ClipFlag.BW_PLAYER)
-    }
+    fun addClipPlayer(tile: Tile) = map.addClipPlayer(tile)
 
     @JvmStatic
-    fun removeClipPlayer(tile: Tile) {
-        removeFlag(tile, ClipFlag.BW_PLAYER)
-    }
+    fun removeClipPlayer(tile: Tile) = map.removeClipPlayer(tile)
 
     @JvmStatic
-    fun addObject(tile: Tile, sizeX: Int, sizeY: Int, blocksProjectiles: Boolean, pathfinder: Boolean) {
-        var flag = ClipFlag.BW_FULL.flag
-        if (blocksProjectiles) flag = flag or ClipFlag.BP_FULL.flag
-        if (pathfinder) flag = flag or ClipFlag.PF_FULL.flag
-        for (tileX in tile.x until tile.x + sizeX) for (tileY in tile.y until tile.y + sizeY) addFlag(Tile.of(tileX, tileY, tile.plane.toInt()), flag)
-    }
+    fun addObject(tile: Tile, sizeX: Int, sizeY: Int, blocksProjectiles: Boolean, pathfinder: Boolean) =
+        map.addObject(tile, sizeX, sizeY, blocksProjectiles, pathfinder)
 
     @JvmStatic
-    fun removeObject(tile: Tile, sizeX: Int, sizeY: Int, blocksProjectiles: Boolean, pathfinder: Boolean) {
-        var flag = ClipFlag.BW_FULL.flag
-        if (blocksProjectiles) flag = flag or ClipFlag.BP_FULL.flag
-        if (pathfinder) flag = flag or ClipFlag.PF_FULL.flag
-        for (tileX in tile.x until tile.x + sizeX) for (tileY in tile.y until tile.y + sizeY) removeFlag(Tile.of(tileX, tileY, tile.plane.toInt()), flag)
-    }
+    fun removeObject(tile: Tile, sizeX: Int, sizeY: Int, blocksProjectiles: Boolean, pathfinder: Boolean) =
+        map.removeObject(tile, sizeX, sizeY, blocksProjectiles, pathfinder)
 
     @JvmStatic
-    fun addWall(tile: Tile, type: ObjectShape?, rotation: Int, blocksProjectiles: Boolean, pathfinder: Boolean) {
-        when (type) {
-            ObjectShape.WALL_STRAIGHT -> {
-                when (rotation) {
-                    0 -> {
-                        addFlag(tile, ClipFlag.blockWest(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(-1, 0, 0), ClipFlag.blockEast(true, blocksProjectiles, pathfinder))
-                    }
-
-                    1 -> {
-                        addFlag(tile, ClipFlag.blockNorth(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(0, 1, 0), ClipFlag.blockSouth(true, blocksProjectiles, pathfinder))
-                    }
-
-                    2 -> {
-                        addFlag(tile, ClipFlag.blockEast(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(1, 0, 0), ClipFlag.blockWest(true, blocksProjectiles, pathfinder))
-                    }
-
-                    3 -> {
-                        addFlag(tile, ClipFlag.blockSouth(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(0, -1, 0), ClipFlag.blockNorth(true, blocksProjectiles, pathfinder))
-                    }
-                }
-            }
-
-            ObjectShape.WALL_DIAGONAL_CORNER, ObjectShape.WALL_STRAIGHT_CORNER -> {
-                when (rotation) {
-                    0 -> {
-                        addFlag(tile, ClipFlag.blockNorthWest(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(-1, 1, 0), ClipFlag.blockSouthEast(true, blocksProjectiles, pathfinder))
-                    }
-
-                    1 -> {
-                        addFlag(tile, ClipFlag.blockNorthEast(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(1, 1, 0), ClipFlag.blockSouthWest(true, blocksProjectiles, pathfinder))
-                    }
-
-                    2 -> {
-                        addFlag(tile, ClipFlag.blockSouthEast(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(1, -1, 0), ClipFlag.blockNorthWest(true, blocksProjectiles, pathfinder))
-                    }
-
-                    3 -> {
-                        addFlag(tile, ClipFlag.blockSouthWest(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(-1, -1, 0), ClipFlag.blockNorthEast(true, blocksProjectiles, pathfinder))
-                    }
-                }
-            }
-
-            ObjectShape.WALL_WHOLE_CORNER -> {
-                when (rotation) {
-                    0 -> {
-                        addFlag(tile, ClipFlag.blockNorth(true, blocksProjectiles, pathfinder) or ClipFlag.blockWest(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(-1, 0, 0), ClipFlag.blockEast(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(0, 1, 0), ClipFlag.blockSouth(true, blocksProjectiles, pathfinder))
-                    }
-
-                    1 -> {
-                        addFlag(tile, ClipFlag.blockNorth(true, blocksProjectiles, pathfinder) or ClipFlag.blockEast(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(0, 1, 0), ClipFlag.blockSouth(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(1, 0, 0), ClipFlag.blockWest(true, blocksProjectiles, pathfinder))
-                    }
-
-                    2 -> {
-                        addFlag(tile, ClipFlag.blockEast(true, blocksProjectiles, pathfinder) or ClipFlag.blockSouth(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(1, 0, 0), ClipFlag.blockWest(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(0, -1, 0), ClipFlag.blockNorth(true, blocksProjectiles, pathfinder))
-                    }
-
-                    3 -> {
-                        addFlag(tile, ClipFlag.blockSouth(true, blocksProjectiles, pathfinder) or ClipFlag.blockWest(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(0, -1, 0), ClipFlag.blockNorth(true, blocksProjectiles, pathfinder))
-                        addFlag(tile.transform(-1, 0, 0), ClipFlag.blockEast(true, blocksProjectiles, pathfinder))
-                    }
-                }
-            }
-
-            else -> {}
-        }
-    }
+    fun addWall(tile: Tile, type: ObjectShape?, rotation: Int, blocksProjectiles: Boolean, pathfinder: Boolean) =
+        map.addWall(tile, type, rotation, blocksProjectiles, pathfinder)
 
     @JvmStatic
-    fun removeWall(tile: Tile, type: ObjectShape?, rotation: Int, blocksProjectiles: Boolean, pathfinder: Boolean) {
-        when (type) {
-            ObjectShape.WALL_STRAIGHT -> {
-                when (rotation) {
-                    0 -> {
-                        removeFlag(tile, ClipFlag.blockWest(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(-1, 0, 0), ClipFlag.blockEast(true, blocksProjectiles, pathfinder))
-                    }
-
-                    1 -> {
-                        removeFlag(tile, ClipFlag.blockNorth(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(0, 1, 0), ClipFlag.blockSouth(true, blocksProjectiles, pathfinder))
-                    }
-
-                    2 -> {
-                        removeFlag(tile, ClipFlag.blockEast(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(1, 0, 0), ClipFlag.blockWest(true, blocksProjectiles, pathfinder))
-                    }
-
-                    3 -> {
-                        removeFlag(tile, ClipFlag.blockSouth(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(0, -1, 0), ClipFlag.blockNorth(true, blocksProjectiles, pathfinder))
-                    }
-                }
-            }
-
-            ObjectShape.WALL_DIAGONAL_CORNER, ObjectShape.WALL_STRAIGHT_CORNER -> {
-                when (rotation) {
-                    0 -> {
-                        removeFlag(tile, ClipFlag.blockNorthWest(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(-1, 1, 0), ClipFlag.blockSouthEast(true, blocksProjectiles, pathfinder))
-                    }
-
-                    1 -> {
-                        removeFlag(tile, ClipFlag.blockNorthEast(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(1, 1, 0), ClipFlag.blockSouthWest(true, blocksProjectiles, pathfinder))
-                    }
-
-                    2 -> {
-                        removeFlag(tile, ClipFlag.blockSouthEast(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(1, -1, 0), ClipFlag.blockNorthWest(true, blocksProjectiles, pathfinder))
-                    }
-
-                    3 -> {
-                        removeFlag(tile, ClipFlag.blockSouthWest(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(-1, -1, 0), ClipFlag.blockNorthEast(true, blocksProjectiles, pathfinder))
-                    }
-                }
-            }
-
-            ObjectShape.WALL_WHOLE_CORNER -> {
-                when (rotation) {
-                    0 -> {
-                        removeFlag(tile, ClipFlag.blockNorth(true, blocksProjectiles, pathfinder) or ClipFlag.blockWest(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(-1, 0, 0), ClipFlag.blockEast(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(0, 1, 0), ClipFlag.blockSouth(true, blocksProjectiles, pathfinder))
-                    }
-
-                    1 -> {
-                        removeFlag(tile, ClipFlag.blockNorth(true, blocksProjectiles, pathfinder) or ClipFlag.blockEast(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(0, 1, 0), ClipFlag.blockSouth(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(1, 0, 0), ClipFlag.blockWest(true, blocksProjectiles, pathfinder))
-                    }
-
-                    2 -> {
-                        removeFlag(tile, ClipFlag.blockEast(true, blocksProjectiles, pathfinder) or ClipFlag.blockSouth(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(1, 0, 0), ClipFlag.blockWest(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(0, -1, 0), ClipFlag.blockNorth(true, blocksProjectiles, pathfinder))
-                    }
-
-                    3 -> {
-                        removeFlag(tile, ClipFlag.blockSouth(true, blocksProjectiles, pathfinder) or ClipFlag.blockWest(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(0, -1, 0), ClipFlag.blockNorth(true, blocksProjectiles, pathfinder))
-                        removeFlag(tile.transform(-1, 0, 0), ClipFlag.blockEast(true, blocksProjectiles, pathfinder))
-                    }
-                }
-            }
-
-            else -> {}
-        }
-    }
+    fun removeWall(tile: Tile, type: ObjectShape?, rotation: Int, blocksProjectiles: Boolean, pathfinder: Boolean) =
+        map.removeWall(tile, type, rotation, blocksProjectiles, pathfinder)
 
     @JvmStatic
-    fun getFlags(tile: Tile): Int {
-        synchronized(LOCK) {
-            val chunkId = tile.chunkId
-            if (allFlags[chunkId] == null) return -1
-            return allFlags[chunkId]?.get(tile.xInChunk or (tile.yInChunk shl 3)) ?: ClipFlag.BW_FULL.flag
-        }
-    }
+    fun getFlags(tile: Tile): Int = map.getFlags(tile)
 
     @JvmStatic
-    fun getFlags(x: Int, y: Int, plane: Int): Int {
-        synchronized(LOCK) {
-            val chunkId = MapUtils.encode(MapUtils.Structure.CHUNK, x shr 3, y shr 3, plane)
-            if (allFlags[chunkId] == null) return -1
-            return allFlags[chunkId]?.get(x and 7 or ((y and 7) shl 3)) ?: ClipFlag.BW_FULL.flag
-        }
-    }
+    fun getFlags(x: Int, y: Int, plane: Int): Int = map.getFlags(x, y, plane)
 
     @JvmStatic
-    fun addFlag(tile: Tile, flag: Int) {
-        synchronized(LOCK) {
-            val chunkId = tile.chunkId
-            if (allFlags[chunkId] == null) allFlags[chunkId] = IntArray(64)
-            allFlags[chunkId]?.set(tile.xInChunk or (tile.yInChunk shl 3), (allFlags[chunkId]?.get(tile.xInChunk or (tile.yInChunk shl 3)) ?: ClipFlag.BW_FULL.flag) or flag)
-        }
-    }
+    fun addFlag(tile: Tile, flag: Int) = map.addFlag(tile, flag)
 
     @JvmStatic
-    fun removeFlag(tile: Tile, flag: Int) {
-        synchronized(LOCK) {
-            val chunkId = tile.chunkId
-            if (allFlags[chunkId] == null) allFlags[chunkId] = IntArray(64)
-            allFlags[chunkId]?.set(tile.xInChunk or (tile.yInChunk shl 3), (allFlags[chunkId]?.get(tile.xInChunk or (tile.yInChunk shl 3)) ?: ClipFlag.BW_FULL.flag) and flag.inv())
-        }
-    }
+    fun removeFlag(tile: Tile, flag: Int) = map.removeFlag(tile, flag)
 
     @JvmStatic
-    fun setFlags(tile: Tile, flag: Int) {
-        synchronized(LOCK) {
-            val chunkId = tile.chunkId
-            if (allFlags[chunkId] == null) allFlags[chunkId] = IntArray(64)
-            allFlags[chunkId]?.set(tile.xInChunk or (tile.yInChunk shl 3), flag)
-        }
-    }
+    fun setFlags(tile: Tile, flag: Int) = map.setFlags(tile, flag)
+
+    @JvmStatic
+    fun unclip(tile: Tile) = map.unclip(tile)
 
     @JvmStatic
     fun clip(obj: SceneObject) {
         if (obj.id == -1) return
-        val type: ObjectShape = obj.shape
-        val rotation: Int = obj.rotation.toInt()
-
-        val defs: ObjectDefinition = obj.defs
-
-        if (defs.clipType == 0) return
-
-        when (type) {
-            ObjectShape.WALL_STRAIGHT, ObjectShape.WALL_DIAGONAL_CORNER, ObjectShape.WALL_WHOLE_CORNER, ObjectShape.WALL_STRAIGHT_CORNER -> addWall(obj.tile, type, rotation, defs.blocks, !defs.ignoreAltClip)
-            ObjectShape.WALL_INTERACT, ObjectShape.SCENERY_INTERACT, ObjectShape.GROUND_INTERACT, ObjectShape.STRAIGHT_SLOPE_ROOF, ObjectShape.DIAGONAL_SLOPE_ROOF, ObjectShape.DIAGONAL_SLOPE_CONNECT_ROOF, ObjectShape.STRAIGHT_SLOPE_CORNER_CONNECT_ROOF, ObjectShape.STRAIGHT_SLOPE_CORNER_ROOF, ObjectShape.STRAIGHT_FLAT_ROOF, ObjectShape.STRAIGHT_BOTTOM_EDGE_ROOF, ObjectShape.DIAGONAL_BOTTOM_EDGE_CONNECT_ROOF, ObjectShape.STRAIGHT_BOTTOM_EDGE_CONNECT_ROOF, ObjectShape.STRAIGHT_BOTTOM_EDGE_CONNECT_CORNER_ROOF -> {
-                val sizeX: Int
-                val sizeY: Int
-                if (rotation != 1 && rotation != 3) {
-                    sizeX = defs.sizeX
-                    sizeY = defs.sizeY
-                } else {
-                    sizeX = defs.sizeY
-                    sizeY = defs.sizeX
-                }
-                addObject(obj.tile, sizeX, sizeY, defs.blocks, !defs.ignoreAltClip)
-            }
-
-            ObjectShape.GROUND_DECORATION -> if (defs.clipType == 1) addBlockWalkAndProj(obj.tile)
-            else -> {}
-        }
-    }
-
-    @JvmStatic
-    fun unclip(tile: Tile) {
-        setFlags(tile, 0)
+        map.applyObject(obj.tile, obj.shape, obj.rotation.toInt(), obj.defs)
     }
 
     @JvmStatic
     fun unclip(obj: SceneObject) {
-        if (obj.id == -1) // dont clip or noclip with id -1
-            return
-        val type: ObjectShape = obj.shape
-        val rotation: Int = obj.rotation.toInt()
-        val defs: ObjectDefinition = obj.defs
-
-        if (defs.clipType == 0) return
-
-        when (type) {
-            ObjectShape.WALL_STRAIGHT, ObjectShape.WALL_DIAGONAL_CORNER, ObjectShape.WALL_WHOLE_CORNER, ObjectShape.WALL_STRAIGHT_CORNER -> removeWall(obj.tile, type, rotation, defs.blocks, !defs.ignoreAltClip)
-            ObjectShape.WALL_INTERACT, ObjectShape.SCENERY_INTERACT, ObjectShape.GROUND_INTERACT, ObjectShape.STRAIGHT_SLOPE_ROOF, ObjectShape.DIAGONAL_SLOPE_ROOF, ObjectShape.DIAGONAL_SLOPE_CONNECT_ROOF, ObjectShape.STRAIGHT_SLOPE_CORNER_CONNECT_ROOF, ObjectShape.STRAIGHT_SLOPE_CORNER_ROOF, ObjectShape.STRAIGHT_FLAT_ROOF, ObjectShape.STRAIGHT_BOTTOM_EDGE_ROOF, ObjectShape.DIAGONAL_BOTTOM_EDGE_CONNECT_ROOF, ObjectShape.STRAIGHT_BOTTOM_EDGE_CONNECT_ROOF, ObjectShape.STRAIGHT_BOTTOM_EDGE_CONNECT_CORNER_ROOF -> {
-                val sizeX: Int
-                val sizeY: Int
-                if (rotation == 1 || rotation == 3) {
-                    sizeX = defs.sizeY
-                    sizeY = defs.sizeX
-                } else {
-                    sizeX = defs.sizeX
-                    sizeY = defs.sizeY
-                }
-                removeObject(obj.tile, sizeX, sizeY, defs.blocks, !defs.ignoreAltClip)
-            }
-
-            ObjectShape.GROUND_DECORATION -> if (defs.clipType == 1) removeBlockWalkAndProj(obj.tile)
-            else -> {}
-        }
+        if (obj.id == -1) return
+        map.removeObjectClip(obj.tile, obj.shape, obj.rotation.toInt(), obj.defs)
     }
 }

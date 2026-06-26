@@ -1,17 +1,15 @@
-package com.undercut.pathfinder
+package world.gregs.voidps.path
 
 /**
- * @author Kris | 16/03/2022
+ * Holds all the flags for every tile in the game.
  *
- * A class to hold all the flags for every tile in the game.
  * The flags are placed into a two-dimensional array, where the outer array
- * returns the flags array for a given zone(1 x 8 x 8 flags total).
- * This is done for memory reasons, as it is rather expensive to allocate a
- * 16384 x 16384 x 4 size int array all in one go(it would also require over a
- * gigabyte of memory).
+ * returns the flags array for a given zone (1 x 8 x 8 flags total). This is done
+ * for memory reasons, as it is rather expensive to allocate a 16384 x 16384 x 4
+ * size int array all in one go (it would also require over a gigabyte of memory).
  *
- * Without any flags, this object initializes as a size 16,777,216 array of
- * int arrays, all of which are null. This consumes roughly ~67mb of memory to
+ * Without any flags, this object initializes as a size 16,777,216 array of int
+ * arrays, all of which are null. This consumes roughly ~67mb of memory to
  * initialize.
  */
 @Suppress("NOTHING_TO_INLINE")
@@ -21,9 +19,6 @@ class ZoneFlags {
      */
     val flags: Array<IntArray?> = arrayOfNulls(TOTAL_ZONES)
 
-    /**
-     * Destroys the flags array for the zone at [zoneCoords].
-     */
     inline fun alloc(zoneCoords: ZoneCoords): IntArray {
         val packed = zoneCoords.packedCoords
         val current = flags[packed]
@@ -37,7 +32,7 @@ class ZoneFlags {
      * Destroys the flags array for the zone at [zoneCoords].
      * It should be noted that [zoneCoords] are not absolute.
      * To convert from absolute coordinates to zone coordinates, divide the x and y values
-     * each by 8(the size of one zone).
+     * each by 8 (the size of one zone).
      * Example:
      * Converting absolute coordinates [3251, 9422, 1] to [zoneCoords] produces [406, 1177, 1].
      */

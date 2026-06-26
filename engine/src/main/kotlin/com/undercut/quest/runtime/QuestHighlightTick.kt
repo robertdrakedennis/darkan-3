@@ -1,6 +1,6 @@
 package com.undercut.quest.runtime
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.highlight.EntityHighlight
 import com.undercut.game.nxt.HeightMap
 import com.undercut.game.nxt.entity.Entity

@@ -1,12 +1,12 @@
 package com.undercut.script.impl.qb.Temporary
 
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.nxt.entity.location.SceneObject
-import com.undercut.pathfinder.PathFinder
+import world.gregs.voidps.path.PathFinder
 import com.undercut.pathfinder.WorldCollision
-import com.undercut.pathfinder.collision.CollisionStrategyType
-import com.undercut.pathfinder.toTiles
+import world.gregs.voidps.collision.CollisionStrategies
+import world.gregs.voidps.path.toTiles
 import com.undercut.script.*
 import com.undercut.script.api.*
 import com.undercut.script.event.Event
@@ -415,7 +415,7 @@ class WalkingToFarm : State<HetsBushManicheState>() {
             bush.location.x.toInt() -1,
             bush.location.y.toInt(),
             localPlayer.tile.plane.toInt(),
-            collision = CollisionStrategyType.NORMAL,
+            collision = CollisionStrategies.NORMAL,
             srcSize = 2,
             destWidth = 1,
             destHeight = 1
@@ -551,7 +551,7 @@ class WalkingToBank : State<HetsBushManicheState>() {
             bankingCoord.x.toInt(),
             bankingCoord.y.toInt(),
             localPlayer.tile.plane.toInt(),
-            collision = CollisionStrategyType.NORMAL,
+            collision = CollisionStrategies.NORMAL,
             srcSize = 2,
             destWidth = 1,
             destHeight = 1

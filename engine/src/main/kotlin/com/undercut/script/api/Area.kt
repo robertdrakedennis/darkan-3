@@ -1,6 +1,6 @@
 package com.undercut.script.api
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.pathfinder.WorldCollision
 import com.undercut.util.random
 import java.awt.Point

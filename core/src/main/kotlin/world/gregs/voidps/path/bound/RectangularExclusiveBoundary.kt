@@ -1,8 +1,5 @@
-package com.undercut.pathfinder.bound
+package world.gregs.voidps.path.bound
 
-/**
- * @author Kris | 12/09/2021
- */
 internal fun reachExclusiveRectangle(
     flags: Array<IntArray?>,
     x: Int,

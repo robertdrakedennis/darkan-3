@@ -1,6 +1,6 @@
 package com.undercut.script.impl.gibson.farming
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.nxt.entity.location.SceneObject
 import com.undercut.script.*
 import com.undercut.script.api.*

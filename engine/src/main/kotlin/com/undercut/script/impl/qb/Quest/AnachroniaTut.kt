@@ -1,6 +1,7 @@
 package com.undercut.script.impl.qb.Quest
+import com.undercut.game.tileOfLocal
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.script.State
 import com.undercut.script.api.*
@@ -111,7 +112,7 @@ class AnachroniaTut : State<DebugScript>() {
 						?.let {
 							if (it < 2) {
 								interactedWithFootPrint = true
-								var firstTile = Tile.ofLocal(29, 32, 0) // THis is the same as Tile.of(6877,3168,0)
+								var firstTile = tileOfLocal(29, 32, 0) // THis is the same as Tile.of(6877,3168,0)
 								var secondile = Tile.of(firstTile.transform(22, 17, 0))
 								var thirdTile = Tile.of(secondile.transform(40, -1, 0))
 								var fourthTile = Tile.of(thirdTile.transform(9, -35, 0))

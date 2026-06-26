@@ -1,6 +1,6 @@
 package com.undercut.game.nxt
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.diag.CrashForensics
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.input.DoActionShadow

@@ -1,6 +1,6 @@
 package com.undercut.script.impl.qb.Temporary
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.interfaces.IFSlot
 import com.undercut.game.interfaces.effects.Effect
 import com.undercut.script.*

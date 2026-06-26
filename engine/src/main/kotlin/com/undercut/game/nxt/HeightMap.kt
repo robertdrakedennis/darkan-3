@@ -1,6 +1,6 @@
 package com.undercut.game.nxt
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.memory.NativeAccess
 import com.undercut.game.memory.NativeAccess.toMemorySegment

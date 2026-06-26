@@ -1,6 +1,7 @@
 package com.undercut.script.impl.bp.thieving.safecracking
+import com.undercut.game.tileOfLocal
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.traversal.nodes.DoorInfo
 
 enum class Door(
@@ -12,10 +13,10 @@ enum class Door(
     val tileOutside: Tile,
     val openAction: String? = "Open"
 ) {
-    // Minimap: 0 Tile.of(2757, 3503, 0) local: Tile.ofLocal(5, 47, 0) -- in front of large door
+    // Minimap: 0 Tile.of(2757, 3503, 0) local: tileOfLocal(5, 47, 0) -- in front of large door
     // CombinedLocationSection: realId: 25638 visibleId: 25638 name: Large door tile: [ X: 2757, Y: 3503, Z: 0 ] -- closed
     // Location: realId: 25639 visibleId: 25639 name: Large door tile: [ X: 2757, Y: 3504, Z: 0 ] -- open
-    // Minimap: 0 Tile.of(2757, 3504, 0) local: Tile.ofLocal(5, 48, 0) -- inside large door
+    // Minimap: 0 Tile.of(2757, 3504, 0) local: tileOfLocal(5, 48, 0) -- inside large door
     CAMELOT_CASTLE_MAIN_DOOR(
         25639,
         25638,
@@ -26,10 +27,10 @@ enum class Door(
         "Open"
     ),
 
-    // Minimap: 0 Tile.of(2750, 3504, 0) local: Tile.ofLocal(62, 48, 0)
+    // Minimap: 0 Tile.of(2750, 3504, 0) local: tileOfLocal(62, 48, 0)
     // CombinedLocationSection: realId: 25642 visibleId: 25642 name: Door tile: [ X: 2750, Y: 3503, Z: 0 ]
     // Location: realId: 25643 visibleId: 25643 name: Door tile: [ X: 2750, Y: 3504, Z: 0 ]
-    // Minimap: 0 Tile.of(2750, 3503, 0) local: Tile.ofLocal(62, 47, 0)
+    // Minimap: 0 Tile.of(2750, 3503, 0) local: tileOfLocal(62, 47, 0)
     CAMELOT_CASTLE_WEST_DOOR(
         25643,
         25642,

@@ -1,4 +1,4 @@
-package com.undercut.pathfinder.reach
+package world.gregs.voidps.path
 
 interface ReachStrategy {
 

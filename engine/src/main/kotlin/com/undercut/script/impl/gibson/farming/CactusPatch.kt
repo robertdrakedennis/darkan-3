@@ -1,6 +1,6 @@
 package com.undercut.script.impl.gibson.farming
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.script.api.varps
 
 enum class CactusPatch(

@@ -1,7 +1,7 @@
 package com.undercut.script.impl.bp.hunter.box
 
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.math.WorldToScreen
 import com.undercut.script.Script
 import com.undercut.script.ScriptDescription

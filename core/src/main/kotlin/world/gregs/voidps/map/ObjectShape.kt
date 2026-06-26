@@ -1,5 +1,10 @@
-package com.undercut.game.map
+package world.gregs.voidps.map
 
+/**
+ * Interprets the raw shape id from
+ * [world.gregs.voidps.cache.definition.data.RegionObject.shape] (and the client's
+ * object-data byte) into the wall / scenery / decoration / ground slot model.
+ */
 enum class ObjectShape(val id: Int, val slot: Int) {
     WALL_STRAIGHT(0, 0),
     WALL_DIAGONAL_CORNER(1, 0),
@@ -28,13 +33,13 @@ enum class ObjectShape(val id: Int, val slot: Int) {
     UNK_24(24, 3),
     UNK_25(25, 3);
 
+    fun isWall(): Boolean {
+        return (id in WALL_STRAIGHT.id..WALL_STRAIGHT_CORNER.id) || id == WALL_INTERACT.id
+    }
+
     companion object {
         private val map = entries.associateBy(ObjectShape::id)
 
-        fun forId(id: Int): ObjectShape = map[id] ?: throw Exception("Invalid object shape: $id")
-    }
-
-    fun isWall(): Boolean {
-        return (id in WALL_STRAIGHT.id..WALL_STRAIGHT_CORNER.id) || id == WALL_INTERACT.id
+        fun forId(id: Int): ObjectShape = map[id] ?: throw IllegalArgumentException("Invalid object shape: $id")
     }
 }

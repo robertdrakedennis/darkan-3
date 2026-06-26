@@ -2,7 +2,7 @@ package com.undercut.script.impl.qb.skilling
 
 import com.google.gson.JsonObject
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.chat.MessageType
 import com.undercut.script.BooleanConfigItem
 import com.undercut.script.ConfigItem

@@ -1,7 +1,7 @@
 package com.undercut.script.impl.qb.combat
 
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.chat.MessageType
 import com.undercut.game.interfaces.Ability
 import com.undercut.game.nxt.entity.npc.NPC

@@ -1,7 +1,7 @@
 package com.undercut.script.impl.qb.skilling
 
 import com.undercut.game.Skill
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.script.BooleanConfigItem
 import com.undercut.script.ConfigItem
 import com.undercut.script.EnumConfigItem

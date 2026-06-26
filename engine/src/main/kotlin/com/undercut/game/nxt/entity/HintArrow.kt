@@ -1,6 +1,6 @@
 package com.undercut.game.nxt.entity
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.memory.NativeAccess.readByte
 import com.undercut.game.memory.NativeAccess.readFloat

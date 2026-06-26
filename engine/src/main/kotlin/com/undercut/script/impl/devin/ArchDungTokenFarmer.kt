@@ -1,6 +1,6 @@
 package com.undercut.script.impl.devin
 
-import com.undercut.game.Tile
+import world.gregs.voidps.type.Tile
 import com.undercut.game.nxt.entity.location.SceneObject
 import com.undercut.game.nxt.entity.npc.NPC
 import com.undercut.script.ScriptDescription

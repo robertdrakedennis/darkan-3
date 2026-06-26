@@ -1,8 +1,5 @@
-package com.undercut.pathfinder
+package world.gregs.voidps.path
 
-/**
- * @author Kris | 16/03/2022
- */
 @JvmInline
 value class ZoneCoords(val packedCoords: Int) {
     constructor(

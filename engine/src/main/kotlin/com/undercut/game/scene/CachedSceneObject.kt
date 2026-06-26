@@ -1,10 +1,10 @@
 package com.undercut.game.scene
 
-import com.undercut.game.Tile
-import com.undercut.game.map.ObjectShape
 import com.undercut.game.nxt.entity.location.SceneObject
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.definition.data.ObjectDefinition
+import world.gregs.voidps.map.ObjectShape
+import world.gregs.voidps.type.Tile
 import java.lang.foreign.MemorySegment
 
 class CachedSceneObject(
