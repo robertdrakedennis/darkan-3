@@ -22,7 +22,7 @@ class BuildAreaTest {
 
     @Test
     fun `Lumbridge spawn yields a non-inverted grid containing region 50,50`() {
-        // Default spawn tile (3200,3200) -> region (50,50).
+        // Lumbridge tile (3200,3200) -> region (50,50).
         val spawn = Tile(3200, 3200, 0)
         assertEquals(50, spawn.region.x); assertEquals(50, spawn.region.y)
 
@@ -36,7 +36,7 @@ class BuildAreaTest {
         assertTrue(area.containsRegion(Region(50, 50)), "build area must contain spawn region (50,50)")
         assertTrue(area.containsTile(spawn), "build area must contain the spawn tile")
 
-        // MEDIUM (default) is a 5x5-region window centred on (50,50): X/Z[48..52].
+        // MEDIUM is a 5x5-region window centred on (50,50): X/Z[48..52].
         assertEquals(48, area.minRegion.x); assertEquals(52, area.maxRegion.x)
         assertEquals(48, area.minRegion.y); assertEquals(52, area.maxRegion.y)
         assertEquals(5, area.regionWidth); assertEquals(5, area.regionHeight)
@@ -66,6 +66,22 @@ class BuildAreaTest {
     fun `pack reproduces production packedA for region 26,37`() {
         // Ground truth (spec §5.3): pack(0, region 26, 37) == 0x01a00940.
         assertEquals(0x01a00940, BuildArea.pack(plane = 0, regionX = 26, regionZ = 37))
+    }
+
+    @Test
+    fun `first-light production grid matches observed rev948 op81 bounds`() {
+        val spawn = Tile(3200, 3200, 0)
+        val area = BuildArea.firstLight(spawn)
+
+        assertEquals(Region(26, 37), area.minRegion)
+        assertEquals(Region(72, 142), area.maxRegion)
+        assertTrue(area.containsTile(spawn))
+        assertEquals(47, area.regionWidth)
+        assertEquals(106, area.regionHeight)
+        assertEquals(0x01a00940, area.packedCoordA)
+        assertEquals(0x048e23b8, area.packedCoordB)
+        assertEquals(72, decodeRegionX(area.packedCoordB))
+        assertEquals(142, decodeRegionZ(area.packedCoordB))
     }
 
     @Test

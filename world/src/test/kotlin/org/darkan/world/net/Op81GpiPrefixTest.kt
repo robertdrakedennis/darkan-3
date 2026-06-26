@@ -97,8 +97,8 @@ class Op81GpiPrefixTest {
 
     @Test
     fun `op81 body is 5137 bytes with magic 0x85 at offset 5122`() {
-        val spawn = Tile(3235, 3234, 0)
-        val buildArea = BuildArea.of(spawn)
+        val spawn = Tile(3224, 3216, 0)
+        val buildArea = BuildArea.firstLight(spawn)
         val prefix = Op81GpiPrefix.build(spawnTile = spawn, localPlayerIndex = 1)
 
         val body = encodeBody(
@@ -108,13 +108,18 @@ class Op81GpiPrefixTest {
                 packedCoordA = buildArea.packedCoordA,
                 packedCoordB = buildArea.packedCoordB,
                 cameraRotation = 7,
-                targetWorldId = 474,
+                sceneRootId = 474,
                 rebuildPrefix = prefix,
             )
         )
 
         assertEquals(5137, body.size, "Shape B op81 body must be 5119 prefix + 18 header = 5137")
         assertEquals(0x85.toByte(), body[5122], "magic 0x85 must land at body offset 5122 (= 5119 + 3)")
+        assertEquals(
+            "ff9201850193870001da01a00940048e23b8",
+            body.copyOfRange(5119, 5137).toHex(),
+            "first-light op81 tail must match the production-derived rev948 scene bootstrap fields"
+        )
         // The 18-byte coord header sits at offset 5119; its centreZoneX (BE) is at +4 → body[5123..5124].
         val centreZoneXFromHeader = ((body[5123].toInt() and 0xFF) shl 8) or (body[5124].toInt() and 0xFF)
         assertEquals(spawn.zone.x, centreZoneXFromHeader, "header centreZoneX (at body 5123 BE) must be the spawn zone X")
@@ -158,4 +163,6 @@ class Op81GpiPrefixTest {
             assertEquals(5119, prefix.size, "prefix size must stay 5119 for localPlayerIndex=$idx")
         }
     }
+
+    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 }

@@ -26,16 +26,17 @@ import world.gregs.voidps.type.Tile
  * object, a position→build-area computation, and a covered-region set. Every byte/bit/unit here
  * is 948-5, not 910.
  *
- * @property size      the build-area window size (half-extent in regions about the spawn region).
+ * @property size      symmetric rebuild window size; null for the production first-light profile.
  * @property minRegion SW / origin corner, in map-squares (`hi14_A >> 6`, `lo14_A >> 6`).
  * @property maxRegion NE / far corner, in map-squares (`hi14_B >> 6`, `lo14_B >> 6`).
  * @property plane     scene base level (0 for the overworld); occupies bits 28-29 of each word.
  */
 class BuildArea private constructor(
-    val size: BuildAreaSize,
+    val size: BuildAreaSize?,
     val minRegion: Region,
     val maxRegion: Region,
     val plane: Int,
+    private val label: String = size?.name ?: "custom",
 ) {
     init {
         // The single hard wire constraint (spec §3/§4): the grid is inclusive and must be
@@ -52,7 +53,12 @@ class BuildArea private constructor(
     val packedCoordA: Int get() = pack(plane, minRegion.x, minRegion.y)
 
     /** NE-corner packed coordinate word for op81 `+14` (BE u32). */
-    val packedCoordB: Int get() = pack(plane, maxRegion.x, maxRegion.y)
+    val packedCoordB: Int get() =
+        packTile(
+            plane = plane,
+            tileX = (maxRegion.x shl REGION_TILE_BITS) + FAR_ZONE_OFFSET_TILES,
+            tileZ = (maxRegion.y shl REGION_TILE_BITS) + FAR_ZONE_OFFSET_TILES,
+        )
 
     /** Inclusive grid width in map-squares (`maxRegionX - minRegionX + 1`). */
     val regionWidth: Int get() = maxRegion.x - minRegion.x + 1
@@ -83,26 +89,30 @@ class BuildArea private constructor(
     fun containsTile(tile: Tile): Boolean = containsRegion(tile.region)
 
     override fun toString(): String =
-        "BuildArea(size=$size, plane=$plane, X[${minRegion.x}..${maxRegion.x}] Z[${minRegion.y}..${maxRegion.y}], " +
+        "BuildArea($label, plane=$plane, X[${minRegion.x}..${maxRegion.x}] Z[${minRegion.y}..${maxRegion.y}], " +
             "packedA=0x${"%08x".format(packedCoordA)}, packedB=0x${"%08x".format(packedCoordB)})"
 
     companion object {
+        val FIRST_LIGHT_MIN_REGION = Region(26, 37)
+        val FIRST_LIGHT_MAX_REGION = Region(72, 142)
+
         /**
          * Packs a `DecodePackedCoord` word from a **region** corner (`@0x006d4320` inverse).
          *
-         * The client reads `field >> 6` to recover the region, so the field must hold a
-         * **tile-aligned** value `region << 6`. The low 6 bits are ignored by the build path, so
-         * we emit the clean `region << 6` form (low6 = 0). Verified: `pack(0, 26, 37) = 0x01a00940`
-         * and `pack(0, 72, 142) | <low6>` round-trips to production's words (spec §5.3).
+         * The client reads `field >> 6` to recover the region, so the field must hold a tile value
+         * inside that region. This emits the clean southwest form `region << 6`.
          *
          * @param plane    scene base level (bits 28-29).
          * @param regionX  map-square X — recovered as `(word >> 14) & 0x3FFF) >> 6`.
          * @param regionZ  map-square Z — recovered as `(word & 0x3FFF) >> 6`.
          */
         fun pack(plane: Int, regionX: Int, regionZ: Int): Int =
+            packTile(plane, regionX shl REGION_TILE_BITS, regionZ shl REGION_TILE_BITS)
+
+        fun packTile(plane: Int, tileX: Int, tileZ: Int): Int =
             ((plane and 0x3) shl 28) or
-                (((regionX shl 6) and 0x3FFF) shl 14) or
-                ((regionZ shl 6) and 0x3FFF)
+                ((tileX and PACKED_TILE_MASK) shl 14) or
+                (tileZ and PACKED_TILE_MASK)
 
         /**
          * Computes a build area centred on [spawn]'s region with the [size] half-window.
@@ -124,6 +134,24 @@ class BuildArea private constructor(
             val maxRegion = Region(region.x + r, region.y + r)
             return BuildArea(size, minRegion, maxRegion, spawn.level)
         }
+
+        fun firstLight(spawn: Tile): BuildArea {
+            val area = BuildArea(
+                size = null,
+                minRegion = FIRST_LIGHT_MIN_REGION,
+                maxRegion = FIRST_LIGHT_MAX_REGION,
+                plane = spawn.level,
+                label = "FIRST_LIGHT_PRODUCTION",
+            )
+            require(area.containsRegion(spawn.region)) {
+                "First-light build-area ${area.minRegion}..${area.maxRegion} does not contain spawn region ${spawn.region}"
+            }
+            return area
+        }
+
+        private const val REGION_TILE_BITS = 6
+        private const val PACKED_TILE_MASK = 0x3FFF
+        private const val FAR_ZONE_OFFSET_TILES = 7 * 8
     }
 }
 
@@ -132,10 +160,9 @@ class BuildArea private constructor(
  * carrying a **region (map-square)** half-extent rather than 910's tile edge-length, because the
  * 948-5 build area is bounded in **map-squares** (`field >> 6`), not chunks/tiles (spec §3).
  *
- * The client picks a detail level; the server honours it by widening/narrowing this window. Until
- * the 948-5 detail-options handler is RE'd we expose a small set of sane symmetric windows and
- * default to [DEFAULT]. A window must contain the spawn region; bigger windows stream more map
- * squares (spec §5.4 / §8 — keep it modest, grow only if the visible edge looks unbuilt).
+ * The client picks a detail level; symmetric sizes remain useful for future rebuilds. Fresh
+ * world-entry uses [BuildArea.firstLight] because production rev948 sends a larger asymmetric grid
+ * before first render.
  *
  * @property halfRegions half-extent of the (square) window in map-squares about the spawn region.
  *   The covered grid spans `(2*halfRegions + 1)` regions per axis (clamped at 0 on the low side).
@@ -152,10 +179,7 @@ enum class BuildAreaSize(val halfRegions: Int) {
 
     companion object {
         /**
-         * Default window for world-entry. MEDIUM (5×5 regions) guarantees the spawn square plus a
-         * two-region ring load, which is enough for the scene to render while staying cheap to
-         * stream. Production used a much larger asymmetric window; the client only requires
-         * `min ≤ spawnRegion ≤ max`, so a small symmetric window suffices (spec §5.4 / §8).
+         * Default symmetric window for non-login rebuilds.
          */
         val DEFAULT = MEDIUM
     }

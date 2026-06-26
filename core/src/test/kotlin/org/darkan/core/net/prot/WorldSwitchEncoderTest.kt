@@ -100,7 +100,7 @@ class WorldSwitchEncoderTest {
         val zoneX = 400        // 0x0190
         val zoneZ = 401        // 0x0191 — distinct from X, and high byte non-zero to prove LE order
         val cameraRotation = 3
-        val targetWorldId = 0
+        val sceneRootId = 0
         val packedA = 0x01234567
         val packedB = 0x089ABCDE
 
@@ -111,19 +111,19 @@ class WorldSwitchEncoderTest {
                 packedCoordA = packedA,
                 packedCoordB = packedB,
                 cameraRotation = cameraRotation,
-                targetWorldId = targetWorldId,
+                sceneRootId = sceneRootId,
             )
         )
 
         val expected = byteArrayOf(
-            0x00,                                   // +0 filler
+            0xFF.toByte(),                          // +0 filler
             (zoneZ and 0xFF).toByte(),              // +1 Z low  = 0x91
             ((zoneZ ushr 8) and 0xFF).toByte(),     // +2 Z high = 0x01
             0x85.toByte(),                          // +3 magic
             (zoneX ushr 8).toByte(), zoneX.toByte(),// +4 X BE = 01 90
             ((cameraRotation + 0x80) and 0xFF).toByte(), // +6 camera (writeByteAdd)
             0x00,                                   // +7 filler
-            (targetWorldId ushr 8).toByte(), targetWorldId.toByte(), // +8 worldId BE
+            (sceneRootId ushr 8).toByte(), sceneRootId.toByte(), // +8 sceneRootId BE
             // +10 packedA BE
             (packedA ushr 24).toByte(), (packedA ushr 16).toByte(), (packedA ushr 8).toByte(), packedA.toByte(),
             // +14 packedB BE
@@ -157,7 +157,7 @@ class WorldSwitchEncoderTest {
                 packedCoordA = RebuildNormalSimple.packRegionCoord(regionX = 48, regionZ = 48),
                 packedCoordB = RebuildNormalSimple.packRegionCoord(regionX = 52, regionZ = 52),
                 cameraRotation = 0,
-                targetWorldId = 300,
+                sceneRootId = 300,
                 // no rebuildPrefix — defaults to ByteArray(0) → bare 18-byte header
             )
         )
@@ -183,7 +183,7 @@ class WorldSwitchEncoderTest {
                 packedCoordA = RebuildNormalSimple.packRegionCoord(regionX = 48, regionZ = 48),
                 packedCoordB = RebuildNormalSimple.packRegionCoord(regionX = 52, regionZ = 52),
                 cameraRotation = 7,
-                targetWorldId = 474,
+                sceneRootId = 474,
                 rebuildPrefix = prefix,
             )
         )

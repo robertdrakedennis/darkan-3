@@ -82,6 +82,7 @@ object EnvVars {
     val worldName: String = dotenv.get("WORLD_NAME", "Darkan")
     val worldHost: String = dotenv.get("WORLD_HOST", "localhost")
     val worldPublicHost: String = dotenv.get("WORLD_PUBLIC_HOST", worldHost)
+    val worldSceneRootId: Int = dotenv.get("WORLD_SCENE_ROOT_ID", "474").toInt()
     val worldActivity: String = dotenv.get("WORLD_ACTIVITY", "")
     val worldMembers: Boolean = dotenv.get("WORLD_MEMBERS", "true").toBooleanStrict()
     val worldQuickChat: Boolean = dotenv.get("WORLD_QUICKCHAT", "false").toBooleanStrict()

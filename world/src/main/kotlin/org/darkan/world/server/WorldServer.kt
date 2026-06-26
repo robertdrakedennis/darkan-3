@@ -391,8 +391,7 @@ object WorldServer {
                 output.flush()
 
                 // Step 14: Send the world-init burst (op81 scene build + UI ops + op5 + varp
-                // baseline). The spawn tile (player.tile, default Lumbridge 3200,3200 = zone
-                // 400,400) is the SINGLE source of truth: it drives the op81 coord-header centre
+                // baseline). The spawn tile is the SINGLE source of truth: it drives the op81 coord-header centre
                 // zone here AND the op22 GPI local 30-bit tile below (PlayerInfoBuilder reads
                 // player.tile). They are now coherent — the 400-vs-404 split + captured 404/404
                 // prefix that quit the client (docs/protocol/world-bootstrap-948.md §4) is gone.
@@ -564,16 +563,12 @@ object WorldServer {
         //
         // The spawn tile is the SINGLE source of truth for all three coordinate facets that MUST
         // agree (§4 coherence): (a) the op81 centre zone (header +4 X / +1,+2 Z), (b) the op81
-        // build-area corners (packedCoordA/B), and (c) the GPI prefix's local 30-bit tile — all
-        // derived from `player.tile` right here. The build area is computed by the [BuildArea]
-        // service per docs/protocol/packed-coord-buildarea-948.md: packedCoordA = SW corner,
-        // packedCoordB = NE corner, both as TILE coords the client `>>6`s to REGIONS. The grid is
-        // a non-inverted window CONTAINING the spawn region, so the client allocates a real grid
-        // and JS5-pulls the index-5 map groups (this is the definitive black-screen fix — the old
-        // packZoneCoord produced inverted, empty bounds). Default spawn is Lumbridge tile
-        // (3200,3200) -> region (50,50), centre zone (400,400).
+        // build-area corners (packedCoordA/B), and (c) the GPI prefix's local 30-bit tile. The
+        // centre zone and prefix tile come from `player.tile`; the first-light build-area uses the
+        // larger asymmetric map-square grid observed in production rev948 so the scene manager
+        // allocates the same map window before the op78 stream arrives.
         val spawn = player.tile
-        val buildArea = player.viewport.loadBuildArea(spawn)
+        val buildArea = player.viewport.loadFirstLightBuildArea(spawn)
         val centreZone = spawn.zone                      // render-scene centre (positioned inside the grid)
         // GPI prefix: local player's 30-bit tile == this same spawn tile; the skipped slot is the
         // player's allocated index (== WorldLoginDetails.playerIndex == viewport.highResIndices[0]).
@@ -585,7 +580,7 @@ object WorldServer {
                 packedCoordA = buildArea.packedCoordA,   // +10 SW corner {minRegionX, minRegionZ}
                 packedCoordB = buildArea.packedCoordB,   // +14 NE corner {maxRegionX, maxRegionZ}
                 cameraRotation = 7,                      // harmless (§5): op81's camera anchor is a map-config flag, not this byte. Production ships 7. Kept so the wire matches; not the render lever.
-                targetWorldId = EnvVars.worldId,
+                sceneRootId = EnvVars.worldSceneRootId,
                 rebuildPrefix = gpiPrefix,               // Shape B: 5119-byte GPI init; body = 5119 + 18 = 5137
             )
         )

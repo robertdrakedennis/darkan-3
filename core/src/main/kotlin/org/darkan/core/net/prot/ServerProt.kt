@@ -901,16 +901,16 @@ data class JcoinsUpdate(val balance: Int) : ServerProt
  * client has no scene and stays on the loading screen. Rev948 op 81, varShort, magic 0x85,
  * with a production prefix plus 18-byte tail. The handler parses this tail after packet position
  * has advanced through the prefix:
- *      +0  u8   ignored filler (send 0)
+ *      +0  u8   ignored filler (production sends 0xFF)
  *      +1  u8   centreZoneZ low
  *      +2  u8   centreZoneZ high            (Z is LE u16: lo then hi; may exceed 255)
  *      +3  u8   magic = 0x85
  *      +4  u16  centreZoneX (BE)
  *      +6  u8   cameraRotation, writeByteAdd (wire = (value + 0x80) & 0xFF)
  *      +7  u8   ignored filler (send 0)
- *      +8  u16  targetWorldId (BE)          (0 for a normal non-instanced login)
- *      +10 u32  packedCoordA (BE)           build-area corner ORIGIN
- *      +14 u32  packedCoordB (BE)           build-area SIZE
+ *      +8  u16  sceneRootId (BE)            scene root selector consumed before BuildArea install
+ *      +10 u32  packedCoordA (BE)           build-area SW corner
+ *      +14 u32  packedCoordB (BE)           build-area NE corner
  *
  * `packedCoordA/B` use the BuildArea `DecodePackedCoord` packing (`BuildArea::DecodePackedCoord`
  * @ 0x006d4320): `word = (plane << 28) | (hi14 << 14) | lo14`, two 14-bit fields + 2-bit plane.
@@ -932,8 +932,8 @@ data class RebuildNormalSimple(
     val packedCoordB: Int,
     /** 948 camera rotation byte (written +0x80). Default 0. */
     val cameraRotation: Int = 0,
-    /** 948 instanced-source world id (+8 BE u16). 0 = normal non-instanced login. */
-    val targetWorldId: Int = 0,
+    /** 948 scene root selector (+8 BE u16). Production first-light uses 474. */
+    val sceneRootId: Int = 0,
     /** Legacy encoder field. Ignored by the rev948 encoder. */
     val forceRefresh: Boolean = true,
     /** Legacy encoder field. Ignored by the rev948 encoder. */
@@ -952,7 +952,7 @@ data class RebuildNormalSimple(
             packedCoordA == other.packedCoordA &&
             packedCoordB == other.packedCoordB &&
             cameraRotation == other.cameraRotation &&
-            targetWorldId == other.targetWorldId &&
+            sceneRootId == other.sceneRootId &&
             forceRefresh == other.forceRefresh &&
             regionLow == other.regionLow &&
             rebuildPrefix.contentEquals(other.rebuildPrefix))
@@ -963,7 +963,7 @@ data class RebuildNormalSimple(
         result = 31 * result + packedCoordA
         result = 31 * result + packedCoordB
         result = 31 * result + cameraRotation
-        result = 31 * result + targetWorldId
+        result = 31 * result + sceneRootId
         result = 31 * result + forceRefresh.hashCode()
         result = 31 * result + regionLow
         result = 31 * result + rebuildPrefix.contentHashCode()

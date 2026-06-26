@@ -19,7 +19,7 @@ abstract class Entity {
     // be assigned post-construction (see [org.darkan.world.world.Players.allocate]).
 
     /** Current world position. Default Lumbridge spawn. Updated by movement processing. */
-    var tile: Tile = Tile(3200, 3200, 0)
+    var tile: Tile = Tile(3224, 3216, 0)
 
     /** Facing direction (0-7 cardinal). Encoded into PLAYER_INFO / NPC_INFO appearance + face blocks. */
     var direction: Int = 0

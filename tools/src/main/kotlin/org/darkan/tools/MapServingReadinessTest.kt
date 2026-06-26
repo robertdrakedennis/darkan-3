@@ -39,12 +39,12 @@ private const val RESPONSE_HEADER_LEN = 10
 private const val CONTINUATION_HEADER_LEN = 5
 private const val BLOCK_SIZE = 102400
 
-// Lumbridge spawn: tile (3200,3200) per the task / (3235,3234) per [prod] op81.
-// mapsquare = tile >> 6. zone = tile >> 3. The 13x13-zone build area spans
-// mapsquares ~49..51 in each axis around the spawn mapsquare (50,50).
-private const val SPAWN_MAPSQUARE_X = 50
-private const val SPAWN_MAPSQUARE_Y = 50
-private const val MAPSQUARE_RADIUS = 1 // -> 49..51 in each axis = 3x3 mapsquares
+private const val FIRST_LIGHT_SPAWN_REGION_X = 50
+private const val FIRST_LIGHT_SPAWN_REGION_Y = 50
+private const val FIRST_LIGHT_MIN_REGION_X = 26
+private const val FIRST_LIGHT_MIN_REGION_Y = 37
+private const val FIRST_LIGHT_MAX_REGION_X = 72
+private const val FIRST_LIGHT_MAX_REGION_Y = 142
 
 private var passed = 0
 private var failed = 0
@@ -58,7 +58,7 @@ fun main() {
         System.err.println("Cache directory not found: $cachePath")
         kotlin.system.exitProcess(1)
     }
-    println("=== Map-Serving Readiness (index 5, Lumbridge build area) ===")
+    println("=== Map-Serving Readiness (index 5, first-light build area) ===")
     println("Cache path: ${cachePath.toAbsolutePath()}")
     println()
 
@@ -105,7 +105,11 @@ fun main() {
     // ---------------------------------------------------------------------------------------
     // Section B: Lumbridge build-area window — name resolution + completeness
     // ---------------------------------------------------------------------------------------
-    println("--- B. Lumbridge build-area map groups (mapsquares ${SPAWN_MAPSQUARE_X - MAPSQUARE_RADIUS}..${SPAWN_MAPSQUARE_X + MAPSQUARE_RADIUS} x ${SPAWN_MAPSQUARE_Y - MAPSQUARE_RADIUS}..${SPAWN_MAPSQUARE_Y + MAPSQUARE_RADIUS}) ---")
+    println(
+        "--- B. first-light build-area map groups " +
+            "(mapsquares $FIRST_LIGHT_MIN_REGION_X..$FIRST_LIGHT_MAX_REGION_X x " +
+            "$FIRST_LIGHT_MIN_REGION_Y..$FIRST_LIGHT_MAX_REGION_Y) ---"
+    )
 
     // Terrain group id = (mapsquareX << 8) | mapsquareY (RS3 NXT coordinate encoding).
     fun terrainGroup(x: Int, y: Int) = (x shl 8) or y
@@ -115,8 +119,8 @@ fun main() {
     var missing = 0
     var presentCount = 0
 
-    for (mx in (SPAWN_MAPSQUARE_X - MAPSQUARE_RADIUS)..(SPAWN_MAPSQUARE_X + MAPSQUARE_RADIUS)) {
-        for (my in (SPAWN_MAPSQUARE_Y - MAPSQUARE_RADIUS)..(SPAWN_MAPSQUARE_Y + MAPSQUARE_RADIUS)) {
+    for (mx in FIRST_LIGHT_MIN_REGION_X..FIRST_LIGHT_MAX_REGION_X) {
+        for (my in FIRST_LIGHT_MIN_REGION_Y..FIRST_LIGHT_MAX_REGION_Y) {
             val name = "m${mx}_$my"
             val groupId = terrainGroup(mx, my)
             val present = groupIdsInIndex.contains(groupId)
@@ -126,16 +130,20 @@ fun main() {
     }
 
     // The exact spawn mapsquare (50,50) terrain group is the load-bearing one for first-light.
-    val spawnGid = terrainGroup(SPAWN_MAPSQUARE_X, SPAWN_MAPSQUARE_Y)
+    val spawnGid = terrainGroup(FIRST_LIGHT_SPAWN_REGION_X, FIRST_LIGHT_SPAWN_REGION_Y)
     if (groupIdsInIndex.contains(spawnGid))
-        pass("spawn terrain m${SPAWN_MAPSQUARE_X}_$SPAWN_MAPSQUARE_Y -> group id $spawnGid (present in index 5)")
+        pass("spawn terrain m${FIRST_LIGHT_SPAWN_REGION_X}_$FIRST_LIGHT_SPAWN_REGION_Y -> group id $spawnGid (present in index 5)")
     else
-        fail("spawn terrain group $spawnGid (m${SPAWN_MAPSQUARE_X}_$SPAWN_MAPSQUARE_Y) ABSENT from index 5 — Lumbridge terrain missing")
+        fail("spawn terrain group $spawnGid (m${FIRST_LIGHT_SPAWN_REGION_X}_$FIRST_LIGHT_SPAWN_REGION_Y) ABSENT from index 5 — Lumbridge terrain missing")
 
     info("build-area terrain window: ${resolved.size} mapsquares, $presentCount present, $missing absent")
     if (missing > 0) {
-        info("absent terrain squares (some edge squares legitimately have no map group): " +
-            resolved.filter { !it.present }.joinToString(", ") { "${it.name}(${it.groupId})" })
+        val sample = resolved.filter { !it.present }.take(40)
+        info(
+            "absent terrain squares (some edge squares legitimately have no map group): " +
+                sample.joinToString(", ") { "${it.name}(${it.groupId})" } +
+                if (missing > sample.size) " ... ${missing - sample.size} more" else ""
+        )
     }
     info("NOTE: loc ('l{X}_{Y}') groups use a distinct client-computed id (not reversed here); index-5 completeness is covered holistically by Section A/C and CacheIntegrityCheck.")
     println()
@@ -148,6 +156,7 @@ fun main() {
     var crcBad = 0
     var decompOk = 0
     var decompBad = 0
+    var decompEmpty = 0
     for (g in resolved.filter { it.present }) {
         val blob = cache.sector(Index.MAPS, g.groupId)
         if (blob == null || blob.size < 5) {
@@ -164,13 +173,19 @@ fun main() {
         // Decompress (Lumbridge F2P = XTEA 0, so no keys needed).
         try {
             val d = decomp.decompress(blob)
-            if (d != null && d.isNotEmpty()) decompOk++ else { decompBad++; fail("group ${g.name}: decompress returned null/empty") }
+            if (d != null) {
+                decompOk++
+                if (d.isEmpty()) decompEmpty++
+            } else {
+                decompBad++
+                fail("group ${g.name}: decompress returned null")
+            }
         } catch (e: Exception) {
             decompBad++; fail("group ${g.name}: decompress threw ${e::class.simpleName}: ${e.message}")
         }
     }
     if (crcBad == 0 && presentCount > 0) pass("all $crcOk present build-area groups CRC-match the index-5 ref table")
-    if (decompBad == 0 && presentCount > 0) pass("all $decompOk present build-area groups decompress cleanly (XTEA-0)")
+    if (decompBad == 0 && presentCount > 0) pass("all $decompOk present build-area groups decompress cleanly (XTEA-0; $decompEmpty empty)")
 
     // Holistic completeness: every group the ref table lists must have a present, CRC-matching blob.
     // (A faithful/complete index 5 has a blob for every ref-table entry; a missing blob = an

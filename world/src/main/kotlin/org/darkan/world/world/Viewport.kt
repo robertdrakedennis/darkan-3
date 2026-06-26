@@ -59,8 +59,7 @@ class Viewport(val owner: Player) {
     /**
      * Build area centre in chunk (zone) coordinates — the op81 coord-header centre zone. Derived
      * from the owner's spawn tile (`tile >> 3`); the render scene window is positioned here inside
-     * the larger [buildArea] map-square grid (spec §2). Default Lumbridge tile (3200,3200) -> zone
-     * (400,400).
+     * the larger [buildArea] map-square grid (spec §2).
      */
     var buildAreaChunkX: Int = owner.tile.x shr 3
     var buildAreaChunkY: Int = owner.tile.y shr 3
@@ -73,6 +72,13 @@ class Viewport(val owner: Player) {
      */
     fun loadBuildArea(tile: Tile, size: BuildAreaSize = BuildAreaSize.DEFAULT): BuildArea {
         buildArea = BuildArea.of(tile, size)
+        buildAreaChunkX = tile.x shr 3
+        buildAreaChunkY = tile.y shr 3
+        return buildArea
+    }
+
+    fun loadFirstLightBuildArea(tile: Tile): BuildArea {
+        buildArea = BuildArea.firstLight(tile)
         buildAreaChunkX = tile.x shr 3
         buildAreaChunkY = tile.y shr 3
         return buildArea

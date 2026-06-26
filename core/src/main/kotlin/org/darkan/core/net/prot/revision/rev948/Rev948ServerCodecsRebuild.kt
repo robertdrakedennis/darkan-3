@@ -39,14 +39,14 @@ internal fun Codec.registerRev948ServerCodecsRebuild() {
     // screen. `rebuildPrefix` is written first (below) then the 18-byte header; the world bootstrap
     // passes the generated 5119-byte prefix, making the body 5119 + 18 = 5137. (`rebuildPrefix`
     // still defaults to empty for non-world callers/tests that want the bare header.)
-    //   +0  u8   ignored filler            (read cursor bumps past it; handler never reads it)
+    //   +0  u8   ignored filler            (read cursor bumps past it; production sends 0xFF)
     //   +1  u8   centreZoneZ low           ┐ Z reconstructs as lo + hi*0x100 → LE u16 (may exceed 255)
     //   +2  u8   centreZoneZ high          ┘
     //   +3  u8   magic == 0x85             (CMP / ADD -0x7b; abort if != 0x85)
     //   +4  u16  centreZoneX               BE (MOVZX word then ROL 8)
     //   +6  u8   cameraRotation            writeByteAdd: wire = (value + 0x80) & 0xFF
     //   +7  u8   ignored filler            (second skipped byte the §13 table omitted)
-    //   +8  u16  targetWorldId             BE; 0 for a normal non-instanced login
+    //   +8  u16  sceneRootId               BE; passed to the scene-root lookup when scene mode == 4
     //   +10 u32  packedCoordA              BE → DecodePackedCoord SW corner {minRegionX, minRegionZ}
     //   +14 u32  packedCoordB              BE → DecodePackedCoord NE corner {maxRegionX, maxRegionZ}
     //
@@ -60,14 +60,14 @@ internal fun Codec.registerRev948ServerCodecsRebuild() {
     // The VarShort length is rebuildPrefix.size + 18 (= 5119 + 18 = 5137 for Shape B world login).
     serverProt<RebuildNormalSimple>(opcode = 81, size = ProtSize.VarShort) { out ->
         out.writeFully(rebuildPrefix)
-        out.writeByte(0)                         // +0 ignored filler
+        out.writeByte(0xFF)                      // +0 ignored filler
         out.writeByte(zoneZ and 0xFF)            // +1 centreZoneZ low
         out.writeByte((zoneZ ushr 8) and 0xFF)   // +2 centreZoneZ high (LE u16 with +1)
         out.writeByte(0x85)                      // +3 magic
         out.writeShort(zoneX)                    // +4 centreZoneX (BE)
         out.writeByteAdd(cameraRotation)         // +6 cameraRotation (wire = value + 0x80)
         out.writeByte(0)                         // +7 ignored filler
-        out.writeShort(targetWorldId)            // +8 targetWorldId (BE)
+        out.writeShort(sceneRootId)              // +8 sceneRootId (BE)
         out.writeInt(packedCoordA)               // +10 SW-corner packed coord (BE)
         out.writeInt(packedCoordB)               // +14 NE-corner packed coord (BE)
     }
