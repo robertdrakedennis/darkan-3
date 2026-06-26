@@ -37,7 +37,7 @@ fun main() {
 
     // Register protocol codec and packet handlers
     register948()
-    Logger.log("Main", "Registered rev947 codec")
+    Logger.log("Main", "Registered rev948 codec")
     PacketHandlers.loadHandlersFromPackage("org.darkan.lobby.server.packet")
 
     Logger.log("Main", "Loading cache...")

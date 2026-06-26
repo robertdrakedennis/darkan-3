@@ -49,6 +49,7 @@ open class Session(
 
     @Volatile
     private var state: State = State.CONNECTED
+    private var stopReadLoopWithoutDisconnect = false
 
     fun onDisconnected(block: () -> Unit) {
         disconnect = block
@@ -124,17 +125,17 @@ open class Session(
     suspend fun readPackets(input: ByteReadChannel) {
         try {
             while (!disconnected) {
-                val cipher = isaacIn.nextInt()
-                val opcode = (input.readUByte() - cipher) and 0xff
+                val decodedOpcode = readOpcode(input)
+                val opcode = decodedOpcode.opcode
                 val clientProt = codec.clientProtsByOpcode[opcode]
                 if (clientProt == null) {
                     // No decoder registered for this opcode. Frame it from the stub
                     // size metadata so the stream stays in sync, deliver it as an
-                    // UnhandledClientProt, and continue. Only an opcode with no size
-                    // metadata at all is fatal.
+                    // UnhandledClientProt, and continue.
                     val info = codec.clientProtInfo[opcode]
                     if (info == null) {
-                        logError("Missing ClientProt with opcode $opcode")
+                        logMissingClientProt(input, decodedOpcode)
+                        stopReadLoopWithoutDisconnect = true
                         return
                     }
                     val skipSize = when (info.size) {
@@ -143,15 +144,32 @@ open class Session(
                         ProtSize.VarShort -> input.readUShort()
                     }
                     input.readPacket(skipSize)
+                    logTrace("C2S ${info.name} opcode=$opcode size=${info.size} payload=$skipSize ${decodedOpcode.describe()}")
                     readChannel.send(UnhandledClientProt(opcode, info.name, skipSize))
                     continue
                 }
-                val size = when (clientProt.size) {
-                    is ProtSize.Fixed -> clientProt.size.length
-                    ProtSize.VarByte -> input.readUByte()
-                    ProtSize.VarShort -> input.readUShort()
+                val size = try {
+                    when (clientProt.size) {
+                        is ProtSize.Fixed -> clientProt.size.length
+                        ProtSize.VarByte -> input.readUByte()
+                        ProtSize.VarShort -> input.readUShort()
+                    }
+                } catch (e: Exception) {
+                    if (isExpectedDisconnect(e)) {
+                        logTrace("Truncated ClientProt length: ${decodedOpcode.describe()} sizeKind=${clientProt.size} (${e::class.simpleName}: ${e.message})")
+                        return
+                    }
+                    throw e
                 }
-                val packet = input.readPacket(size)
+                val packet = try {
+                    input.readPacket(size)
+                } catch (e: Exception) {
+                    if (isExpectedDisconnect(e)) {
+                        logTrace("Truncated ClientProt payload: ${decodedOpcode.describe()} type=${clientProt.protClass.simpleName} expected=$size (${e::class.simpleName}: ${e.message})")
+                        return
+                    }
+                    throw e
+                }
 
                 val packetData = try {
                     clientProt.decoder?.invoke(packet, opcode)
@@ -168,6 +186,7 @@ open class Session(
                     logError("Failed to create packet instance for opcode $opcode")
                     continue
                 }
+                logTrace("C2S ${packetData::class.simpleName} opcode=$opcode size=${clientProt.size} payload=$size ${decodedOpcode.describe()}")
                 readChannel.send(packetData)
             }
         } catch (e: Exception) {
@@ -177,7 +196,7 @@ open class Session(
                 throw e
             }
         } finally {
-            if (!disconnected) {
+            if (!disconnected && !stopReadLoopWithoutDisconnect) {
                 disconnected = true
                 state = State.LOST_CONNECTION
                 disconnecting?.invoke()
@@ -242,9 +261,11 @@ open class Session(
                     if (packetLength != expectedLength) {
                         logWarn("Fixed packet size mismatch for ${serverProt::class.simpleName}: expected=$expectedLength actual=$packetLength opcode=${encoder.opcode}")
                     }
+                    logTrace("S2C ${serverProt::class.simpleName} opcode=${encoder.opcode} size=${encoder.size.length} payload=$packetLength")
                     writeOpcode(encoder.opcode, if (noIsaac) null else isaacOut)
                     write.writePacket(payload)
                 } else {
+                    logTrace("S2C ${serverProt::class.simpleName} opcode=${encoder.opcode} size=${encoder.size.length}")
                     writeOpcode(encoder.opcode, if (noIsaac) null else isaacOut)
                     encoder.encoder?.invoke(serverProt, write)
                 }
@@ -253,11 +274,15 @@ open class Session(
                 val payload = encodeToBuffer(serverProt, encoder)
                 val packetLength = payload.size.toInt()
 
-                if (encoder.size == ProtSize.VarByte && packetLength > 255)
-                    logWarn("Packet length exceeds VarByte maximum ($packetLength > 255)")
-                else if (encoder.size == ProtSize.VarShort && packetLength > 65535)
-                    logWarn("Packet length exceeds VarShort maximum ($packetLength > 65535)")
+                if (encoder.size == ProtSize.VarByte && packetLength > 255) {
+                    logWarn("Dropping ${serverProt::class.simpleName}: packet length exceeds VarByte maximum ($packetLength > 255)")
+                    return
+                } else if (encoder.size == ProtSize.VarShort && packetLength > 65535) {
+                    logWarn("Dropping ${serverProt::class.simpleName}: packet length exceeds VarShort maximum ($packetLength > 65535)")
+                    return
+                }
 
+                logTrace("S2C ${serverProt::class.simpleName} opcode=${encoder.opcode} size=${encoder.size} payload=$packetLength")
                 writeOpcode(encoder.opcode, if (noIsaac) null else isaacOut)
 
                 if (encoder.size == ProtSize.VarByte)
@@ -282,6 +307,45 @@ open class Session(
         encode.invoke(serverProt, channel)
         channel.flush()
         return payload
+    }
+
+    private data class DecodedOpcode(
+        val opcode: Int,
+        val wire: Int,
+        val cipher: Int,
+        val index: Int,
+    ) {
+        fun describe(): String =
+            "opcode=$opcode wire=0x${wire.hexByte()} cipher=0x${cipher.hexByte()} isaacIndex=$index"
+    }
+
+    private var inboundOpcodeIndex = 0
+
+    private suspend fun readOpcode(input: ByteReadChannel): DecodedOpcode {
+        // ClientProt opcodes are single-byte; the two-byte smart form is only for outbound ServerProt.
+        val wire = input.readUByte()
+        val cipher = isaacIn.nextInt()
+        inboundOpcodeIndex += 1
+        return DecodedOpcode(
+            opcode = (wire - cipher) and 0xff,
+            wire = wire,
+            cipher = cipher,
+            index = inboundOpcodeIndex,
+        )
+    }
+
+    /**
+     * Logs an unframable C2S opcode WITHOUT consuming any payload bytes.
+     *
+     * The caller stops the read loop but leaves the session write side open. Without size metadata
+     * there is no safe way to skip the payload; continuing would decode payload bytes as opcodes and
+     * dispatch garbage packets.
+     */
+    private fun logMissingClientProt(input: ByteReadChannel, decodedOpcode: DecodedOpcode) {
+        logError(
+            "Missing ClientProt ${decodedOpcode.describe()} " +
+                "available=${input.availableForRead} (C2S reads stopped; session write side kept open)"
+        )
     }
 
     private suspend fun writeOpcode(opcode: Int, cipher: Isaac?) {
@@ -315,3 +379,5 @@ open class Session(
         }
     }
 }
+
+private fun Int.hexByte(): String = "%02x".format(this and 0xff)

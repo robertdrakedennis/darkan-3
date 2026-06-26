@@ -34,6 +34,8 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object SocialGateway {
 
+    private val socialNamePattern = Regex("[A-Za-z0-9 _-]{1,12}")
+
     // --- Internal data types ---
 
     private data class Presence(
@@ -516,6 +518,10 @@ object SocialGateway {
         when (packet) {
             is FriendListAdd -> {
                 val from = Accounts.findByUsername(username) ?: return
+                if (!isPlausibleSocialName(packet.displayName)) {
+                    logTrace("SocialGateway: dropping invalid friend-add name from $username")
+                    return
+                }
                 val target = Accounts.findByDisplayName(packet.displayName)
                 if (target == null) {
                     sendToUser(username, GameMessage(ChatMessageType.FRIEND_NOTIFICATION, "Unable to find player '${packet.displayName}'."))
@@ -544,6 +550,10 @@ object SocialGateway {
 
             is FriendListDel -> {
                 val from = Accounts.findByUsername(username) ?: return
+                if (!isPlausibleSocialName(packet.displayName)) {
+                    logTrace("SocialGateway: dropping invalid friend-del name from $username")
+                    return
+                }
                 val target = Accounts.findByDisplayName(packet.displayName) ?: return
                 if (from.social.friends.remove(target.username) != null) {
                     Accounts.save(from)
@@ -553,6 +563,10 @@ object SocialGateway {
 
             is IgnoreListAdd -> {
                 val from = Accounts.findByUsername(username) ?: return
+                if (!isPlausibleSocialName(packet.displayName)) {
+                    logTrace("SocialGateway: dropping invalid ignore-add name from $username")
+                    return
+                }
                 val target = Accounts.findByDisplayName(packet.displayName)
                     ?: Accounts.findByUsername(packet.displayName.formatForProtocol())
                 if (target == null) {
@@ -570,10 +584,18 @@ object SocialGateway {
             }
 
             is MessagePrivateSend -> {
+                if (!isPlausibleSocialName(packet.toDisplayName)) {
+                    logTrace("SocialGateway: dropping invalid private-message target from $username")
+                    return
+                }
                 handlePrivateMessage(username, packet.toDisplayName, packet.message)
             }
 
             is ClanChannelKickUser -> {
+                if (!isPlausibleSocialName(packet.username)) {
+                    logTrace("SocialGateway: dropping invalid channel-kick target from $username")
+                    return
+                }
                 handleCcKick(username, packet)
             }
 
@@ -582,6 +604,8 @@ object SocialGateway {
             }
         }
     }
+
+    private fun isPlausibleSocialName(name: String): Boolean = socialNamePattern.matches(name.trim())
 
     // =====================================================================
     //  Private Messages

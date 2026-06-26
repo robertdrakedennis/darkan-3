@@ -50,36 +50,35 @@ value class ResetClientVarcache(val dummy: Int = 0) : ServerProt
 
 // --- Interfaces ---
 
-/** IF_OPENTOP (op 68, 6B) per A1 §1.1 — opens a top-level interface. */
+/** IF_OPENTOP — rev948 op 39, 6B. Opens a top-level interface. */
 data class IfOpenTop(val topLevelId: Int, val subId: Int = 0) : ServerProt
 
-/** IF_SETTOPLEVELINTERFACE (op 94, 19B) per A1 §1.2 — switches the active top-level interface. */
+/** IF_SETTOPLEVELINTERFACE — rev948 op 3, 19B. Switches the active top-level interface. */
 data class IfSetTopLevelInterface(val topLevelId: Int) : ServerProt
 
-/** IF_OPENSUB (op 17, 8B) per A1 §1.3 — opens a sub-interface inside a parent. */
+/** IF_OPENSUB — rev948 op 94, 8B. Opens a sub-interface inside a parent. */
 data class IfOpenSub(val subId: Int, val walkable: Int, val parentHash: Int) : ServerProt
 
-/** IF_SETPOSITION (op 8, 23B) per A1 §1.4 — sets a component's layer/position descriptor. */
+/** IF_SETPOSITION — rev948 op 82, 23B. Sets a component's layer/position descriptor. */
 data class IfSetPosition(val componentId: Int, val layer: Int, val position: Int) : ServerProt
 
-/** IF_CLOSESUB (op 33, 4B) per A1 §1.6 — closes a sub-interface by component hash. */
+/** IF_CLOSESUB — rev948 op 62, 4B. Closes a sub-interface by component hash. */
 data class IfCloseSub(val componentHash: Int) : ServerProt
 
 /**
- * IF_MOVESUB (op 189, 3B) per A1 §1.7. [mode] is a tri-state operator:
+ * IF_MOVESUB is not mapped in the rev948 codec. [mode] is a tri-state operator:
  * 0x71 = close all subs under top, 0x7F = mark subs active, anything else = mark inactive.
  */
 data class IfMoveSub(val topId: Int, val mode: Int) : ServerProt
 
 /**
- * IF_SETEVENTS (opcode 35, 12B fixed) — IF_SETEVENTS2 per A1 §1.8. Sets the event mask for
+ * IF_SETEVENTS — rev948 op 35, 12B fixed. Sets the event mask for
  * a range of slots on an interface component. Use [IFEvents] to build the settings bitfield.
- * The existing 12B encoder maps to A1's IF_SETEVENTS2 (op 35) layout.
  */
 data class IfSetEvents(val events: IFEvents) : ServerProt
 
 /**
- * IF_SETEVENTS1 (opcode 34, 10B fixed) per A1 §1.8. Distinct from IF_SETEVENTS2: this variant
+ * IF_SETEVENTS1 — rev948 op 97, 10B fixed. Distinct from IF_SETEVENTS: this variant
  * sends the events bitmask on the wire (vs IF_SETEVENTS2 hard-coding it to all-events).
  */
 data class IfSetEvents1(
@@ -89,10 +88,10 @@ data class IfSetEvents1(
     val startSlot: Int = -1,
 ) : ServerProt
 
-/** IF_SETHIDE (op 103, 5B) per A1 §1.9 — toggles a component's hidden state. */
+/** IF_SETHIDE — rev948 op 91, 5B. Toggles a component's hidden state. */
 data class IfSetHide(val componentHash: Int, val hide: Boolean) : ServerProt
 
-/** IF_SETANGLE (op 117, 32B) per A1 §1.10 — full angle/zoom/component packing. */
+/** IF_SETANGLE — rev948 op 4, 32B. Full angle/zoom/component packing. */
 data class IfSetAngle(
     val componentId: Int,
     val angle1: Int,
@@ -102,81 +101,90 @@ data class IfSetAngle(
     val packedAngle2: Int,
 ) : ServerProt
 
-/** IF_SET_HTTP_IMAGE (op 146, varByte) per A1 §1.11. Stub name was IF_SETGRAPHIC_ACTIVE. */
+/** IF_SET_HTTP_IMAGE — rev948 op 152, varByte. */
 data class IfSetHttpImage(val imageUrl: String) : ServerProt
 
 // --- Interface property setters (A1 §2.1, SetComponentProperty) ---
 
-/** IF_SETOBJECT_ACTIVE (op 16, 4B) per A1 §2.1. */
+/** IF_SETOBJECT_ACTIVE — rev948 op 101, 4B. */
 data class IfSetObjectActive(val componentHash: Int) : ServerProt
 
-/** IF_SETMODEL (op 74, 8B) per A1 §2.1. */
+/** IF_SETMODEL — rev948 op 102, 8B. */
 data class IfSetModel(val value: Int, val componentHash: Int) : ServerProt
 
-/** IF_SETANIM_ACTIVE (op 81, 4B) per A1 §2.1. */
+/** IF_SETANIM_ACTIVE — rev948 op 96, 4B. */
 data class IfSetAnimActive(val componentHash: Int) : ServerProt
 
-/** IF_SETNPCHEAD (op 98, 10B) per A1 §2.1. */
+/** IF_SETNPCHEAD — rev948 op 115, 10B. */
 data class IfSetNpcHead(val scale: Int, val componentHash: Int, val partA: Int, val partB: Int) : ServerProt
 
-/** IF_SETOBJECT (op 100, 10B) per A1 §2.1. */
+/** IF_SETOBJECT — rev948 op 84, 10B. */
 data class IfSetObject(val objectSlot: Int, val objectCount: Int, val componentHash: Int) : ServerProt
 
 /**
  * Unknown SetComponentProperty propType-3 packet (op 86 in 948 / op 106 in 947, 10B).
- * Wire shape: componentHash (int) + short + int. Canonical name UNKNOWN — this is NOT IF_SETANIM
- * (the canonical IF_SETANIM is op103, see [IfSetAnim]). Renamed from the misleading `IfSetAnim`
- * (binary-verified 2026-06-25; op86 = SetComponentProperty propType 3, distinct from op103 propType 5).
+ * Wire shape: componentHash (int, LE) + frame (short, BE) + animId (int, BE). Canonical name
+ * UNKNOWN — this is NOT IF_SETANIM (the canonical IF_SETANIM is op103, see [IfSetAnim]). Renamed
+ * from the misleading `IfSetAnim` (binary-verified 2026-06-25; op86 = SetComponentProperty
+ * propType 3, distinct from op103 propType 5). Bound at op86 by Rev948ServerCodecsInterface.
  */
 data class IfSetComponentProp3(val componentHash: Int, val frame: Int, val animId: Int) : ServerProt
 
-/** IF_SETCOLOUR (op 122, 8B) per A1 §2.1. */
+/** IF_SETCOLOUR — rev948 op 32, 8B. */
 data class IfSetColour(val colour24: Int, val componentHash: Int) : ServerProt
 
-/** IF_SETOBJECT_SMALL (op 141, 5B) per A1 §2.1. Value derived as `-2 - smallIdx` client-side. */
+/** IF_SETOBJECT_SMALL — rev948 op 180, 5B. Value derived as `-2 - smallIdx` client-side. */
 data class IfSetObjectSmall(val componentHash: Int, val smallIdx: Int) : ServerProt
 
-/** IF_SETANIM_SMALL (op 193, 5B) per A1 §2.1. Value derived as `-2 - smallIdx` client-side. */
+/** IF_SETANIM_SMALL — rev948 op 136, 5B. Value derived as `-2 - smallIdx` client-side. */
 data class IfSetAnimSmall(val smallIdx: Int, val componentHash: Int) : ServerProt
 
 // --- Interface direct-update setters (A1 §2.2, CreateOrFindUpdateEntry) ---
 
-/** IF_SETPLAYERHEAD_ACTIVE (op 14, 5B) per A1 §2.2. flag=1 if rawByte == 0x01. */
+/** IF_SETPLAYERHEAD_ACTIVE — rev948 op 8, 5B. flag=1 if rawByte == 0x01. */
 data class IfSetPlayerHeadActive(val flag: Int, val componentHash: Int) : ServerProt
 
-/** IF_SETRECOL (op 44, 6B) per A1 §2.2. RGB-555 expanded client-side to 24-bit. */
+/** IF_SETRECOL — rev948 op 99, 6B. RGB-555 expanded client-side to 24-bit. */
 data class IfSetRecol(val rgb555: Int, val componentHash: Int) : ServerProt
 
 /**
  * IF_SETGRAPHIC (op 30 in 948 / op 53 in 947, 8B). update-type 0xd. value = graphicId/spriteId.
  * Was misnamed `IfSet2DAngle`: the handler the Ghidra DB labeled IF_SET2DANGLE actually decodes as
- * the official IF_SETGRAPHIC (binary-verified 2026-06-25, handler @0x00193f10).
+ * the official IF_SETGRAPHIC (binary-verified 2026-06-25, handler @0x00193f10). Bound at op30 by
+ * Rev948ServerCodecsInterface.
  */
 data class IfSetGraphic(val graphicId: Int, val componentHash: Int) : ServerProt
 
-/** IF_SET_MODEL_FRAME (op 64, 8B) per A1 §2.2. */
+/**
+ * IF_SET2DANGLE — rev948 op 30, 8B. Retained alias of the op30 packet under its legacy name; the
+ * landed world HUD (`GameHud`) still emits this. NOTE: the rev948 codec binds [IfSetGraphic] (not
+ * this class) at op30, so emitting `IfSet2DAngle` currently has no registered encoder — see the
+ * migration note. Wire shape is identical (two ints): `angle` is the same field as `graphicId`.
+ */
+data class IfSet2DAngle(val angle: Int, val componentHash: Int) : ServerProt
+
+/** IF_SET_MODEL_FRAME — rev948 op 38, 8B. */
 data class IfSetModelFrame(val frame: Int, val componentHash: Int) : ServerProt
 
-/** IF_SETNPCMODEL (op 76, 10B) per A1 §2.2. npcId 0xFFFF means null. */
+/** IF_SETNPCMODEL — rev948 op 59, 10B. npcId 0xFFFF means null. */
 data class IfSetNpcModel(val componentHash: Int, val modelId: Int, val npcId: Int) : ServerProt
 
-/** IF_SETMODELORIGIN (op 88, 10B) per A1 §2.2. */
+/** IF_SETMODELORIGIN — rev948 op 68, 10B. */
 data class IfSetModelOrigin(val componentHash: Int, val x: Int, val y: Int, val z: Int) : ServerProt
 
 /**
  * IF_SETANIM (op 103 in 948 / op 92 in 947, 8B). update-type 5. value = animationId (seq id).
  * Was misnamed `IfSetGraphic`: the handler the Ghidra DB labeled IF_SETGRAPHIC actually decodes as
- * the official IF_SETANIM (binary-verified 2026-06-25, handler @0x00193fe0).
- *
- * This is the canonical IF_SETANIM. op86 (see [IfSetComponentProp3]) is a distinct
- * SetComponentProperty propType-3 packet, NOT IF_SETANIM (binary-verified 2026-06-25).
+ * the official IF_SETANIM (binary-verified 2026-06-25, handler @0x00193fe0). This is the canonical
+ * IF_SETANIM; op86 (see [IfSetComponentProp3]) is a distinct SetComponentProperty propType-3 packet.
+ * Bound at op103 by Rev948ServerCodecsInterface.
  */
 data class IfSetAnim(val animationId: Int, val componentHash: Int) : ServerProt
 
-/** IF_SETSPRITE (op 123, 8B) per A1 §2.2. */
+/** IF_SETSPRITE — rev948 op 14, 8B. */
 data class IfSetSprite(val componentHash: Int, val spriteValue: Int) : ServerProt
 
-/** IF_SETSCROLLSIZE (op 136, 9B) per A1 §2.2. */
+/** IF_SETSCROLLSIZE — rev948 op 158, 9B. */
 data class IfSetScrollSize(
     val scrollW: Int,
     val scrollH: Int,
@@ -184,13 +192,13 @@ data class IfSetScrollSize(
     val subSlot: Int,
 ) : ServerProt
 
-/** IF_SETNPCHEAD_ACTIVE (op 150, 5B) per A1 §2.2. flag=1 if rawByte == 0x7F. */
+/** IF_SETNPCHEAD_ACTIVE — rev948 op 206, 5B. flag=1 if rawByte == 0x7F. */
 data class IfSetNpcHeadActive(val flag: Int, val componentHash: Int) : ServerProt
 
-/** IF_SETMODEL_COORD (op 208, 14B) per A1 §2.2. */
+/** IF_SETMODEL_COORD — rev948 op 165, 14B. */
 data class IfSetModelCoord(val npcId: Int, val componentHash: Int, val part1: Int, val part2: Int) : ServerProt
 
-/** IF_SETSCROLLPOS (op 210, 9B) per A1 §2.2. */
+/** IF_SETSCROLLPOS — rev948 op 179, 9B. */
 data class IfSetScrollPos(
     val scrollY: Int,
     val componentHash: Int,
@@ -200,56 +208,253 @@ data class IfSetScrollPos(
 
 // --- Interface complex/direct-allocation setters (A1 §2.3) ---
 
-/** IF_SETPLAYERMODEL_OTHER (op 97, 25B) per A1 §2.3 — model from another player. Opaque payload until B4 unpacks. */
+/** IF_SETPLAYERMODEL_OTHER — rev948 op 70, 25B. Opaque payload until B4 unpacks. */
 data class IfSetPlayerModelOther(val payload: ByteArray) : ServerProt {
     override fun equals(other: Any?): Boolean = this === other ||
         (other is IfSetPlayerModelOther && payload.contentEquals(other.payload))
     override fun hashCode(): Int = payload.contentHashCode()
 }
 
-/** IF_SETPLAYERMODEL_SELF (op 107, 25B) per A1 §2.3 — local player's model. Opaque payload until B4. */
+/** IF_SETPLAYERMODEL_SELF — rev948 op 60, 25B. Opaque payload until B4. */
 data class IfSetPlayerModelSelf(val payload: ByteArray) : ServerProt {
     override fun equals(other: Any?): Boolean = this === other ||
         (other is IfSetPlayerModelSelf && payload.contentEquals(other.payload))
     override fun hashCode(): Int = payload.contentHashCode()
 }
 
-/** IF_SETPLAYERMODEL_SNAPSHOT (op 110, 29B) per A1 §2.3 — embeds a packed-coord snapshot. Opaque until B4. */
+/** IF_SETPLAYERMODEL_SNAPSHOT — rev948 op 118, 29B. Opaque until B4. */
 data class IfSetPlayerModelSnapshot(val payload: ByteArray) : ServerProt {
     override fun equals(other: Any?): Boolean = this === other ||
         (other is IfSetPlayerModelSnapshot && payload.contentEquals(other.payload))
     override fun hashCode(): Int = payload.contentHashCode()
 }
 
-/** IF_SUBSWAP (op 85, 8B) per A1 §2.3 — atomic close-A-then-open-B for sub-interface swap. */
+/** IF_SUBSWAP — rev948 op 40, 8B. Atomic close-A-then-open-B for sub-interface swap. */
 data class IfSubSwap(val componentA: Int, val componentB: Int) : ServerProt
 
 // --- Interface trigger / close variants (A1 §2.4) ---
 
-/** IF_TRIGGER_CLOSE (op 49, 0B) per A1 §2.4 — fires event 0x29 on current top-level. */
+/** IF_TRIGGER_CLOSE — rev948 op 123, 0B. Fires event 0x29 on current top-level. */
 @JvmInline
 value class IfTriggerClose(val dummy: Int = 0) : ServerProt
 
-/** IF_CLOSESUB_BY_ID (op 169, 2B) per A1 §2.4 — closes a sub by 16-bit id. */
+/** IF_CLOSESUB_BY_ID — rev948 op 148, 2B. Closes a sub by 16-bit id. */
 data class IfCloseSubById(val id: Int) : ServerProt
 
-/** IF_SETTEXT (op 2, varShort) per A1 §3 — sets the text content of a component. */
+/** IF_SETTEXT — rev948 op 122, varShort. Sets the text content of a component. */
 data class IfSetText(val componentHash: Int, val text: String) : ServerProt
 
-// NOTE: IF_OPENSUB_THUNK (op 186) intentionally not modelled — A1 §1.5 confirms this is a
-// debug-only DBFilter path, never registered server-side.
+// NOTE: IF_OPENSUB_THUNK is intentionally not modelled; the active rev948 codec does not emit it.
 
 // --- Misc ---
 
 @JvmInline
 value class SetReadyFlag(val dummy: Int = 0) : ServerProt
 
-/** CHANGE_LOBBY (opcode 30, varShort) — empty packet that triggers lobby transition on client. */
+/** CHANGE_LOBBY — rev948 op 49, varShort. Empty packet that triggers lobby transition on client. */
 @JvmInline
 value class ChangeLobby(val dummy: Int = 0) : ServerProt
 
 @JvmInline
 value class NoTimeout(val dummy: Int = 0) : ServerProt
+
+@JvmInline
+value class ResetEntityLists(val dummy: Int = 0) : ServerProt
+
+@JvmInline
+value class DestroyZoneData(val dummy: Int = 0) : ServerProt
+
+@JvmInline
+value class NoopVarA(val dummy: Int = 0) : ServerProt
+
+@JvmInline
+value class ClearPendingUpdates(val dummy: Int = 0) : ServerProt
+
+@JvmInline
+value class TriggerOnDialogAbort(val dummy: Int = 0) : ServerProt
+
+data class AntiCheatChallenge(val challengeA: Int, val challengeB: Int) : ServerProt
+
+data class MinimapState(val first: Int, val second: Int) : ServerProt
+
+data class EntityAnimAtTile(val value: Int, val target: Int, val cycleOffset: Int) : ServerProt
+
+data class SceneFlag(val value: Int) : ServerProt
+
+@JvmInline
+value class CamSmoothReset(val dummy: Int = 0) : ServerProt
+
+data class SetMultiwayState(val state: Int) : ServerProt
+
+data class MinimapFlagA(val value: Int) : ServerProt
+
+data class MinimapFlagB(val value: Int) : ServerProt
+
+data class MidiSong(val payload: ByteArray) : ServerProt {
+    init {
+        require(payload.size == 5) { "MidiSong payload must be 5 bytes" }
+    }
+
+    override fun equals(other: Any?): Boolean = this === other ||
+        (other is MidiSong && payload.contentEquals(other.payload))
+    override fun hashCode(): Int = payload.contentHashCode()
+}
+
+data class SetNpcOp(val text: String? = null, val cursor: Int = -1) : ServerProt
+
+data class SetPlayerOp2(val value: Int) : ServerProt
+
+data class SetPlayerOp3(val value: Int) : ServerProt
+
+data class PlayerInfoDecode(val slot: Int, val mode: Int = 0) : ServerProt {
+    init {
+        require(slot in 0..7) { "player info decode slot out of range: $slot" }
+        require(mode == 0) { "player info decode mode $mode is not modelled yet" }
+    }
+}
+
+data class CutsceneData(
+    val group: Int,
+    val slot: Int,
+    val mode: Int,
+    val extendedMode: Int,
+    val shape: Int,
+    val flags: Int,
+    val id: Int,
+    val primaryLong: Long,
+    val primaryInt: Int,
+    val secondaryInt: Int,
+    val secondaryLong: Long,
+    val skipLength: Int,
+) : ServerProt
+
+data class CamUpdate(
+    val byteA0: Boolean = false,
+    val modeA8: Int? = null,
+    val modeC0: Int? = null,
+    val extended: CamUpdateExtended? = null,
+) : ServerProt {
+    init {
+        require(modeA8 == null || modeA8 in 0..0xFF) { "modeA8 out of range: $modeA8" }
+        require(modeC0 == null || modeC0 in 0..0xFF) { "modeC0 out of range: $modeC0" }
+    }
+
+    companion object {
+        fun firstLight(): CamUpdate =
+            CamUpdate(
+                byteA0 = true,
+                extended = CamUpdateExtended(
+                    vector138 = CamVector3(100f, 100f, 100f),
+                    vector150 = CamVector3(100f, 100f, 100f),
+                    vector168 = CamVector3(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+                    vector180 = CamVector3(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+                    pair1e8 = CamFloatPair(50f, 10000f),
+                    pair1dc = CamFloatPair(1.5707964f, 1.5707964f),
+                    byteA4 = 0,
+                    ignored80 = 0x00000500,
+                    flagsFcFd = CamBooleanPair(first = true, second = true),
+                    scriptedCommandCount = 0,
+                    pair118 = CamUShortFloat(0, 1f),
+                    byte100 = 1,
+                    envelope198 = CamEnvelope(
+                        first = CamVector3(1f, 1f, 1f),
+                        second = CamVector3(1f, 1f, 1f),
+                        firstScalar = 1.1f,
+                        secondScalar = 1.1f,
+                    ),
+                    scalar108 = 0.05f,
+                    scalar110 = 0.05f,
+                ),
+            )
+    }
+}
+
+data class CamVector3(val x: Float, val y: Float, val z: Float)
+
+data class CamFloatPair(val first: Float, val second: Float)
+
+data class CamBooleanPair(val first: Boolean, val second: Boolean)
+
+data class CamUShortFloat(val id: Int, val value: Float) {
+    init {
+        require(id in 0..0xFFFF) { "camera ushort out of range: $id" }
+    }
+}
+
+data class CamEnvelope(
+    val first: CamVector3,
+    val second: CamVector3,
+    val firstScalar: Float,
+    val secondScalar: Float,
+)
+
+data class CamUpdateExtended(
+    val vector138: CamVector3? = null,
+    val vector150: CamVector3? = null,
+    val vector168: CamVector3? = null,
+    val vector180: CamVector3? = null,
+    val pair1e8: CamFloatPair? = null,
+    val pair1dc: CamFloatPair? = null,
+    val byteA4: Int? = null,
+    val ignored80: Int? = null,
+    val flagsFcFd: CamBooleanPair? = null,
+    val scriptedCommandCount: Int? = null,
+    val pair118: CamUShortFloat? = null,
+    val byte100: Int? = null,
+    val envelope198: CamEnvelope? = null,
+    val scalar108: Float? = null,
+    val scalar110: Float? = null,
+) {
+    init {
+        require(byteA4 == null || byteA4 in 0..0xFF) { "byteA4 out of range: $byteA4" }
+        require(scriptedCommandCount == null || scriptedCommandCount == 0) {
+            "scripted camera commands are not modelled yet"
+        }
+        require(byte100 == null || byte100 in 0..0xFF) { "byte100 out of range: $byte100" }
+    }
+}
+
+data class UpdateIgnoreListRaw(
+    val mask: Long = 0,
+    val encodedFields: ByteArray = byteArrayOf(),
+    val entryId: Int = 0,
+) : ServerProt {
+    override fun equals(other: Any?): Boolean = this === other ||
+        (other is UpdateIgnoreListRaw &&
+            mask == other.mask &&
+            encodedFields.contentEquals(other.encodedFields) &&
+            entryId == other.entryId)
+
+    override fun hashCode(): Int = 31 * (31 * mask.hashCode() + encodedFields.contentHashCode()) + entryId
+}
+
+data class NpcInfoThunk(
+    val payloadKind: PayloadKind = PayloadKind.ResetWorldEntityNpcs,
+    val payload: ByteArray = byteArrayOf(),
+) : ServerProt {
+    init {
+        require(payloadKind != PayloadKind.ResetWorldEntityNpcs || payload.isEmpty()) {
+            "ResetWorldEntityNpcs must not carry payload bytes"
+        }
+    }
+
+    override fun equals(other: Any?): Boolean = this === other ||
+        (other is NpcInfoThunk && payloadKind == other.payloadKind && payload.contentEquals(other.payload))
+    override fun hashCode(): Int = 31 * payloadKind.hashCode() + payload.contentHashCode()
+
+    enum class PayloadKind {
+        ResetWorldEntityNpcs,
+        RawWorldEntityPayload,
+    }
+}
+
+data class InventoryEntry(val itemId: Int, val quantity: Int, val metadata: Int = 0)
+
+data class UpdateInvFull(
+    val inventoryId: Int,
+    val flags: Int = 0,
+    val entries: List<InventoryEntry> = emptyList(),
+) : ServerProt
 
 data class UpdateRunenergy(val energy: Int) : ServerProt
 
@@ -268,10 +473,9 @@ data class UpdateIgnoreList(val ignores: List<IgnoreEntry>) : ServerProt {
 }
 
 /**
- * UPDATE_FRIENDLIST (opcode 102, varShort) -- sends friend list entries.
+ * UPDATE_FRIENDLIST — rev948 op 26, varShort. Sends friend list entries.
  * Each entry has display name, world, rank, flags, notes.
  * Fields worldName, platform, worldFlags only present when worldId > 0.
- * RE-verified from rs2client rev 947 handler at 0x00242840.
  */
 @Serializable
 data class FriendStatus(val updates: List<FriendStatusUpdate>) : ServerProt {
@@ -626,7 +830,7 @@ data class MessageQuickChatClanChannel(
 // --- Client Scripts ---
 
 /**
- * RUNCLIENTSCRIPT (opcode 121, varShort) -- invokes a CS2 script on the client.
+ * RUNCLIENTSCRIPT — rev948 op 110, varShort. Invokes a CS2 script on the client.
  *
  * Wire format: type descriptor (RS string) + args (in REVERSED type order) + script ID (4B BE).
  * The type descriptor is a string of chars: 'i' = int, 's' = string, 'l' = long.
@@ -676,15 +880,15 @@ data class WorldLoginDetails(
 
 // --- World init ---
 
-/** HASHED_WORLD_TOKEN (opcode 6, varByte) — session nonce for the world connection. */
+/** HASHED_WORLD_TOKEN — revision-dependent world session nonce packet. */
 data class HashedWorldToken(val token: String) : ServerProt
 
 /**
- * SET_WORLD_TARGET (opcode 187, varByte) — tells the client the hostname/port of the next lobby
+ * SET_WORLD_TARGET — rev948 op 212, varByte. Tells the client the hostname/port of the next lobby
  * target. Only populates the LOBBY login slot in WorldSwitcher — does NOT trigger a world transfer.
- * Use [SwitchWorld] for lobby→world transfers.
+ * Cold-lobby Play Now uses the world-target tail in the lobby login response, not this packet.
  *
- * Wire format (verified against 947-3 handler at 0x00222390):
+ * Wire format:
  *   string hostname (CP1252 + null) + ushort worldId + ushort port1 + ushort port2 (all BE).
  */
 data class SetWorldTarget(
@@ -695,14 +899,13 @@ data class SetWorldTarget(
 ) : ServerProt
 
 /**
- * SWITCH_WORLD (opcode 179, varByte) — triggers the lobby→world transfer on the client.
+ * SWITCH_WORLD — rev948 op 213, varByte. Explicit world-switch path, not cold-lobby Play Now.
  *
- * The client handler (verified in 947-3 at 0x001c1bd5 — previously mislabeled `FRIENDCHAT_JOIN`)
- * stores the world target in `WorldSwitcher`, sets MainState to 0x25, which fires the login state
- * machine — the client then opens a TCP connection to hostname:port1 for world login.
+ * The client handler stores the world target in `WorldSwitcher`, sets MainState to 0x25, which fires
+ * the login state machine — the client then opens a TCP connection to hostname:port1 for world login.
  *
- * Wire format:
- *   string hostname (CP1252 + null) + ushort worldId + ushort port1 + ushort port2 + ubyte pendingFlag (all BE).
+ * Rev948 wire format is worldId BE u16, hostname (CP1252 + null), portA BE u16,
+ * portB BE u16, reconnectFlag u8. worldId is first, unlike [SetWorldTarget].
  */
 data class SwitchWorld(
     val hostname: String,
@@ -712,55 +915,167 @@ data class SwitchWorld(
     val pendingFlag: Int = 0,
 ) : ServerProt
 
-/** JCOINS_UPDATE (opcode 59, 4B) — RuneCoins balance display. Value is BE int. */
+/** JCOINS_UPDATE — rev948 op 74, 4B. RuneCoins balance display. Value is BE int. */
 data class JcoinsUpdate(val balance: Int) : ServerProt
 
 // === Rebuild packets (per A2) ===
 
 /**
- * REBUILD_NORMAL — the simple single-scene login rebuild (947-3 op 90; **948 op 81**).
+ * REBUILD_NORMAL_SIMPLE — the simple-form (non-instanced) world-login scene build
+ * (`ClientState::REBUILD_NORMAL_SIMPLE`). Allocates + installs the BuildArea; without it the
+ * client has no scene and stays on the loading screen. Rev948 op 81, varShort, magic 0x85,
+ * with a production prefix plus 18-byte tail. The handler parses this tail after packet position
+ * has advanced through the prefix:
+ *      +0  u8   ignored filler (production sends 0xFF)
+ *      +1  u8   centreZoneZ low
+ *      +2  u8   centreZoneZ high            (Z is LE u16: lo then hi; may exceed 255)
+ *      +3  u8   magic = 0x85
+ *      +4  u16  centreZoneX (BE)
+ *      +6  u8   cameraRotation, writeByteAdd (wire = (value + 0x80) & 0xFF)
+ *      +7  u8   ignored filler (send 0)
+ *      +8  u16  sceneRootId (BE)            scene root selector consumed before BuildArea install
+ *      +10 u32  packedCoordA (BE)           build-area SW corner
+ *      +14 u32  packedCoordB (BE)           build-area NE corner
  *
- * 948-5 wire format — FIXED 18-byte body (varShort framed), binary-confirmed against handler
- * `jag::packethandlers::ClientState::REBUILD_NORMAL @ 0x001daa70`:
- *
- * ```
- *  [0]      u8   reserved0   = 0          (read, discarded by client)
- *  [1..2]   u16  playerCoordX  LITTLE-endian
- *  [3]      u8   magic       = 0x85       (MANDATORY — handler no-ops unless body[3]==0x85)
- *  [4..5]   u16  playerCoordY  BIG-endian
- *  [6]      u8   cameraAngle              (client stores (wireByte + 0x80) & 0xff)
- *  [7]      u8   reserved7   = 0          (read, discarded)
- *  [8..9]   u16  worldAreaTypeId  BIG-endian
- *  [10..13] u32  srcPackedCoord1  BIG-endian  (BuildArea::DecodePackedCoord)
- *  [14..17] u32  srcPackedCoord2  BIG-endian  (BuildArea::DecodePackedCoord)
- * ```
- *
- * Carries NO XTEA keys and NO map-square payload: the client loads map/loc/XTEA data for the
- * scene from the JS5 cache. Packed coords use `(plane << 28) | (y << 14) | x` (tile units;
- * 0xFFFFFFFF = unset). `playerCoordX/Y` are CHUNK coordinates (the handler computes the local
- * scene focus as `(val - sceneBaseChunks) * 8`). `worldAreaTypeId` is only consulted when the
- * world-entity build manager is active (instanced regions); for a plain overworld build it is
- * ignored and the default world area is used (see WorldServer caller + Rev948 codec notes).
+ * `packedCoordA/B` use the BuildArea `DecodePackedCoord` packing (`BuildArea::DecodePackedCoord`
+ * @ 0x006d4320): `word = (plane << 28) | (hi14 << 14) | lo14`, two 14-bit fields + 2-bit plane.
+ * Per `docs/protocol/packed-coord-buildarea-948.md` (948-5-verified), the handler discards plane
+ * and passes both 14-bit fields `>> 6` to the scene builder as **map-square (region) corners**:
+ *   - `packedCoordA` = the **SW / origin corner** {minRegionX = hi14>>6, minRegionZ = lo14>>6}
+ *   - `packedCoordB` = the **NE / far corner**  {maxRegionX = hi14>>6, maxRegionZ = lo14>>6}
+ * `hi14` is the X-**tile**, `lo14` the Z-**tile**; the client divides each by 64 (`>>6`) to get
+ * the region. The two words are two corners, NOT origin+span, and NOT `zone<<6` (the prior broken
+ * model overflowed 14 bits and produced inverted bounds → empty grid → black screen). Build each
+ * word from a region corner with [packRegionCoord], or use the world `BuildArea` service.
  */
 data class RebuildNormalSimple(
-    val playerCoordX: Int,
-    val playerCoordY: Int,
-    val cameraAngle: Int,
-    val worldAreaTypeId: Int,
-    val srcPackedCoord1: Int,
-    val srcPackedCoord2: Int,
-) : ServerProt
+    /** Centre zone X (8-tile units). Rev948: +4 BE u16. */
+    val zoneX: Int,
+    /** Centre zone Z (8-tile units). Rev948: +1/+2 LE u16. */
+    val zoneZ: Int,
+    val packedCoordA: Int,
+    val packedCoordB: Int,
+    /** 948 camera rotation byte (written +0x80). Default 0. */
+    val cameraRotation: Int = 0,
+    /** 948 scene root selector (+8 BE u16). Production first-light uses 474. */
+    val sceneRootId: Int = 0,
+    /** Legacy encoder field. Ignored by the rev948 encoder. */
+    val forceRefresh: Boolean = true,
+    /** Legacy encoder field. Ignored by the rev948 encoder. */
+    val regionLow: Int = 0,
+    /** Rev948 prefix before the 18-byte parser tail. */
+    val rebuildPrefix: ByteArray = ByteArray(0),
+) : ServerProt {
+    init {
+        require(rebuildPrefix.size <= 65517) { "Rebuild prefix is too large for VarShort framing" }
+    }
+
+    override fun equals(other: Any?): Boolean = this === other ||
+        (other is RebuildNormalSimple &&
+            zoneX == other.zoneX &&
+            zoneZ == other.zoneZ &&
+            packedCoordA == other.packedCoordA &&
+            packedCoordB == other.packedCoordB &&
+            cameraRotation == other.cameraRotation &&
+            sceneRootId == other.sceneRootId &&
+            forceRefresh == other.forceRefresh &&
+            regionLow == other.regionLow &&
+            rebuildPrefix.contentEquals(other.rebuildPrefix))
+
+    override fun hashCode(): Int {
+        var result = zoneX
+        result = 31 * result + zoneZ
+        result = 31 * result + packedCoordA
+        result = 31 * result + packedCoordB
+        result = 31 * result + cameraRotation
+        result = 31 * result + sceneRootId
+        result = 31 * result + forceRefresh.hashCode()
+        result = 31 * result + regionLow
+        result = 31 * result + rebuildPrefix.contentHashCode()
+        return result
+    }
+
+    companion object {
+        /**
+         * Builds a `DecodePackedCoord` word from a **map-square (region) corner**, the inverse of
+         * `BuildArea::DecodePackedCoord @0x006d4320`.
+         *
+         * The client recovers a region by `field >> 6`, so each 14-bit field must hold the
+         * **tile-aligned** value `region << 6` (`hi14` = X-tile, `lo14` = Z-tile). The low 6 bits
+         * are ignored by the build path, so we emit the clean `region << 6` form. plane occupies
+         * bits 28-29. Verified against production (`docs/protocol/packed-coord-buildarea-948.md`
+         * §5.3): `packRegionCoord(26, 37) = 0x01a00940`.
+         *
+         * Callers should prefer the world `BuildArea` service (`BuildArea.packedCoordA/B`), which
+         * also enforces non-inverted bounds; this helper is the low-level encode used by the
+         * service and by tests.
+         *
+         * @param regionX map-square X — recovered as `((word >> 14) & 0x3FFF) >> 6`.
+         * @param regionZ map-square Z — recovered as `(word & 0x3FFF) >> 6`.
+         */
+        fun packRegionCoord(regionX: Int, regionZ: Int, plane: Int = 0): Int =
+            ((plane and 0x3) shl 28) or
+                (((regionX shl 6) and 0x3FFF) shl 14) or
+                ((regionZ shl 6) and 0x3FFF)
+    }
+}
+
+data class RebuildRegion(val scenes: List<RebuildRegionScene>) : ServerProt {
+    init {
+        require(scenes.size in 0..0xFF) { "rebuild region scene count out of range: ${scenes.size}" }
+    }
+
+    companion object {
+        fun firstLight(): RebuildRegion =
+            RebuildRegion(
+                listOf(
+                    RebuildRegionScene(sceneId = 4, secondaryIds = listOf(1)),
+                    RebuildRegionScene(
+                        sceneId = 1,
+                        primaryIds = listOf(0),
+                        secondaryIds = listOf(1, 2, 4),
+                        primaryMetadata = listOf(0),
+                        matrix = listOf(listOf(0, 0, 0)),
+                    ),
+                    RebuildRegionScene(sceneId = 2, secondaryIds = listOf(22, 15, 17, 11)),
+                    RebuildRegionScene(sceneId = 3, secondaryIds = listOf(36, 31, 33, 35)),
+                ),
+            )
+    }
+}
+
+data class RebuildRegionScene(
+    val sceneId: Int,
+    val primaryIds: List<Int> = emptyList(),
+    val secondaryIds: List<Int> = emptyList(),
+    val primaryMetadata: List<Int> = emptyList(),
+    val matrix: List<List<Int?>> = emptyList(),
+) {
+    init {
+        require(primaryIds.size in 0..0xFF) { "primary id count out of range: ${primaryIds.size}" }
+        require(secondaryIds.size in 0..0xFF) { "secondary id count out of range: ${secondaryIds.size}" }
+        require(primaryMetadata.size == primaryIds.size) {
+            "primary metadata count ${primaryMetadata.size} does not match primary id count ${primaryIds.size}"
+        }
+        require(matrix.size == primaryIds.size) {
+            "matrix row count ${matrix.size} does not match primary id count ${primaryIds.size}"
+        }
+        require(primaryMetadata.all { it in -128..127 }) { "primary metadata must fit signed byte" }
+        require(matrix.all { it.size == secondaryIds.size }) {
+            "matrix column count must match secondary id count ${secondaryIds.size}"
+        }
+    }
+}
 
 /**
- * Multi-scene grid rebuild for INSTANCED regions (947-3 op172; 948 op199) per A2 §2. Field
- * structure (per-scene seed + primary/secondary descriptor lists + per-cell XTEA grid) is heavy;
- * modelled as opaque payload until a downstream consumer needs structured access. B4 will define
- * the scene record API when an instanced-region flow is wired up.
+ * Multi-scene grid rebuild for INSTANCED regions (rev947 op172). Field structure (per-scene
+ * seed + primary/secondary descriptor lists + per-cell XTEA grid) is heavy; modelled as an
+ * opaque payload until a downstream consumer needs structured access.
  *
- * NAMING (2026-06-25): renamed from `RebuildRegion` to avoid a display-name collision with the
- * canonical op83 REBUILD_REGION. The 948-5 binary (jag::ServerProt::RegisterAll + handler
- * ClientState::REBUILD_NORMAL @0x001daa70, 0x7B/0x85 magic) confirms op199 is the multi-scene
- * REBUILD_NORMAL form, distinct from op83's REBUILD_REGION_ALT (bit-packed coords @0x001df100).
+ * This is distinct from the canonical [RebuildRegion] (rev948 op199, structured scene list). The
+ * multi-revision monorepo keeps both: rev947's op172 codec emits the opaque grid via this class,
+ * while rev948's op199 codec emits a structured scene list via [RebuildRegion]. The two were
+ * separated to avoid a display-name collision — see ServerProt.kt history (2026-06-25).
  */
 data class RebuildNormalMultiScene(val payload: ByteArray) : ServerProt {
     override fun equals(other: Any?): Boolean = this === other ||
@@ -769,7 +1084,7 @@ data class RebuildNormalMultiScene(val payload: ByteArray) : ServerProt {
 }
 
 /**
- * REBUILD_WORLDENTITY — opcode 188, varShort — per A2 §4. Triple-nested (level / regionX /
+ * REBUILD_WORLDENTITY — rev948 op 186, varShort. Triple-nested (level / regionX /
  * regionY) -1-terminated XTEA stream. Opaque payload until B4 defines a structured API.
  */
 data class RebuildWorldEntity(val payload: ByteArray) : ServerProt {
@@ -780,16 +1095,15 @@ data class RebuildWorldEntity(val payload: ByteArray) : ServerProt {
 
 // === Zone update packets (per A3) ===
 
-/** UPDATE_ZONE_FULL_FOLLOWS — opcode 18, 3B — per A3 §2. Sets zone globals + scene-clear. */
+/** UPDATE_ZONE_FULL_FOLLOWS — rev948 op 78, 3B. Sets zone globals + scene-clear. */
 data class UpdateZoneFullFollowsV2(val level: Int, val zoneX: Int, val zoneY: Int) : ServerProt
 
-/** UPDATE_ZONE_PARTIAL_FOLLOWS — opcode 57, 3B — per A3 §2. Sets zone globals only. */
+/** UPDATE_ZONE_PARTIAL_FOLLOWS — rev948 op 41, 3B. Sets zone globals only. */
 data class UpdateZonePartialFollows(val level: Int, val zoneX: Int, val zoneY: Int) : ServerProt
 
 /**
- * UPDATE_ZONE_PARTIAL_ENCLOSED — opcode 126, varShort — per A3 §2. Per A3 §1, in 947-3 only
- * sub-op 1 (LOC_ANIM) is bound; the server SHOULD prefer the standalone main-table opcodes
- * for everything else. Carries a header + an embedded list of sub-packets.
+ * UPDATE_ZONE_PARTIAL_ENCLOSED — rev948 op 76, varShort. Carries a header plus embedded
+ * sub-packets; prefer standalone main-table zone opcodes when possible.
  */
 data class UpdateZonePartialEnclosed(
     val level: Int,
@@ -798,18 +1112,19 @@ data class UpdateZonePartialEnclosed(
     val subPackets: List<ServerProt>,
 ) : ServerProt
 
-/** LOC_ADD — op 79, varByte — per A3 §3.1. Adds a location at a zone-relative tile. */
+/** LOC_ADD — rev948 op 90, varByte. Adds a location at a zone-relative tile. */
 data class LocAdd(
     val packedCoord: Int,
     val locId: Int,
     val shapeFlags: Int,
+    val extra: Int? = null,
 ) : ServerProt
 
-/** LOC_DEL — op 37, 2B — per A3 §3.2. Removes a location by shape+rotation at a tile. */
+/** LOC_DEL — rev948 op 16, 2B. Removes a location by shape+rotation at a tile. */
 data class LocDel(val shapeFlags: Int, val packedCoord: Int) : ServerProt
 
 /**
- * LOC_CUSTOMISE — op 41, varByte — per A3 §3.3. Header (4B template + packed coord + shape +
+ * LOC_CUSTOMISE — rev948 op 50, varByte. Header (4B template + packed coord + shape +
  * flags) + optional (model list, recolor src list, recolor dst list). Opaque payload until B4.
  */
 data class LocCustomise(val payload: ByteArray) : ServerProt {
@@ -818,7 +1133,7 @@ data class LocCustomise(val payload: ByteArray) : ServerProt {
     override fun hashCode(): Int = payload.contentHashCode()
 }
 
-/** LOC_PREFETCH — op 51, 7B — per A3 §3.4. Pre-load a future location. */
+/** LOC_PREFETCH — rev948 op 6, 7B. Pre-load a future location. */
 data class LocPrefetch(
     val visTime: Int,
     val packedCoord: Int,
@@ -826,7 +1141,7 @@ data class LocPrefetch(
     val locId: Int,
 ) : ServerProt
 
-/** LOC_ANIM_SPECIFIC — op 56, 10B — per A3 §3.6. Like LOC_ANIM with constant flag (no per-packet flag byte). */
+/** LOC_ANIM_SPECIFIC — rev948 op 21, 10B. Like LOC_ANIM with constant flag. */
 data class LocAnimSpecific(
     val packedCoord: Int,
     val animId: Int,
@@ -836,22 +1151,31 @@ data class LocAnimSpecific(
     val speed: Int,
 ) : ServerProt
 
-/** LOC_MERGE — op 197, 5B — per A3 §3.7. Merge a location's model with another entity. */
-data class LocMerge(val entityServerIndex: Int, val packedCoordAndShape: Int) : ServerProt
-
-/** OBJ_ADD — op 38, 5B — per A3 §3.8. Add a ground item to a zone tile. */
-data class ObjAdd(
-    val objIdHi: Int,
-    val objIdLo: Int,
-    val countHi: Int,
-    val countLo: Int,
+/** LOC_ANIM — rev948 enclosed zone sub-op 13, 11B. */
+data class LocAnim(
     val packedCoord: Int,
+    val animId: Int,
+    val shapeFlags: Int,
+    val unknown1: Int,
+    val delay: Int,
+    val speed: Int,
+    val mode: Int,
 ) : ServerProt
 
-/** OBJ_DEL — op 42, 3B — per A3 §3.9. Remove a ground item from a zone tile. */
+/** LOC_MERGE — rev948 op 170, 5B. Merge a location's model with another entity. */
+data class LocMerge(val entityServerIndex: Int, val packedCoordAndShape: Int) : ServerProt
+
+/** OBJ_ADD — rev948 op 46, 5B. Add a ground item to a zone tile. */
+data class ObjAdd(
+    val packedCoord: Int,
+    val objId: Int,
+    val count: Int,
+) : ServerProt
+
+/** OBJ_DEL — rev948 op 107, 3B. Remove a ground item from a zone tile. */
 data class ObjDel(val packedCoord: Int, val objIdLo: Int, val objIdHi: Int) : ServerProt
 
-/** OBJ_COUNT — op 60, 7B — per A3 §3.10. Update a ground item's stack count. */
+/** OBJ_COUNT — rev948 op 125, 7B. Update a ground item's stack count. */
 data class ObjCount(
     val playerIndex: Int,
     val objIdLo: Int,
@@ -860,7 +1184,7 @@ data class ObjCount(
     val count: Int,
 ) : ServerProt
 
-/** OBJ_REVEAL — op 20, 7B — per A3 §3.11. Reveal a ground item's true count to the viewer. */
+/** OBJ_REVEAL — rev948 op 71, 7B. Reveal a ground item's true count to the viewer. */
 data class ObjReveal(
     val packedCoord: Int,
     val objId: Int,
@@ -868,7 +1192,7 @@ data class ObjReveal(
     val newCount: Int,
 ) : ServerProt
 
-/** MAP_ANIM — op 62, 11B — per A3 §3.12. Place/remove a spot animation at a zone tile. */
+/** MAP_ANIM — rev948 op 113, 11B. Place/remove a spot animation at a zone tile. */
 data class MapAnim(
     val packedCoord: Int,
     val entityIdLow: Int,
@@ -877,7 +1201,7 @@ data class MapAnim(
     val angleHeight: Int,
 ) : ServerProt
 
-/** MAP_ANIM_SPECIFIC — op 145, 14B — per A3 §3.13. Like MAP_ANIM with fine sub-tile offsets. */
+/** MAP_ANIM_SPECIFIC — rev948 op 183, 14B. Like MAP_ANIM with fine sub-tile offsets. */
 data class MapAnimSpecific(
     val packedCoord: Int,
     val entityIdLow: Int,
@@ -888,35 +1212,35 @@ data class MapAnimSpecific(
     val fineOffset: Int,
 ) : ServerProt
 
-/** MAP_PROJANIM — op 47, 20B — per A3 §3.14. Spawn a projectile animation between zone tiles. */
+/** MAP_PROJANIM — rev948 op 65, 20B. Spawn a projectile animation between zone tiles. */
 data class MapProjAnim(val payload: ByteArray) : ServerProt {
     override fun equals(other: Any?): Boolean = this === other ||
         (other is MapProjAnim && payload.contentEquals(other.payload))
     override fun hashCode(): Int = payload.contentHashCode()
 }
 
-/** MAP_PROJANIM_HALT — op 199, 28B — per A3 §3.15. Projectile with fine src/dst offsets. */
+/** MAP_PROJANIM_HALT — rev948 op 164, 28B. Projectile with fine src/dst offsets. */
 data class MapProjAnimHalt(val payload: ByteArray) : ServerProt {
     override fun equals(other: Any?): Boolean = this === other ||
         (other is MapProjAnimHalt && payload.contentEquals(other.payload))
     override fun hashCode(): Int = payload.contentHashCode()
 }
 
-/** PROJANIM_SPECIFIC — op 196, 21B — per A3 §3.16. Projectile w/ double-resolution coords. */
+/** PROJANIM_SPECIFIC — rev948 op 151, 21B. Projectile with double-resolution coords. */
 data class ProjAnimSpecific(val payload: ByteArray) : ServerProt {
     override fun equals(other: Any?): Boolean = this === other ||
         (other is ProjAnimSpecific && payload.contentEquals(other.payload))
     override fun hashCode(): Int = payload.contentHashCode()
 }
 
-/** PROJANIM_SPECIFIC_HALT — op 192, 29B — per A3 §3.17. Combines halt + double-res. */
+/** PROJANIM_SPECIFIC_HALT — rev948 op 177, 29B. Combines halt plus double-res. */
 data class ProjAnimSpecificHalt(val payload: ByteArray) : ServerProt {
     override fun equals(other: Any?): Boolean = this === other ||
         (other is ProjAnimSpecificHalt && payload.contentEquals(other.payload))
     override fun hashCode(): Int = payload.contentHashCode()
 }
 
-/** SOUND_AREA — op 167, varByte — per A3 §3.18. Play an area sound effect at a zone tile. */
+/** SOUND_AREA — rev948 op 168, varByte. Play an area sound effect at a zone tile. */
 data class SoundArea(
     val packedCoord: Int,
     val soundId: Int,
@@ -925,13 +1249,10 @@ data class SoundArea(
     val paramB: Int,
 ) : ServerProt
 
-// NOTE: LOC_ANIM has no standalone main-table opcode in 947-3 (sub-op 1 only) per A3 §3.5;
-// not modelled as ServerProt — emit it inline inside UpdateZonePartialEnclosed.
-
 // === Entity sync packets (per A4, A5) ===
 
 /**
- * PLAYER_INFO — opcode 27, varShort — per A4. Carries the pre-built bit block + per-player
+ * PLAYER_INFO — rev948 op 22, varShort. Carries the pre-built bit block + per-player
  * extended-info blocks (the bit block is built by the world-side viewport traversal in B6).
  * [firstTick] toggles the first-tick init layout (30-bit local tile + 2047 18-bit region
  * hashes; see A4 §4A).
@@ -958,7 +1279,7 @@ data class PlayerInfo(
 }
 
 /**
- * NPC_INFO — opcode 12, varShort — per A5. Carries the pre-built bit block + per-NPC
+ * NPC_INFO — rev948 op 52, varShort. Carries the pre-built bit block + per-NPC
  * extended-info blocks.
  */
 data class NpcInfo(
@@ -979,8 +1300,7 @@ data class NpcInfo(
     }
 }
 
-// NOTE: UPDATE_UID192 (op 36) intentionally not modelled here — A4 §"Related Packets"
-// confirms this is HANDSHAKE_UID (CRC32 identity binding), out of B2 scope.
+// NOTE: UPDATE_UID192 is intentionally not modelled here; it is handshake identity binding.
 
 // --- World list ---
 

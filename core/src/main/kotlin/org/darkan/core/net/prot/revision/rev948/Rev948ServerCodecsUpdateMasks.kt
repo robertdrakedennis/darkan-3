@@ -11,19 +11,31 @@ import org.darkan.core.net.prot.update.UpdateMask
  * `ProcessExtendedInfoNPC @ 0x001621c0` (rs2client.948-2-2). Bit/order/identity per
  * [Rev948PlayerUpdateMaskKey] / [Rev948NpcUpdateMaskKey].
  *
- * **948 ext-info wire format — per-field "scrambled" mode byte (IMPORTANT, NEW vs 947-3):**
- * Every scalar field read by the 948 ext-info handlers goes through a `gScrambled*` reader
- * (`gScrambledByte/Ubyte/Ushort/Uint/Medium`, and `FUN_0047f240` for the mode-select short).
- * Each such reader FIRST consumes a 1-byte *mode selector* from a separate cursor (packet+0x28),
- * then reads the value with one of 4 transforms:
- *   mode 0 = plain / big-endian   (server emits this)
- *   mode 1 = little-endian / reversed
- *   mode 2 = big-endian, low byte +0x80
- *   mode 3 = little-endian, low byte +0x80
- * The server is free to always pick **mode 0** and emit the plain value. Therefore every
- * scrambled scalar below is encoded as `writeByte(0)` (mode) followed by the plain BE value.
- * Raw `gBit`/`gSmart*`/`gArrayBuffer` reads and the BE-short slot reads (FUN_00121880) are NOT
- * mode-prefixed — only the `gScrambled*` family is.
+ * **948 ext-info wire format — the "scrambled" mode is a FIXED client-side `.rodata` table,
+ * NOT a wire-transmitted mode byte (CORRECTED — see `docs/protocol/player-appearance-948.md` §1/§6).**
+ * The earlier model below ("server emits `writeByte(0)` mode 0 then the plain value") was WRONG.
+ * `ProcessExtendedInfo @0x0015e290` (948-5) drives each scrambled read from a per-block offset into
+ * the client's read-only `.rodata` table at `@0x00cb6a80` (block `.rodata` r=true **w=false** — it
+ * CANNOT be filled from the wire). Emitting a `0x00` mode prefix injects a spurious byte the client
+ * consumes as real field data → guaranteed desync. The transform for each scrambled field is fixed
+ * by `table[blockBase + fieldIndex]`; the server must apply that transform with NO mode byte.
+ *
+ * For the **APPEARANCE** block (the only ext-info block on the first-light render path), the base is
+ * `0x00cb6ac0`: `table[0]=3` governs the length byte (mode 3) and `table[1]=2` governs the body
+ * (mode 2, forward). The four transforms (`gScrambledByte @0x0047f840` / buffer `FUN_0047ec70`):
+ *   mode 0 — scalar: `wire = value`            ; buffer: verbatim, forward
+ *   mode 1 — scalar: `wire = (value+0x80)&0xFF`; buffer: verbatim, REVERSED
+ *   mode 2 — scalar: `wire = (-value)&0xFF`    ; buffer: each `(b+0x80)&0xFF`, forward
+ *   mode 3 — scalar: `wire = (-0x80-value)&0xFF`; buffer: each `(b+0x80)&0xFF`, REVERSED
+ * So APPEARANCE: length byte = mode 3 = `(-0x80 - L) & 0xFF`; body = mode 2 = every byte `+0x80`.
+ *
+ * **The other scrambled-scalar encoders below STILL use the now-retired `writeByte(0)` mode prefix
+ * (`sByte`/`sShort`/`sMedium`).** They are LATENT — none are emitted on the first-light path (only
+ * APPEARANCE is), and re-auditing all 36 per-block `.rodata` bases is out of scope here (doc §6/§8
+ * defers it: "trace them when those masks are actually sent"). They are left as-is so this change
+ * is surgical to the only block that ships; when FACE_DIRECTION/FORCED_MOVEMENT/etc. are wired, each
+ * must be re-pointed at its own `table[blockBase + fieldIndex]` transform per doc §6 action item 2.
+ * This is FLAGGED for the ghidra-reverse-engineer agent (per-block base map).
  *
  * Only blocks with DEFINITIVE identity (named fn / exact offset / 0xffff-clear semantics) and a
  * fully-characterised wire payload are registered here. Spot-anim list / transient-triple blocks
@@ -35,7 +47,13 @@ internal fun registerRev948ServerCodecsUpdateMasks() {
     registerNpcMaskEncoders()
 }
 
-/** Mode-0 (plain BE) scrambled-scalar helpers — emit the mode selector then the value. */
+/**
+ * LEGACY mode-prefix scrambled-scalar helpers — emit a `writeByte(0)` mode selector then the plain
+ * BE value. **These are WRONG per `docs/protocol/player-appearance-948.md` §6** (the mode is a fixed
+ * `.rodata` table, not on the wire) but are kept for the not-yet-emitted blocks below to keep this
+ * change surgical to APPEARANCE. Do NOT use these for any block that actually ships — re-point at the
+ * block's `table[base + fieldIndex]` transform first. See the file-level doc.
+ */
 private fun world.gregs.voidps.buffer.write.BufferWriter.sByte(value: Int) {
     writeByte(0); writeByte(value)
 }
@@ -48,20 +66,45 @@ private fun world.gregs.voidps.buffer.write.BufferWriter.sMedium(value: Int) {
     writeByte(0); writeMedium(value)
 }
 
+/**
+ * Ext-info APPEARANCE framing transforms (`docs/protocol/player-appearance-948.md` §1.2), exposed
+ * `internal` so [Rev948ExtInfoTransforms] / unit tests can assert them against the doc table.
+ *
+ * The client reads the appearance entry as `[length: mode 3][body: mode 2 over the whole run]`,
+ * where the modes come from the fixed `.rodata` table (NOT the wire). The server therefore writes:
+ *  - length byte: `(-0x80 - L) & 0xFF`  (mode 3 scalar transform; L = true payload byte count)
+ *  - body bytes : each plain payload byte `(b + 0x80) & 0xFF`  (mode 2 buffer transform, forward)
+ *
+ * No `writeByte(0)` mode prefix precedes either (that was the retired §6 model).
+ */
+internal object Rev948ExtInfoTransforms {
+    /** APPEARANCE length-byte transform: mode 3 scalar = `(-0x80 - L) & 0xFF`. */
+    fun appearanceLengthByte(payloadLength: Int): Int = (-0x80 - payloadLength) and 0xFF
+
+    /** APPEARANCE body per-byte transform: mode 2 buffer (forward) = `(b + 0x80) & 0xFF`. */
+    fun appearanceBodyByte(plainByte: Int): Int = (plainByte + 0x80) and 0xFF
+
+    /** Write the framed APPEARANCE ext-info entry: length(mode 3) + body(mode 2) over [payload]. */
+    fun write(out: world.gregs.voidps.buffer.write.BufferWriter, payload: ByteArray) {
+        out.writeByte(appearanceLengthByte(payload.size))
+        for (b in payload) out.writeByte(appearanceBodyByte(b.toInt() and 0xFF))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // PLAYER_INFO ext-info encoders (bit/order per Rev948PlayerUpdateMaskKey)
 // ---------------------------------------------------------------------------
 
 private fun registerPlayerMaskEncoders() {
-    // APPEARANCE (bit 3, order 4). Wire: scrambled length byte + length raw bytes (mode-buffer; mode 0 = plain copy).
+    // APPEARANCE (bit 3, order 4). Wire (docs/protocol/player-appearance-948.md §1.2):
+    //   [length byte]  mode 3 scalar = (-0x80 - L) & 0xFF   (NOT a writeByte(0)+len mode prefix)
+    //   [L body bytes] mode 2 buffer = each payload byte (b + 0x80) & 0xFF, forward
+    // The mode selectors are read from the client's fixed `.rodata` table (base 0xcb6ac0:
+    // table[0]=3 length, table[1]=2 body), NOT from the wire. [UpdateMask.Appearance.data] is the
+    // PLAIN appearance payload (built by PlayerAppearanceEncoder per §2/§3); the framing transform
+    // is applied here once over the whole block.
     PlayerUpdateMaskEncoder.register(Rev948PlayerUpdateMaskKey.APPEARANCE) { mask ->
-        val payload = (mask as UpdateMask.Appearance).data
-        sByte(payload.size and 0xFF)
-        if (payload.isNotEmpty()) {
-            // mode-buffer reader (FUN_0047e7f0): mode 0 = plain copy. The length-byte's mode byte
-            // above also governs the buffer copy (single mode byte precedes the whole block).
-            writeBytes(payload)
-        }
+        Rev948ExtInfoTransforms.write(this, (mask as UpdateMask.Appearance).data)
     }
 
     // FORCED_MOVEMENT (bit 7, order 9). Wire: 6x scrambled byte + 3x scrambled short -> SetForcedMovement.

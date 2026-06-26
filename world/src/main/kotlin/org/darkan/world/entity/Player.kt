@@ -31,19 +31,18 @@ class Player(
     /** Per-player visibility state — high-res / low-res index lists, cached appearance hashes, build area center. */
     val viewport: Viewport = Viewport(this)
 
+    val varps: VarpManager = VarpManager()
+
+    @Volatile
+    var readyForTick: Boolean = false
+
     /** PLAYER_INFO "active" bit — true if this player was moving or had updates the previous tick. */
     var active: Boolean = true
 
     /** PLAYER_INFO "stationary" bit — true once the player has been idle long enough to qualify for the stationary cohort. */
     var stationary: Boolean = false
 
-    /**
-     * "Needs absolute reposition" — when true the next PLAYER_INFO (op 22) high-res entry encodes an
-     * absolute BIG/region TELEPORT to [tile] instead of an incremental move, and the flag is cleared
-     * by the encoder. Defaults to `true` because the client entity is created at (0,0,0) when the
-     * player enters the world (REBUILD_NORMAL sets only the scene/camera), so the avatar must be
-     * teleported to its real spawn on the first tick. Set it back to `true` on any server-side
-     * teleport so the client warps rather than slides.
-     */
-    var teleporting: Boolean = true
+    init {
+        appearance.ensureCachedBytes()
+    }
 }

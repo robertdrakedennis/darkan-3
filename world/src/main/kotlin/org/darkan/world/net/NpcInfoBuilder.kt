@@ -4,6 +4,8 @@ import org.darkan.core.net.prot.NpcInfo
 import org.darkan.core.net.prot.update.ActiveMaskKeys
 import org.darkan.core.net.prot.update.NpcUpdateMaskEncoder
 import org.darkan.core.net.prot.update.NpcUpdateMaskKey
+import org.darkan.core.net.prot.update.UpdateMaskHeader
+import org.darkan.world.entity.PendingUpdates
 import org.darkan.world.entity.Player
 import org.darkan.world.world.Npcs
 import world.gregs.voidps.buffer.write.BufferWriter
@@ -125,7 +127,7 @@ object NpcInfoBuilder {
         bitOut.stopBitAccess()
 
         // Phase 3: per-NPC ext-info blocks. Each NPC's bytes are wrapped by a 2-byte BE length
-        // header by the Rev947 codec (NOT here — we emit raw block bytes; the codec prefixes).
+        // header by the codec (NOT here — we emit raw block bytes; the codec prefixes).
         val extendedInfo = ArrayList<ByteArray>(flaggedForExtInfo.size)
         for (slot in flaggedForExtInfo) {
             val npc = Npcs.get(slot) ?: continue
@@ -141,9 +143,9 @@ object NpcInfoBuilder {
      * byte 3 bit 0 (mask 0x01).
      *
      * Per-flag blocks are emitted in [NpcUpdateMaskKey.order] ascending order via
-     * [NpcUpdateMaskEncoder] (registered in `Rev947ServerCodecsUpdateMasks.kt`).
+     * [NpcUpdateMaskEncoder] (registered in `Rev948ServerCodecsUpdateMasks.kt`).
      */
-    private fun encodeExtendedInfoBlock(pending: org.darkan.world.entity.PendingUpdates): ByteArray {
+    private fun encodeExtendedInfoBlock(pending: PendingUpdates): ByteArray {
         val extOut = BufferWriter(256)
 
         val entries = pending.npcMaskEntries().filter { (key, _) ->
@@ -168,30 +170,8 @@ object NpcInfoBuilder {
             flagBitset = flagBitset or key.flag
         }
 
-        // Compute the byte length from the highest set bit. Per A5 §"Flag bitset expansion":
-        //  byte 0 always; if (byte0 & 0x40) byte 1; if (byte1 & 0x20) byte 2;
-        //  if (byte2 & 0x40) byte 3; if (byte3 & 0x01) byte 4.
-        val highestBit = 63 - java.lang.Long.numberOfLeadingZeros(flagBitset)
-        val byteCount = when {
-            highestBit < 8 -> 1
-            highestBit < 16 -> 2
-            highestBit < 24 -> 3
-            highestBit < 32 -> 4
-            else -> 5
-        }
-        // Set expansion ("continue") bits. These are revision-dependent (947-3 = {6,13,22,24};
-        // 948 = {6,8,19,25}) so they are driven from the active codec's published positions
-        // (ActiveMaskKeys.npcExpansionBits) rather than hardcoded literals — see
-        // Rev948NpcUpdateMaskKey.EXPANSION_BITS / docs/net/serverprot/948-research-C-*.md.
-        // npcExpansionBits[N] is the continue-bit in byte N that tells the client to read byte N+1.
-        val expansionBits = ActiveMaskKeys.npcExpansionBits
-        for (byte in 1 until byteCount) {
-            flagBitset = flagBitset or (1L shl expansionBits[byte - 1])
-        }
-
-        // LSB-first byte write.
-        for (i in 0 until byteCount) {
-            extOut.writeByte(((flagBitset ushr (i * 8)) and 0xFF).toInt())
+        for (byte in UpdateMaskHeader.npc(flagBitset, ActiveMaskKeys.npcExpansionBits)) {
+            extOut.writeByte(byte.toInt() and 0xFF)
         }
 
         for ((key, mask) in entries.sortedBy { it.first.order }) {
@@ -202,7 +182,7 @@ object NpcInfoBuilder {
     }
 
     /** True if the NPC has any pending mask with a registered encoder. */
-    private fun hasFlaggableNpcExtendedInfo(pending: org.darkan.world.entity.PendingUpdates): Boolean {
+    private fun hasFlaggableNpcExtendedInfo(pending: PendingUpdates): Boolean {
         return pending.npcMaskEntries().any { NpcUpdateMaskEncoder.hasEncoder(it.first) }
     }
 

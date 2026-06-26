@@ -64,13 +64,12 @@ internal fun Codec.registerRev948ServerCodecsZone() {
 
     // UPDATE_ZONE_PARTIAL_FOLLOWS (op 41, 3B) — handler jag::packethandlers::ZoneUpdates::
     //   UPDATE_ZONE_PARTIAL_FOLLOWS @ 0x000ef150 (asm-verified — resolves the prior TODO).
-    //   Wire: [+0]=zoneX(raw unsigned byte), [+1]=level(byteAdd), [+2]=zoneY(raw signed byte).
+    //   Wire: [+0]=zoneX+128(raw unsigned byte), [+1]=level(byteAdd), [+2]=zoneY(raw signed byte).
     //   Handler: DAT_ac=base608-0x400+byte*8=zoneX ; DAT_a8=(byte+0x80)=level ;
     //            DAT_b0=base60c+(char)byte*8=zoneY.
-    //   The "3-byte header reorder" flagged by the delta doc is: level moved to the MIDDLE byte
-    //   (it is NOT last). zoneX raw first, zoneY raw last.
+    //   The 3-byte header order is: zoneX+128, level in the middle byte, zoneY last.
     serverProt<UpdateZonePartialFollows>(opcode = 41, size = 3) { out ->
-        out.writeByte(zoneX)
+        out.writeByte(zoneX + 128)
         out.writeByteAdd(level)
         out.writeByte(zoneY)
     }
@@ -85,15 +84,13 @@ internal fun Codec.registerRev948ServerCodecsZone() {
         out.writeByteInverse(level)
         out.writeByte(zoneY)
         out.writeByteSubtract(zoneX)
-        if (subPackets.isNotEmpty()) {
-            // The 948 enclosed sub-opcode table (g_zoneSubProtVector @ DAT_015d4580) has not
-            // been RE'd, so sub-packet payloads CANNOT be encoded yet. Dropping them silently
-            // would lose zone state — warn loudly until the table is documented.
-            logWarn(
-                "UPDATE_ZONE_PARTIAL_ENCLOSED (op 76) dropped ${subPackets.size} sub-packet(s) — " +
-                    "948 enclosed sub-opcode table not yet RE'd; only the 3-byte zone header was sent. " +
-                    "TODO: document g_zoneSubProtVector in docs/net/serverprot/ and implement sub-packet encoding."
-            )
+        for (packet in subPackets) {
+            if (!out.writeEnclosedZoneSubPacket(packet)) {
+                logWarn(
+                    "UPDATE_ZONE_PARTIAL_ENCLOSED (op 76) cannot encode ${packet::class.simpleName}; " +
+                        "send it as a standalone zone update or add its rev948 sub-op mapping."
+                )
+            }
         }
     }
 
@@ -101,17 +98,18 @@ internal fun Codec.registerRev948ServerCodecsZone() {
     // Standalone sub-packet encoders (presumed byte-equivalent to 947-3)
     // -----------------------------------------------------------------------
 
-    // LOC_ADD (op 90 in 948, was op 79). Wire: g1_neg packedCoord; g4_alt1 locId; g1 shapeFlags.
+    // LOC_ADD (op 90 in 948, was op 79). Wire: g1 packedCoord; g4_alt1 locId; g1 shapeFlags-128.
     serverProt<LocAdd>(opcode = 90, size = ProtSize.VarByte) { out ->
-        out.writeByteInverse(packedCoord)
+        out.writeByte(packedCoord)
         out.writeIntLittle(locId)
-        out.writeByte(shapeFlags)
+        out.writeByte(shapeFlags - 128)
+        extra?.let { out.writeByte(it) }
     }
 
-    // LOC_DEL (op 16, 2B). Wire: g1s shapeFlags_signed; g1_sub128 packedCoord.
+    // LOC_DEL (op 16, 2B). Wire: g1(-128-shapeFlags); g1_neg packedCoord.
     serverProt<LocDel>(opcode = 16, size = 2) { out ->
-        out.writeByte(shapeFlags)
-        out.writeByteInverse(packedCoord + 128)
+        out.writeByte(-128 - shapeFlags)
+        out.writeByteInverse(packedCoord)
     }
 
     // LOC_CUSTOMISE (op 50, varByte). Opaque payload.
@@ -144,13 +142,12 @@ internal fun Codec.registerRev948ServerCodecsZone() {
         out.writeByte(packedCoordAndShape)
     }
 
-    // OBJ_ADD (op 46, 5B). Wire: g1 objIdHi; g1+128 objIdLo; g1 countHi; g1 countLo; g1 packedCoord.
+    // OBJ_ADD (op 46, 5B). Wire: g1 packedCoord; g2 objId; g1 countHi; g1 countLo-128.
     serverProt<ObjAdd>(opcode = 46, size = 5) { out ->
-        out.writeByte(objIdHi)
-        out.writeByteAdd(objIdLo)
-        out.writeByte(countHi)
-        out.writeByte(countLo)
         out.writeByte(packedCoord)
+        out.writeShort(objId)
+        out.writeByte(count ushr 8)
+        out.writeByte((count and 0xFF) - 128)
     }
 
     // OBJ_DEL (op 107, 3B). Wire: g1_neg packedCoord; g1+128 objIdLo; g1 objIdHi.
@@ -230,4 +227,24 @@ internal fun Codec.registerRev948ServerCodecsZone() {
         out.writeByte(0)
         out.writeRSString("")
     }
+}
+
+private suspend fun ByteWriteChannel.writeEnclosedZoneSubPacket(packet: ServerProt): Boolean =
+    when (packet) {
+        is LocAnim -> {
+            writeByte(13)
+            writeLocAnimBody(packet)
+            true
+        }
+        else -> false
+    }
+
+private suspend fun ByteWriteChannel.writeLocAnimBody(packet: LocAnim) {
+    writeByte(packet.packedCoord)
+    writeInt(packet.animId)
+    writeByte(packet.shapeFlags)
+    writeByte(packet.unknown1)
+    writeByte(packet.delay)
+    writeShort(packet.speed)
+    writeByte(packet.mode)
 }

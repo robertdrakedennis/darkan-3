@@ -36,16 +36,22 @@ object EnvVars {
     val minorVersion: Int = dotenv.get("MINOR_VERSION", "1").toInt()
     val cacheThreadUsage: Double = dotenv.get("CACHE_THREAD_USAGE", "1.0").toDouble()
     val configHttpPort: Int = dotenv.get("CONFIG_HTTP_PORT", "8829").toInt()
+    // Host advertised to the client in jav_config (codebase/param URLs, lobby host param).
+    // Default is localhost so local-dev behavior is unchanged.
+    val configPublicHost: String = dotenv.get("CONFIG_PUBLIC_HOST", "localhost")
     val clientBinaryPath: String = dotenv.get("CLIENT_BINARY_PATH", "./data/client/linux/rs2client")
     val logLevel: String = dotenv.get("LOG_LEVEL", "TRACE")
     val packetQueueCapacity: Int = dotenv.get("PACKET_QUEUE_CAPACITY", "100").toInt()
     val packetValidateSizes: Boolean = dotenv.get("PACKET_VALIDATE_SIZES", "true").toBooleanStrict()
     val mongoUri: String = dotenv.get("MONGO_URI", "mongodb://localhost:27017")
     val mongoDatabase: String = dotenv.get("MONGO_DATABASE", "darkan3")
-    /** When true, MongoManager boots an in-process mongod via Flapdoodle and
-     *  ignores `mongoUri`. Dev convenience so `:lobby:run` works without a
-     *  separately installed MongoDB. Off by default to keep prod paths clean. */
     val embeddedMongo: Boolean = dotenv.get("EMBEDDED_MONGO", "false").toBooleanStrict()
+    val embeddedMongoHost: String = dotenv.get("EMBEDDED_MONGO_HOST", "localhost")
+    val embeddedMongoPort: Int = dotenv.get("EMBEDDED_MONGO_PORT", "37117").toInt()
+    val embeddedMongoDataDir: String = dotenv.get(
+        "EMBEDDED_MONGO_DATA_DIR",
+        "${System.getProperty("user.home")}/.darkan3/embedded-mongo"
+    )
 
     /**
      * Resolve a shared secret from the environment. The well-known dev default is only
@@ -72,15 +78,16 @@ object EnvVars {
     val worldLoginTokenTtlMs: Long = dotenv.get("WORLD_LOGIN_TOKEN_TTL_MS", "1800000").toLong()  // 30 minutes
 
     // World server identity (used by world module to register with lobby)
-    val worldId: Int = dotenv.get("WORLD_ID", "300").toInt()
+    val worldId: Int = dotenv.get("WORLD_ID", "34").toInt()
     val worldName: String = dotenv.get("WORLD_NAME", "Darkan")
     val worldHost: String = dotenv.get("WORLD_HOST", "localhost")
     val worldPublicHost: String = dotenv.get("WORLD_PUBLIC_HOST", worldHost)
+    val worldSceneRootId: Int = dotenv.get("WORLD_SCENE_ROOT_ID", "474").toInt()
     val worldActivity: String = dotenv.get("WORLD_ACTIVITY", "")
     val worldMembers: Boolean = dotenv.get("WORLD_MEMBERS", "true").toBooleanStrict()
     val worldQuickChat: Boolean = dotenv.get("WORLD_QUICKCHAT", "false").toBooleanStrict()
     val worldPvp: Boolean = dotenv.get("WORLD_PVP", "false").toBooleanStrict()
-    val worldLootShare: Boolean = dotenv.get("WORLD_LOOTSHARE", "true").toBooleanStrict()
+    val worldLootShare: Boolean = dotenv.get("WORLD_LOOTSHARE", "false").toBooleanStrict()
     val worldCountry: String = dotenv.get("WORLD_COUNTRY", "USA")
     val worldHighlighted: Boolean = dotenv.get("WORLD_HIGHLIGHTED", "false").toBooleanStrict()
 

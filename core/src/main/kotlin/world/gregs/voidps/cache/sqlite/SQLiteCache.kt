@@ -72,6 +72,15 @@ class SQLiteCache private constructor(
         return indexFiles[index]?.getLength(archive) ?: -1
     }
 
+    override fun sectorVersion(index: Int, archive: Int): Int {
+        if (index == 255) {
+            if (archive >= indexFiles.size) return 0
+            return indexFiles[archive]?.getRawTableVersion() ?: 0
+        }
+        if (index >= indexFiles.size) return 0
+        return indexFiles[index]?.getVersion(archive) ?: 0
+    }
+
     override fun indexCount() = _indices.size
 
     override fun indices() = _indices
@@ -133,29 +142,48 @@ class SQLiteCache private constructor(
 
     private fun parseMultiFileArchive(decompressed: ByteArray, fileCount: Int): Array<ByteArray?>? {
         if (decompressed.isEmpty()) return null
-        val first = decompressed[0].toInt() and 0xFF
 
-        // Modern format: leading 1 byte + (N+1) 24-bit offsets + file data
-        if (first == 1) {
-            return parseModernMultiFile(decompressed, fileCount)
-        }
+        // The RS3 NXT cache uses the trailing-stripe (chunked) group layout: file data, then a
+        // size-delta table, then a 1-byte chunk count at the very end. A leading 0x01 byte is NOT
+        // a format marker here - it is simply the first byte of file data, so the old
+        // "first byte == 1 => modern 24-bit offset table" heuristic misfired on every such group
+        // (NegativeArraySizeException / BufferUnderflow). We only take the modern path when its
+        // leading offset table is self-consistent, otherwise fall back to trailing-stripe.
+        parseModernMultiFile(decompressed, fileCount)?.let { return it }
 
-        // Legacy format: trailing chunk count + int deltas at end
         return parseLegacyMultiFile(decompressed, fileCount)
     }
 
-    private fun parseModernMultiFile(decompressed: ByteArray, fileCount: Int): Array<ByteArray?> {
-        val reader = BufferReader(decompressed)
-        reader.readByte() // skip the leading 1
+    /**
+     * Modern "smart" group layout: leading version byte (1) + (N+1) 24-bit offsets + file data.
+     * Returns null (rather than throwing) when the offset table is not self-consistent, so the
+     * caller can fall back to the trailing-stripe layout used by the RS3 NXT cache.
+     */
+    private fun parseModernMultiFile(decompressed: ByteArray, fileCount: Int): Array<ByteArray?>? {
+        // Need: 1 version byte + (fileCount + 1) * 3 offset bytes.
+        val headerSize = 1 + (fileCount + 1) * 3
+        if (decompressed.size < headerSize) return null
+        if ((decompressed[0].toInt() and 0xFF) != 1) return null
 
+        val reader = BufferReader(decompressed)
+        reader.readByte() // version byte
         val offsets = IntArray(fileCount + 1) { reader.readUnsignedMedium() }
-        val files = Array<ByteArray?>(fileCount) { i ->
+
+        // Validate: first offset is the header end, offsets are non-decreasing, and the last
+        // offset is exactly the buffer length (file data fills the remainder). Any deviation
+        // means this is not the modern layout.
+        if (offsets[0] != headerSize) return null
+        for (i in 1..fileCount) {
+            if (offsets[i] < offsets[i - 1]) return null
+        }
+        if (offsets[fileCount] != decompressed.size) return null
+
+        return Array(fileCount) { i ->
             val size = offsets[i + 1] - offsets[i]
             val data = ByteArray(size)
             reader.readBytes(data, 0, size)
             data
         }
-        return files
     }
 
     @Suppress("UNCHECKED_CAST")

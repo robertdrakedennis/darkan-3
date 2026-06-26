@@ -15,6 +15,15 @@ class Codec {
     private val opcodeToClassMap = mutableMapOf<Int, KClass<out ClientProt>>()
 
     /**
+     * Opcodes that have a real server encoder registered via [serverProt]. The stub table
+     * ([serverProtStub]) consults this so it NEVER renames an opcode that already has a concrete
+     * encoder — the encoder's own (PascalCase) class name is authoritative for display, matching the
+     * binary-derived `claude-re/findings/14-serverprot-table.md` "capture name" column. (Client side
+     * uses [clientProtsByOpcode] directly, which is already opcode-keyed.)
+     */
+    private val serverEncoderOpcodes = mutableSetOf<Int>()
+
+    /**
      * Decoder-less packets (e.g. the per-second Ping keepalive) are stateless singletons —
      * resolve the reflective instance once per class and reuse it for every packet.
      */
@@ -52,6 +61,7 @@ class Codec {
             size = size,
             encoder = encoder?.let { { output -> (this as T).it(output) } }
         )
+        serverEncoderOpcodes += opcode
         serverProtInfo[opcode] = ProtInfo(T::class.simpleName ?: "UNKNOWN_$opcode", size)
     }
 
@@ -66,6 +76,7 @@ class Codec {
             size = protSize,
             encoder = encoder?.let { { output -> (this as T).it(output) } }
         )
+        serverEncoderOpcodes += opcode
         serverProtInfo[opcode] = ProtInfo(T::class.simpleName ?: "UNKNOWN_$opcode", protSize)
     }
 
@@ -158,53 +169,38 @@ class Codec {
     }
 
     /**
-     * Register the canonical official (UPPER_SNAKE) display name + size metadata for a server
-     * opcode. Unlike a naive `putIfAbsent`, the canonical NAME wins over an encoder's class-name
-     * (which is PascalCase) so [serverProtName] reports a consistent UPPER_SNAKE name for EVERY
-     * opcode regardless of whether it has an encoder.
+     * Fill in name + size display metadata for a server opcode that has NO real encoder.
      *
-     * The encoder/decoder + its authoritative size stay registered in [serverProts] (that is the
-     * codec invariant — encoders win for the CODEC); only the DISPLAYED name+size metadata here is
-     * reconciled:
-     *  - The encoder's size (when one already registered an entry) is authoritative and preserved.
-     *  - If [name] is the placeholder `UNKNOWN_<op>` AND an encoder already registered a (PascalCase)
-     *    name, fall back to [pascalToScreamingSnake] of that name so the result is STILL UPPER_SNAKE
-     *    rather than PascalCase.
+     * The stub table runs AFTER the real [serverProt] registrations and must behave as a strict
+     * gap-filler: an opcode that already has a concrete encoder keeps the encoder's own (PascalCase)
+     * class name AND size — the encoder is authoritative for BOTH the codec and the displayed
+     * metadata. This matches the binary-derived `claude-re/findings/14-serverprot-table.md` "capture
+     * name" column (e.g. op199=`RebuildRegion`, op174=`AntiCheatChallenge`, op73=`MinimapState`,
+     * op1=`SetNpcOp`, op7=`ResetEntityLists`), and it prevents the stub table's UPPER_SNAKE oracle
+     * names from silently overriding (renaming) a verified, registered prot. The stub's [name]/[size]
+     * therefore apply ONLY to opcodes without an encoder.
      */
     internal fun serverProtStub(opcode: Int, name: String, size: ProtSize) {
-        val existing = serverProtInfo[opcode]
-        val resolvedSize = existing?.size ?: size
-        val resolvedName = resolveDisplayName(opcode, name, existing?.name)
-        serverProtInfo[opcode] = ProtInfo(resolvedName, resolvedSize)
+        if (opcode in serverEncoderOpcodes) return
+        serverProtInfo[opcode] = ProtInfo(name, size)
     }
 
     internal fun serverProtStub(opcode: Int, name: String, size: Int) {
         serverProtStub(opcode, name, ProtSize.Fixed(size))
     }
 
-    /** Client-side analogue of [serverProtStub] — canonical name wins, decoder's size is preserved. */
+    /**
+     * Client-side analogue of [serverProtStub] — a strict gap-filler. An opcode with a real decoder
+     * (present in [clientProtsByOpcode]) keeps the decoder's own class name + size; the stub's
+     * [name]/[size] apply ONLY to opcodes without a decoder.
+     */
     internal fun clientProtStub(opcode: Int, name: String, size: ProtSize) {
-        val existing = clientProtInfo[opcode]
-        val resolvedSize = existing?.size ?: size
-        val resolvedName = resolveDisplayName(opcode, name, existing?.name)
-        clientProtInfo[opcode] = ProtInfo(resolvedName, resolvedSize)
+        if (clientProtsByOpcode.containsKey(opcode)) return
+        clientProtInfo[opcode] = ProtInfo(name, size)
     }
 
     internal fun clientProtStub(opcode: Int, name: String, size: Int) {
         clientProtStub(opcode, name, ProtSize.Fixed(size))
-    }
-
-    /**
-     * Pick the display name for an opcode. The canonical official [stubName] wins, EXCEPT when it is
-     * the placeholder `UNKNOWN_<op>` and an encoder/decoder already supplied a real (PascalCase)
-     * [existingName] — in that case fall back to [pascalToScreamingSnake] of the existing name so the
-     * displayed name is always UPPER_SNAKE, never the raw PascalCase class name.
-     */
-    private fun resolveDisplayName(opcode: Int, stubName: String, existingName: String?): String {
-        if (stubName == "UNKNOWN_$opcode" && existingName != null) {
-            return pascalToScreamingSnake(existingName)
-        }
-        return stubName
     }
 
     /** Get the size (as int: fixed=N, varByte=-1, varShort=-2) for a server opcode. */

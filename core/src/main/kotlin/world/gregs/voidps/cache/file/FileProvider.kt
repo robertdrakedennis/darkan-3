@@ -23,11 +23,6 @@ import world.gregs.voidps.cache.file.type.MemoryFileProvider
  * from the 10-byte header. After 102,400 bytes (including header), a continuation
  * header is inserted. This matches the NXT client's wire reader which tracks
  * block position independently for each pending response.
- *
- * For group data (non-index responses), NO version suffix is appended. The wire
- * payload is: response_header(10) + container_data(compressedSize + decompSize_if_compressed).
- * The CRC stored in the archive index is computed by Jagex over the full container
- * minus 2 bytes, and the client's GroupDownloaded verifies against that.
  */
 interface FileProvider {
 
@@ -55,13 +50,14 @@ interface FileProvider {
         val compression = data[0].toInt()
         val compressedSize = getInt(data[1], data[2], data[3], data[4])
 
-        // Calculate payload size (data after the 5-byte container header)
         val payloadSize = compressedSize + if (compression != 0) 4 else 0
         val available = data.size - CONTAINER_HEADER_LEN
         if (payloadSize > available) {
             logWarn("Truncated container: index=$index archive=$archive header says $payloadSize bytes but only $available available — client CRC will fail.")
         }
         val actualPayloadSize = minOf(payloadSize, available)
+
+        val bodyToWrite = actualPayloadSize
 
         // Build 10-byte response header
         val headerBytes = ByteArray(RESPONSE_HEADER_LEN)
@@ -83,9 +79,7 @@ interface FileProvider {
         continuationHeader[3] = (hash shr 8).toByte()
         continuationHeader[4] = hash.toByte()
 
-        // Exact output size: the first block holds BLOCK_SIZE content bytes, every
-        // subsequent block holds BLOCK_SIZE - CONTINUATION_HEADER_LEN content bytes.
-        val total = RESPONSE_HEADER_LEN + actualPayloadSize
+        val total = RESPONSE_HEADER_LEN + bodyToWrite
         val continuations = if (total > BLOCK_SIZE) {
             (total - BLOCK_SIZE + (BLOCK_SIZE - CONTINUATION_HEADER_LEN) - 1) / (BLOCK_SIZE - CONTINUATION_HEADER_LEN)
         } else {
@@ -121,8 +115,9 @@ interface FileProvider {
         // Write the 10-byte response header with block framing
         writeWithFraming(headerBytes, 0, RESPONSE_HEADER_LEN)
 
-        // Write payload (container data after 5-byte header, no version suffix)
-        writeWithFraming(data, CONTAINER_HEADER_LEN, actualPayloadSize)
+        // Stream only the declared container body; any stored trailer bytes are not part of
+        // the NXT TCP response body for 948.
+        writeWithFraming(data, CONTAINER_HEADER_LEN, bodyToWrite)
 
         if (pos != buf.size) {
             logWarn("JS5 framing size mismatch: index=$index archive=$archive expected ${buf.size} bytes, wrote $pos.")

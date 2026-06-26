@@ -6,13 +6,12 @@ import org.darkan.core.net.prot.update.ActiveMaskKeys
 /**
  * Top-level entry point for the 948 codec.
  *
- * Mirrors the structure of `register947()` — the same registration order is used so the
- * `putIfAbsent` semantics of the stub functions correctly defer to the real encoder
- * registrations.
+ * Real encoders/decoders are registered first; the stub functions then fill in metadata for any
+ * remaining opcodes using `putIfAbsent` semantics so they correctly defer to the real encoder
+ * registrations rather than overwriting them.
  *
- * Both `register947()` and `register948()` can be invoked in the same JVM; they register
- * into [Codec.companion.codecs] under their own revision numbers and operate independently.
- * Switching active revision is done via `Codec.get(EnvVars.majorVersion)`.
+ * `register948()` registers into [Codec.companion.codecs] under revision 948. Switching active
+ * revision is done via `Codec.get(EnvVars.majorVersion)`.
  *
  * **APPEARANCE (resolved):** an exhaustive walk of `ProcessExtendedInfo @ 0x0015e110`
  * (rs2client.948-2-2) confirmed APPEARANCE MOVED from 947-3 bit 2 to **948 bit 3** (dispatch
@@ -28,6 +27,7 @@ fun register948() = Codec.register(948) {
     registerRev948ServerCodecsInterface()
     registerRev948ServerCodecsMisc()
     registerRev948ServerCodecsSocial()
+    registerRev948ServerCodecsInventory()
     registerRev948ServerCodecsRebuild()
     registerRev948ServerCodecsZone()
     registerRev948ServerCodecsPlayerInfo()

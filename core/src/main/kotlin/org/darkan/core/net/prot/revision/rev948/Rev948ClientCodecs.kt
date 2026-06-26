@@ -48,6 +48,23 @@ internal fun Codec.registerRev948ClientProts() {
     // sender (×2 emitters) — see docs/net/948-5-delta-from-948-2.md §3 op 51.
     clientProt<Ping>(opcode = 51, size = 0)
 
+    clientProt<SceneGraphReport>(opcode = 5, size = 4) {
+        SceneGraphReport(value = readInt())
+    }
+
+    // MAP_BUILD_COMPLETE — 948 SendMapBuildComplete @ 0x002bc030, entry 0x015d3800.
+    clientProt<MapBuildComplete>(opcode = 107, size = 0)
+
+    // Response emitted by ServerProt::HandleAntiCheatChallenge @ 0x00180920.
+    // The final byte is `*(uint *)(*client + 0x534)` clamped to 0xff, then biased by -128.
+    clientProt<AntiCheatChallengeResponse>(opcode = 3, size = 9) {
+        AntiCheatChallengeResponse(
+            challengeA = readInt(),
+            challengeB = readUIntLittle(),
+            sequence = (readByte().toInt() + 128) and 0xFF,
+        )
+    }
+
     // WORLDLIST_FETCH
     clientProt<RequestWorldList>(opcode = 54, size = 4) {
         RequestWorldList(worldlistVersion = readInt())
@@ -111,6 +128,10 @@ internal fun Codec.registerRev948ClientProts() {
     ifButtonClick(opcode = 13, buttonId = 9)
     ifButtonClick(opcode = 23, buttonId = 10)
 
+    clientProt<MacOsLobbyHandoff>(opcode = 218, size = MAC_OS_LOBBY_HANDOFF_SIZE) {
+        MacOsLobbyHandoff(readByteArray(MAC_OS_LOBBY_HANDOFF_SIZE).findEmbeddedPlayNowClick())
+    }
+
     // MESSAGE_PUBLIC
     clientProt<MessagePublicSend>(
         opcodes = intArrayOf(124),
@@ -149,3 +170,35 @@ private fun Codec.ifButtonClick(opcode: Int, buttonId: Int) {
         IfButton(buttonId = buttonId, interfaceHash = interfaceHash, slotId = slotId, itemId = itemId)
     }
 }
+
+private const val MAC_OS_LOBBY_HANDOFF_SIZE = 70
+private const val PLAY_NOW_INTERFACE_HASH = (906 shl 16) or 81
+
+private fun ByteArray.findEmbeddedPlayNowClick(): IfButton? {
+    for (offset in 0..size - 8) {
+        val interfaceHash = readIntLittle(offset)
+        if (interfaceHash == PLAY_NOW_INTERFACE_HASH) {
+            return IfButton(
+                buttonId = 1,
+                interfaceHash = interfaceHash,
+                slotId = readUShortAddLittle(offset + 4),
+                itemId = readUShortAdd(offset + 6),
+            )
+        }
+    }
+    return null
+}
+
+private fun ByteArray.readIntLittle(offset: Int): Int =
+    (this[offset].toInt() and 0xff) or
+        ((this[offset + 1].toInt() and 0xff) shl 8) or
+        ((this[offset + 2].toInt() and 0xff) shl 16) or
+        ((this[offset + 3].toInt() and 0xff) shl 24)
+
+private fun ByteArray.readUShortAddLittle(offset: Int): Int =
+    ((this[offset].toInt() - 128) and 0xff) or
+        ((this[offset + 1].toInt() and 0xff) shl 8)
+
+private fun ByteArray.readUShortAdd(offset: Int): Int =
+    ((this[offset].toInt() and 0xff) shl 8) or
+        ((this[offset + 1].toInt() - 128) and 0xff)

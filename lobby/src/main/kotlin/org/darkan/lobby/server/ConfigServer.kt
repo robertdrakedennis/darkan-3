@@ -10,7 +10,6 @@ import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import org.darkan.core.EnvVars
-import org.darkan.core.Logger.logFinest
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logTrace
 import org.darkan.core.Logger.logWarn
@@ -18,6 +17,8 @@ import org.darkan.lobby.social.SocialGateway
 import world.gregs.voidps.cache.file.FileProvider
 import world.gregs.voidps.cache.secure.Whirlpool
 import java.math.BigInteger
+import java.net.URLDecoder
+import java.util.Base64
 import java.util.zip.CRC32
 import kotlin.time.Duration.Companion.seconds
 
@@ -143,7 +144,10 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
                     SocialGateway.handleWorldSocket(this)
                 }
                 get("/ms") {
-                    logFinest("JS5 HTTP request: ${call.request.local.uri}")
+                    // DIAGNOSTIC (JS5 stall): INFO-level so we can see whether the 948-5 client
+                    // routes post-master-index content (255/N indices, N/M groups) over HTTP to
+                    // this endpoint vs. the persistent TCP JS5 socket. Decisive for TCP-vs-HTTP.
+                    logInfo("JS5 HTTP request: ${call.request.local.uri}")
                     serveJs5Http(call)
                 }
                 post("/nxtclienterror.ws") {
@@ -153,8 +157,8 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
                     body.split("&").forEach { param ->
                         val parts = param.split("=", limit = 2)
                         if (parts.size == 2) {
-                            val key = java.net.URLDecoder.decode(parts[0], "UTF-8")
-                            val value = java.net.URLDecoder.decode(parts[1], "UTF-8")
+                            val key = URLDecoder.decode(parts[0], "UTF-8")
+                            val value = URLDecoder.decode(parts[1], "UTF-8")
                             logWarn("  $key = $value")
                         }
                     }
@@ -199,6 +203,10 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
                     } else if (path.contains("rs2client")) {
                         // Serve the client binary so the launcher can download it. The launcher
                         // appends ?binaryType=N (&fileName=NAME) when fetching the binary.
+                        //
+                        // The binary is served RAW (uncompressed): the LD_PRELOAD patcher disables
+                        // rs3linux's LZMA decompression flag (patcher/src/lib.rs §6), so the launcher
+                        // saves whatever bytes we send verbatim — they must be the raw client binary.
                         val binaryType = call.request.queryParameters["binaryType"]?.toIntOrNull()
                         val os = if (binaryType != null) {
                             binaryTypeToOs(binaryType)
@@ -277,31 +285,23 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         }
         val data = provider.data(archive, group)
         if (data == null) {
+            // DIAGNOSTIC (JS5 stall): a 404 here would itself stall the client; make misses loud.
+            logWarn("JS5 HTTP miss: a=$archive g=$group — no cache data, returning 404")
             call.respondText("Not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
             return
         }
-        // HTTP JS5 responses must end with a 2-byte big-endian version suffix.
-        // The client computes CRC over (responseBody.length - 2) and verifies against the archive index.
-        //
-        // Some archives were downloaded via HTTP from Jagex, so the stored blob already
-        // contains the 2-byte suffix. Detect this by checking blob size vs container header.
         val version = call.request.queryParameters["v"]?.toIntOrNull() ?: 0
-        val alreadyHasSuffix = blobHasVersionSuffix(data)
-        val response = if (alreadyHasSuffix) {
-            data // serve as-is — suffix already present
-        } else {
-            val buf = ByteArray(data.size + 2)
-            System.arraycopy(data, 0, buf, 0, data.size)
-            buf[data.size] = ((version shr 8) and 0xFF).toByte()
-            buf[data.size + 1] = (version and 0xFF).toByte()
-            buf
-        }
-        logFinest("JS5 HTTP: a=$archive g=$group v=$version -> ${response.size} bytes (container=${data.size}, suffix=${if (alreadyHasSuffix) "stored" else "appended"})")
+        val response = data
+        // DIAGNOSTIC (JS5 stall): INFO-level so successful HTTP content serves are visible
+        // at the default TRACE/FINER log level during a pilot run.
+        logInfo("JS5 HTTP: a=$archive g=$group v=$version -> ${response.size} bytes (container=${data.size}, suffix=raw)")
         call.respondBytes(response, ContentType.Application.OctetStream)
     }
 
     private fun generateJavConfig(info: BinaryInfo): String = buildString {
-        val host = "localhost"
+        // configPublicHost is the host advertised to the client (codebase/param URLs, lobby host
+        // param). Defaults to localhost for local dev; set CONFIG_PUBLIC_HOST for remote serving.
+        val host = EnvVars.configPublicHost
         val lobbyPort = EnvVars.lobbyPort
 
         fun line(s: String) { append(s); append("\n") }
@@ -384,7 +384,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=3=$host")                                    // lobby host
         line("param=4=0")
         line("param=5=0")
-        line("param=6=300")                                     // world ID (MAP_WORLD() reads this)
+        line("param=6=${EnvVars.worldId}")
         line("param=7=0")
         line("param=8=false")
         line("param=10=${EnvVars.loginServerToken}")              // login server token
@@ -401,7 +401,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=22=")
         line("param=23=false")
         line("param=24=true")
-        line("param=25=0")                                    // ModeWhere=LIVE (HTTP port patched by LD_PRELOAD)
+        line("param=25=0")                                    // ModeWhere=LIVE — httpMode param (§11); kept 0 so JS5 stays on TCP, paired with empty content-server params 35/37/40/49
         line("param=26=false")
         line("param=27=3")
         line("param=28=265964763")
@@ -410,16 +410,21 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         line("param=32=")
         line("param=33=")
         line("param=34=547933620")
-        line("param=35=http://$host:${EnvVars.configHttpPort}")   // world server URL
+        // NOTE (2026-06-23): params 35/37/40/49 = HTTP content-server advertisement. Emptying them
+        // to force JS5 over TCP (intended fix for the index-40 / AUDIO_STREAMS group-38557
+        // "Verifying Cache" httpMode loop, per docs/net/js5-http-group-download.md §11) was tried
+        // and BROKE early init — the client hung at "initializing resources" and never opened ANY
+        // JS5 connection (it does NOT fall back to TCP at bootstrap; the content server is required
+        // to construct the JS5 provider). Reverted to the working values. The real index-40 fix is
+        // the precise sync→async httpMode lever (provider+0x70), NOT emptying these params.
+        line("param=35=http://$host:${EnvVars.configHttpPort}")   // content server URL
         line("param=36=")
         line("param=37=$host")                                    // content server host
         line("param=38=1200")
-        line("param=39=1829")                                    // lobby worldId (HTTP port = 1829+7000 = 8829)
-        line("param=40=http://$host:${EnvVars.configHttpPort}")   // world server URL
-        // Game ports — client uses these for JS5 (TCP) AND world connections. In Jagex's
-        // architecture both services share one port; our split architecture (lobby 43594, world
-        // 43595) requires overriding via SET_WORLD_TARGET. We keep JS5 on the lobby port here
-        // and send SET_WORLD_TARGET from the lobby to steer world login to the world port.
+        line("param=39=false")
+        line("param=40=http://$host:${EnvVars.configHttpPort}")   // content server URL
+        // Game ports for JS5/lobby bootstrap. The local world socket target is carried in the
+        // lobby login-response world-target tail.
         line("param=41=$lobbyPort")                               // game port 1 (JS5 lives here)
         line("param=42=$lobbyPort")                               // game port 2 (was SSL 443)
         line("param=43=$lobbyPort")                               // game port 3
@@ -450,26 +455,6 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
     }
 
     companion object {
-        /**
-         * Check if a cached JS5 blob already contains a 2-byte version suffix.
-         *
-         * Container format: [1B type][4B compressedSize BE][compressedData][if compressed: 4B decompressedSize]
-         * Expected container size = 5 + compressedSize + (if type != 0: 4 else 0)
-         * If the blob is exactly 2 bytes longer than that, it already has a version suffix
-         * (from being downloaded via HTTP from Jagex).
-         */
-        private fun blobHasVersionSuffix(data: ByteArray): Boolean {
-            if (data.size < 5) return false
-            val compressedSize = ((data[1].toInt() and 0xFF) shl 24) or
-                    ((data[2].toInt() and 0xFF) shl 16) or
-                    ((data[3].toInt() and 0xFF) shl 8) or
-                    (data[4].toInt() and 0xFF)
-            val type = data[0].toInt() and 0xFF
-            val headerSize = if (type != 0) 9 else 5  // compressed types have 4-byte decompressed size
-            val expectedContainerSize = headerSize + compressedSize
-            return data.size == expectedContainerSize + 2
-        }
-
         private fun computeBinaryCrc(path: String): Long {
             val file = java.io.File(path)
             if (!file.exists()) return 0L
@@ -507,7 +492,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
             System.arraycopy(whirlpoolHash, 0, message, 1, 64)
 
             // RSA sign with the login key — rs3linux's embedded public key is
-            // patched by DARKAN_RSA_MODULUS which is the login modulus hex
+            // patched by DARKAN_RSA_MODULUS which is the login modulus hex.
             val modulus = BigInteger(EnvVars.loginRsaModulus)
             val exponent = BigInteger(EnvVars.loginRsaExponent)
             val messageBigInt = BigInteger(1, message) // positive BigInteger
@@ -524,7 +509,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
             }
 
             // Base64 encode with Jagex alternate alphabet (* for +, - for /)
-            val base64 = java.util.Base64.getEncoder().withoutPadding().encodeToString(sigBytes)
+            val base64 = Base64.getEncoder().withoutPadding().encodeToString(sigBytes)
             return base64.replace('+', '*').replace('/', '-')
         }
     }

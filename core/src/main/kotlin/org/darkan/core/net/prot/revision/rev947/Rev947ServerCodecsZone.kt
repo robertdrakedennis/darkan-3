@@ -141,11 +141,15 @@ internal fun Codec.registerRev947ServerCodecsZone() {
 
     // OBJ_ADD (op 38, 5B) — A3 §3.8.
     // Wire: g1 objIdHi; g1+128 objIdLo; g1 countHi; g1 countLo; g1 packedCoord.
+    // OURS' ObjAdd carries objId/count as packed ints (not Hi/Lo byte fields). Wire bytes are
+    // UNCHANGED — we just split the ints into the same Hi/Lo bytes the 947-3 RE documents:
+    //   objIdHi  = objId ushr 8   objIdLo = objId and 0xFF
+    //   countHi  = count ushr 8   countLo = count and 0xFF
     serverProt<ObjAdd>(opcode = 38, size = 5) { out ->
-        out.writeByte(objIdHi)
-        out.writeByteAdd(objIdLo)
-        out.writeByte(countHi)
-        out.writeByte(countLo)
+        out.writeByte(objId ushr 8)             // objIdHi
+        out.writeByteAdd(objId and 0xFF)        // objIdLo (g1+128)
+        out.writeByte(count ushr 8)             // countHi
+        out.writeByte(count and 0xFF)           // countLo
         out.writeByte(packedCoord)
     }
 

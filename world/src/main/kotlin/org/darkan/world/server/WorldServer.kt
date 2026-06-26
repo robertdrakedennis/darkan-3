@@ -16,41 +16,52 @@ import org.darkan.core.Logger.logTrace
 import org.darkan.core.Logger.logWarn
 import org.darkan.core.formatForProtocol
 import org.darkan.core.net.*
-import org.darkan.core.net.login.WorldLoginTokens
+import org.darkan.core.net.login.LoginToken
+import org.darkan.core.net.login.RsaCredentialTailParser
 import org.darkan.core.net.prot.*
 import org.darkan.core.net.prot.handler.PacketHandlers
 import org.darkan.core.net.session.GameSession
+import org.darkan.core.security.PasswordHash
+import org.darkan.core.model.Account
 import org.darkan.core.mongo.Accounts
 import org.darkan.core.social.gateway.*
-import org.darkan.world.entity.Player
+import org.darkan.world.net.GameHud
 import org.darkan.world.net.NpcInfoBuilder
+import org.darkan.world.net.Op81GpiPrefix
 import org.darkan.world.net.PlayerInfoBuilder
+import org.darkan.world.net.SceneMapCacheDiagnostics
+import org.darkan.world.net.SceneMapRegionPlanner
+import org.darkan.world.net.ZoneStreamer
+import org.darkan.world.entity.Player
+import org.darkan.world.entity.Rev948FirstLightVarpDefaults
 import org.darkan.world.social.SocialClient
 import org.darkan.world.world.Players
 import world.gregs.voidps.buffer.*
-import world.gregs.voidps.type.Tile
+import world.gregs.voidps.buffer.write.BufferWriter
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.secure.RSA
 import world.gregs.voidps.cache.secure.decryptXtea
 import java.math.BigInteger
+import java.security.SecureRandom
+import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 /**
  * Minimal world server that accepts lobby-to-world transfer connections.
  *
- * Handles the NXT world login handshake (loginType RECONNECT 2):
+ * Handles the NXT world login handshake:
  * 1. Connection type CONNECT_LOGIN (14) already read by the accept loop
- * 2. Sends the 9-byte exchange data: status byte (0) + 8-byte session key (client reads 9 — Phase 5)
- * 3. Client sends login opcode (16=LOGIN or 18=RECONNECT)
- * 4. RSA decrypt -> ISAAC keys (session-nonce slot is NOT rejected; reconnect carries one)
+ * 2. Sends JS5_SYNC response byte (0)
+ * 3. Client sends login opcode (16=RECONNECT or 18=LOGIN)
+ * 4. RSA decrypt -> ISAAC keys + LoginToken
  * 5. XTEA decrypt -> username, display mode, screen size, machine info
- * 6. Validates the lobby-issued session authorization by username (WorldLoginTokens, cross-process)
+ * 6. Verifies the LoginToken issued by the lobby
  * 7. Loads account from MongoDB
  * 8. Creates GameSession with ISAAC ciphers
  * 9. Sends WorldLoginDetails (pre-ISAAC)
  * 10. Notifies lobby of player online via SocialClient
- * 11. Enters session loop (in-game ClientProts op52/op98/op51 are framed + drained, never blocking)
+ * 11. Enters session loop
  */
 object WorldServer {
     private lateinit var job: Job
@@ -63,7 +74,7 @@ object WorldServer {
 
     private val worldRsaMod = BigInteger(EnvVars.worldRsaModulus)
     private val worldRsaExp = BigInteger(EnvVars.worldRsaExponent)
-    private val secureRandom = java.security.SecureRandom()
+    private val loginRandom = SecureRandom()
 
     private val pendingLogins = ConcurrentHashMap.newKeySet<String>()
     private val playersByUsername = ConcurrentHashMap<String, GameSession>()
@@ -155,14 +166,15 @@ object WorldServer {
     }
 
     private suspend fun initWorldLogin(input: ByteReadChannel, output: ByteWriteChannel, ip: String) {
-        // Step 1: Send the 9-byte exchange-data response — status byte (0) + 8-byte session key —
-        // IDENTICAL to the lobby login. The client's login state machine (LoginManager
-        // WAITING_FIRST_RESPONSE / step 30, login-protocol.md Phase 5) reads exactly 9 bytes here
-        // for BOTH the lobby and the world reconnect; if it gets only 1, it blocks forever waiting
-        // for the 8-byte session key and the world login never progresses. (The previous
-        // single-byte respond() was the silent stall.)
-        output.writeByte(ResponseOpcode.JS5_SYNC)
-        output.writeFully(ByteArray(8).also { secureRandom.nextBytes(it) })
+        // Step 1: Send the 9-byte first response: status byte (JS5_SYNC = 0 = OK) + 8-byte server
+        // seed. The client re-runs the SAME login state machine for the world hop as for the lobby
+        // (LoginStepWaitingFirstResponse expects 1 status + 8 seed = 9 bytes — boot/02 step 0x1e),
+        // so the world MUST emit the full 9 bytes exactly like LoginServer.handleLogin does. A bare
+        // 1-byte response leaves the client blocked reading the missing 8 seed bytes — the silent
+        // world-login stall flagged in docs/protocol/lobby-world-switch-948.md §2.
+        val serverSeed = ByteArray(8).also { loginRandom.nextBytes(it) }
+        output.writeByte(ResponseOpcode.JS5_SYNC) // 0 = OK
+        output.writeFully(serverSeed)
         output.flush()
 
         // Step 2: Read login opcode
@@ -210,21 +222,25 @@ object WorldServer {
         }
 
         val isaacKeys = IntArray(4) { sensitiveData.readInt() }
+        logTrace("World ISAAC keys: ${isaacKeys.joinToString(", ") { "0x${"%08x".format(it)}" }} from $ip")
 
-        // Session-nonce slot (LoginManager+0x138). A RECONNECT (loginType 2) carries a NON-ZERO
-        // session nonce here, so we must NOT reject on it — that was a hard blocker for every world
-        // reconnect. Mirrors the lobby login, which only logs this value. The world authorization is
-        // validated below by username via WorldLoginTokens, not by this nonce.
-        val sessionNonce = sensitiveData.readLong()
-        if (sessionNonce != 0L) {
-            logTrace("World login session nonce non-zero ($sessionNonce) from $ip — reconnect, continuing")
+        // 8-byte session/seed value the client echoes back here. For the world hop the real NXT
+        // client echoes the seed it stored from the world's INIT_GAME_CONNECTION first-response
+        // (LoginManager+0x40), so this is LEGITIMATELY NON-ZERO — rejecting on `!= 0` kicked the
+        // real client straight back to login (the 03:27:59 "RSA session check non-zero" abort).
+        // Mirror the lobby login (LoginServer.handleLogin), which reads + logs this value and
+        // never rejects on it: read it to keep the byte cursor aligned for the subsequent
+        // lobbyAuthToken/padding reads, but do not validate it.
+        // FUTURE HARDENING: echo-verify this against the seed the world sent in its INIT reply.
+        val sessionCheck = sensitiveData.readLong()
+        logTrace("RSA session check: $sessionCheck from $ip")
+
+        val credentialTail = if (sensitiveData.remaining > 0) {
+            RsaCredentialTailParser.parse(sensitiveData.readByteArray(sensitiveData.remaining.toInt()))
+        } else {
+            RsaCredentialTailParser.parse(ByteArray(0))
         }
-
-        // Remaining RSA-block tail (legacy auth-token slot + two session-token longs). The exact
-        // reconnect layout is not yet fully RE'd; none of these bytes gate the login (auth is by
-        // username via WorldLoginTokens), so a tail misparse here is harmless — the XTEA section is
-        // read from the main packet, independently of this decrypted RSA block.
-        sensitiveData.readRSString() // legacy auth-token slot (unused by the world token bridge)
+        logTrace("World RSA credential type: ${credentialTail.credentialType ?: "legacy"} from $ip")
 
         // Step 6: XTEA decrypt
         val xtea = packet.decryptXtea(isaacKeys)
@@ -264,26 +280,6 @@ object WorldServer {
             return output.finish(ResponseOpcode.LOGIN_LIMIT_EXCEEDED)
 
         try {
-            // Step 8: Validate the lobby-issued session authorization (cross-process token bridge).
-            // The lobby wrote a TTL'd, signed authorization for this username at login-success; the
-            // world confirms it here. This is the auth for the world login — there is no second
-            // password/credential exchange (loginType RECONNECT 2). See WorldLoginTokens.
-            val authorized = try {
-                WorldLoginTokens.validate(username, EnvVars.worldLoginTokenSecret)
-            } catch (e: Exception) {
-                logError("World login token validation error for $username", e)
-                false
-            }
-            if (authorized) {
-                logInfo("World login authorized for '$username' via lobby session token")
-            } else if (EnvVars.debug) {
-                logWarn("World login for '$username' has no valid lobby authorization — ALLOWING (debug). The lobby issues one at login-success; check Mongo connectivity / token TTL.")
-            } else {
-                logError("World login REJECTED for '$username': no valid lobby authorization (token bridge)")
-                return output.finish(ResponseOpcode.INVALID_CREDENTIALS)
-            }
-
-            // Step 9: Load account
             val account = try {
                 Accounts.findByUsername(username)
             } catch (e: Exception) {
@@ -299,6 +295,25 @@ object WorldServer {
             }
             if (playersByUsername.containsKey(username)) {
                 return output.finish(ResponseOpcode.ACCOUNT_ONLINE)
+            }
+
+            // Step 8: Verify the world login proof. Launcher/session-token paths carry a compact
+            // lobby token; direct username/password login carries the password again in the same
+            // credential branch.
+            val nowMs = System.currentTimeMillis()
+            val verifiedString = LoginToken.verify(credentialTail.tokenString, nowMs, EnvVars.worldLoginTokenSecret)
+            if (verifiedString != null && verifiedString.username != username) {
+                logError("LoginToken username mismatch: token=${verifiedString.username} login=$username")
+                return output.finish(ResponseOpcode.INVALID_CREDENTIALS)
+            }
+            val compactToken = LoginToken.Compact(credentialTail.sessionNonce1, credentialTail.sessionNonce2)
+            val verifiedCompact = LoginToken.verifyCompact(username, compactToken, nowMs, EnvVars.worldLoginTokenSecret)
+            val verifiedPassword = credentialTail.password.isNotEmpty() &&
+                PasswordHash.verifySuspend(credentialTail.password, account.passwordHash)
+            logTrace("World auth proof for $username: tokenString=${verifiedString != null} compact=$verifiedCompact password=$verifiedPassword")
+            if (verifiedString == null && !verifiedCompact && !verifiedPassword) {
+                logWarn("World auth proof verify failed for $username")
+                return output.finish(ResponseOpcode.INVALID_CREDENTIALS)
             }
 
             // Step 10: ISAAC cipher setup
@@ -328,55 +343,92 @@ object WorldServer {
             // during init (e.g. a failed flush) would otherwise leak one of the 2048 slots
             // permanently. The single try/finally below guarantees it.
             try {
-                // Realign the viewport's high-res-indices[0] with the assigned slot id. This
-                // SHOULD be done by Viewport but it captures owner.index at construction time;
-                // doing it here avoids a refactor of Viewport's init order.
-                player.viewport.highResIndices[0] = playerIndex
+                player.viewport.resetAfterGpiPrefix(playerIndex)
+                // Step 13: Send the world-login RESPONSE (pre-ISAAC, raw — NO opcode/length framing).
+                //
+                // CRITICAL (docs/protocol/lobby-world-switch-948.md §9): in WORLD mode the client's
+                // LoginStepDealWithFirstResponse routes result byte 2 to step 0xfa (server-client-var
+                // block), NOT to HandleLoginData like the lobby. So after the SUCCESS byte the world
+                // client parses a fixed THREE-PART pre-ISAAC stream and `WorldLoginDetails` is the LAST
+                // part, not the first:
+                //   Part A — server-client-var block: [u16 BE len][u8 ackFlag][ {u16 BE varcId,value}… ]
+                //   Part B — players byte: 0x02
+                //   Part C — login-data block: [u8 len][u8 leadFlag=0][WorldLoginDetails body][u16 reserved=0]
+                //            [u32 serverTime][u64 sid1][u64 sid2]
+                //
+                // The OLD code sent only Part C, mis-framed as the op-2 smart-opcode/VarByte packet
+                // (`02 14 <20-byte body>`). The client read `[02][14]` as a 2-byte BE varc length (=532),
+                // swallowed the body + ~514 bytes of the following ISAAC burst, walked it as varc ids,
+                // hit 0x6803 → GetVarcType NULL → SIGSEGV @ +0x40 in LoginStepWaitingServerClientVar.
+                //
+                // FIX (§9.6 Option 1): write Parts A+B+C as one raw pre-ISAAC blob.
+                //  - Part A is generated by ServerClientVarBlock. First light uses an empty
+                //    continue block until cache-backed varc values are known.
+                //  - Part B = 02: players byte; step 0x82 requires ==2 (§9.5).
+                //  - Part C: 1-byte length prefix (= bytes after it), leadFlag 0x00 (so the client's
+                //    field-0 sub-reader FUN_0017a620 — which would pull 4 ISAAC-keystream bytes that
+                //    don't exist yet — is skipped), the EXISTING WorldLoginDetails body fields 1–11
+                //    (unchanged — they ARE the correct world HandleLoginData body, §9.4), then the 4
+                //    trailing fields the client unconditionally reads (§9.4 fields 12–15): u16 reserved,
+                //    u32 serverTime, u64 sid1, u64 sid2.
+                //
+                // serverTime = server epoch seconds; sid1/sid2 = 0 (§9.5/§9.6: "0 ok for first light").
+                // worldName is the only variable-length field, so loginDataLen is computed, not constant.
+                val details = WorldLoginDetails(
+                    rights = if (EnvVars.debug) 2 else account.rights,
+                    modLevel = 0,
+                    quickChat = false,
+                    verifiedEmail = false,
+                    aBool7322 = false,
+                    quickChatOnly = false,
+                    playerIndex = playerIndex,
+                    members = EnvVars.worldMembers,
+                    dob = 0,
+                    memberWorld = EnvVars.worldMembers,
+                    worldName = EnvVars.worldName,
+                )
+                writeWorldLoginResponse(output, details)
+                output.flush()
 
-                // Spawn the avatar at the Lumbridge tile that matches the op81 REBUILD_NORMAL focus
-                // (chunk 400,400 -> tile centre 3204,3204; see sendWorldLoginCore). The first
-                // PLAYER_INFO (op 22) teleports the local player to exactly THIS tile (Player.teleporting
-                // is true at construction), so the avatar lands inside the scene the client just built.
-                player.tile = Tile(SPAWN_TILE_X, SPAWN_TILE_Y, SPAWN_PLANE)
+                // Step 14: Send the world-init burst (op81 scene build + UI ops + op5 + varp
+                // baseline). The spawn tile is the SINGLE source of truth: it drives the op81 coord-header centre
+                // zone here AND the op22 GPI local 30-bit tile below (PlayerInfoBuilder reads
+                // player.tile). They are now coherent — the 400-vs-404 split + captured 404/404
+                // prefix that quit the client (docs/protocol/world-bootstrap-948.md §4) is gone.
+                sendWorldInitPackets(session, player)
 
-                // Step 13: Send the world login-success data as a RAW [length][body] block,
-                // mirroring the lobby's framing (LoginServer.handleLogin / buildLobbyData). It must
-                // NOT go through serverProt: that prepends opcode 2 + its own varByte length, which
-                // the client's login parser reads as the block length → it consumes 2 bytes and
-                // desyncs the entire login response → the client hangs on "loading" then times out.
-                // Body is byte-identical to the former WorldLoginDetails(op2) encoder (booleans as
-                // 0/1 bytes, worldName null-terminated CP1252); only the framing changed.
-                val loginData = BufferWriter(64).apply {
-                    writeByte(if (EnvVars.debug) 2 else account.rights) // rights
-                    writeByte(0)                                        // modLevel
-                    writeByte(0)                                        // quickChat
-                    writeByte(0)                                        // verifiedEmail
-                    writeByte(0)                                        // aBool7322
-                    writeByte(0)                                        // quickChatOnly
-                    writeShort(playerIndex)                             // playerIndex
-                    writeByte(if (EnvVars.worldMembers) 1 else 0)       // members
-                    writeMedium(0)                                      // dob
-                    writeByte(if (EnvVars.worldMembers) 1 else 0)       // memberWorld
-                    EnvVars.worldName.forEach { writeByte(it.code and 0xFF) } // worldName (CP1252)
-                    writeByte(0)                                        // NUL terminator
-                }.toArray()
-                output.writeByte(loginData.size.toByte())
-                output.writeFully(loginData)
-                session.flush()
+                session.send(DestroyZoneData())
+                session.send(SetNpcOp())
+                session.send(PlayerInfoBuilder.buildWorldEntrySync(player))
+                session.send(CamUpdate.firstLight())
+                session.send(UpdateIgnoreListRaw())
 
-                // Step 14: Send world init packets
-                sendWorldInitPackets(session, account)
+                // Step 15-zones: stream the op78 scene (13×13 zones × planes 0–3) that POPULATES the
+                // client's scene graph and so advances the scene-build phase (ClientSceneManager+0x1c,
+                // client+0x19578) — the foundational world-entry render gate. Without it the graph
+                // stays empty, the phase never leaves 0 ("Running Auto Configuration"), and the client
+                // black-screens while emitting zero C2S (latest prod streams 606 op78 before HUD).
+                // MUST be
+                // after op55 DestroyZoneData (zone reset) and before the op3 HUD commit + op75 (below).
+                ZoneStreamer.streamScene(session, player.viewport)
 
-                // Step 15: Send initial PLAYER_INFO / NPC_INFO so the client renders the
-                // local avatar before the tick loop's first per-tick build lands. After this
-                // the WorldTick loop will drive subsequent updates at 600ms cadence.
-                // PLAYER_INFO uses the single 4-pass build form; the local player's high-res
-                // entry teleports to its spawn tile (Player.teleporting set at construction).
-                session.send(PlayerInfoBuilder.build(player))
-                session.send(NpcInfoBuilder.buildInit(player))
+                // buildWorldEntrySync clears firstTick and marks appearance delivered.
+                sendInitialInventories(session)
+
+                // Step 15b: THE IN-GAME TRANSITION (§8 task #1+#2) — swap the client's top-level
+                // interface from the lobby/worldlist UI to the in-game HUD, then build the HUD, then
+                // (Step 15c) flip the render-ready gate LAST. Without this the client stays on the
+                // lobby interface (polls op54 worldlist-fetch) and never commits to in-game.
+                sendInGameHud(session)
+
+                session.send(SceneFlag(0))
+                sendFirstLightTail(session, player)
+                session.send(UpdateRunenergy(1))
+                session.send(SetReadyFlag())
                 session.flush()
 
                 // Step 16: Register player and notify lobby
+                player.readyForTick = true
                 playersByUsername[username] = session
 
                 CoroutineScope(dispatcher).launch {
@@ -418,141 +470,257 @@ object WorldServer {
     }
 
     /**
-     * Send world init packets after login. Based on docs/net/account-creation-sequence.md Phase 1.
+     * Writes the full world-login RESPONSE (Parts A + B + C) as a single raw pre-ISAAC blob.
      *
-     * Routes to either character creation (interface 1349) or the game HUD (1477) based
-     * on whether the account has completed character creation. We intentionally do NOT
-     * send RUNCLIENTSCRIPT(1246) — the display name prompt — because display names are
-     * managed via the web, not in-client.
+     * This is the §9.6 fix for the world-login segfault. See the call site (Step 13) for the why.
+     * Layout (docs/protocol/lobby-world-switch-948.md §9.5), all big-endian, NO opcode/length framing
+     * other than the explicit length prefixes below:
+     *
+     *   PART A (server-client-var block — steps 0xfa→0x104→0x10e):
+     *     u16  varcBlockLen            (BE; length of the part-A body that follows)
+     *     u8   ackFlag      = 0x01     (==1 advances to Part B; len==1 ⇒ step 0x10e loop guard `1<1` false)
+     *   PART B (players byte — step 0x82):
+     *     u8   playersByte  = 0x02     (==2 advances to Part C)
+     *   PART C (login-data block — steps 0x8c→0x96, = darkan's WorldLoginDetails):
+     *     u8   loginDataLen            (1-byte count of every byte AFTER it: leadFlag … sessionId2)
+     *     u8   leadFlag     = 0x00     (field 0; 0 ⇒ skip FUN_0017a620's 4-byte ISAAC-keystream peek)
+     *     ... WorldLoginDetails body fields 1–11 (identical transforms to the op-2 encoder) ...
+     *     u16  reserved16   = 0        (BE; client discards — §9.4 field 12)
+     *     u32  serverTime              (BE; server epoch seconds — §9.4 field 13)
+     *     u64  sessionId1   = 0        (BE — §9.4 field 14; 0 ok for first light)
+     *     u64  sessionId2   = 0        (BE — §9.4 field 15; 0 ok for first light)
+     *
+     * loginDataLen is computed (not constant) because worldName is variable-length. For
+     * worldName="Darkan" it is 43 (≤255, so the 1-byte prefix is sufficient). If a future worldName
+     * pushes the body past 255 the client's 1-byte length step (0x8c) cannot represent it — the
+     * length is asserted below so that surfaces loudly rather than silently truncating.
      */
-    private suspend fun sendWorldInitPackets(session: GameSession, account: org.darkan.core.model.Account) {
-        sendWorldLoginCore(session)
+    private suspend fun writeWorldLoginResponse(output: ByteWriteChannel, d: WorldLoginDetails) {
+        // Part C body: leadFlag(0) + fields 1–11 + 4 trailing fields. Built first to measure its length.
+        // Fields 1–11 mirror the op-2 encoder in Rev948ServerCodecsMisc byte-for-byte.
+        val body = BufferWriter(96).apply {
+            writeByte(0)                  // field 0: leadFlag = 0  (skip the gated ISAAC-prefix reader)
+            writeByte(d.rights)           // field 1
+            writeByte(d.modLevel)         // field 2
+            writeByte(d.quickChat)        // field 3  (Boolean overload → 0/1)
+            writeByte(d.verifiedEmail)    // field 4
+            writeByte(d.aBool7322)        // field 5
+            writeByte(d.quickChatOnly)    // field 6
+            writeShort(d.playerIndex)     // field 7  (BE u16 — MUST equal the GPI slot)
+            writeByte(d.members)          // field 8
+            writeMedium(d.dob)            // field 9  (BE s24)
+            writeByte(d.memberWorld)      // field 10
+            writeString(d.worldName)      // field 11 (CP1252 + NUL — same bytes as ByteWriteChannel.writeRSString)
+            // Trailing fields the client reads unconditionally (§9.4 fields 12–15):
+            writeShort(0)                                              // field 12: reserved16 (discarded)
+            writeInt((System.currentTimeMillis() / 1000).toInt())      // field 13: serverTime (epoch seconds)
+            writeLong(0L)                                              // field 14: sessionId1
+            writeLong(0L)                                              // field 15: sessionId2
+        }.toArray()
 
-        if (!account.characterCreated) {
-            logInfo("Opening character creation UI for ${session.ip} (${account.displayName})")
-            sendCharacterCreationUI(session)
-        } else {
-            logInfo("Opening game HUD for ${session.ip} (${account.displayName})")
-            // Per A1 §1.1: IF_OPENTOP is opcode 68 (6B) — the wire format is
-            // (topLevelId BE u32, subId LE u16). For the main game HUD root we open
-            // sub-component 0 (the root frame inside interface 1477).
-            session.send(IfOpenTop(topLevelId = GAME_HUD_INTERFACE, subId = 0))
+        require(body.size <= 255) {
+            "World login-data body is ${body.size} bytes (>255) — the client's step 0x8c reads a " +
+                "1-byte length and cannot frame this. Shorten worldName ('${d.worldName}')."
         }
 
+        val serverClientVarBlock = ServerClientVarBaseline.firstLight().encode()
+        val response = BufferWriter(body.size + serverClientVarBlock.size + 4).apply {
+            // Part A — server-client-var block
+            writeShort(serverClientVarBlock.size)
+            writeBytes(serverClientVarBlock)
+            // Part B — players byte
+            writeByte(0x02)               // playersByte = 2
+            // Part C — login-data block
+            writeByte(body.size)          // loginDataLen (1 byte)
+            writeBytes(body)
+        }.toArray()
+
+        output.writeFully(response)
+    }
+
+    private suspend fun sendWorldInitPackets(session: GameSession, player: Player) {
+        sendWorldLoginCore(session, player)
         session.flush()
     }
 
-    /** Core world login packets common to both character creation and game HUD paths. */
-    private suspend fun sendWorldLoginCore(session: GameSession) {
-        // 1. Session token (HASHED_WORLD_TOKEN) — no RE'd 948 opcode yet (948 op 6 is
-        // LOC_PREFETCH); sendIfSupported skips it with a single INFO log instead of
-        // per-login warn spam until the 948 destination is documented.
-        val tokenBytes = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
-        val token = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes)
-        session.sendIfSupported(HashedWorldToken(token))
+    private suspend fun sendInGameHud(session: GameSession) {
+        GameHud.open(session, rootInterface = GAME_HUD_INTERFACE)
+    }
 
-        // 2. Reset client varcache
+    /** Core world login packets before the 1477 HUD transition. */
+    private suspend fun sendWorldLoginCore(session: GameSession, player: Player) {
+        // op81 REBUILD_NORMAL_SIMPLE — **Shape B**: body = [5119-byte GPI prefix][18-byte coord
+        // header] (docs/protocol/world-bootstrap-948.md §"⚠️ CORRECTION (2026-06-23)").
+        //
+        // On world entry the client sets worldState+0x49=1, so op81's handler UNCONDITIONALLY runs
+        // the gBit-based GPI-prefix parser (NO bounds check) BEFORE reading the coord header. The
+        // parser consumes 30 + 2046×20 = 40950 bits = 5119 bytes, then the handler reads the header
+        // at the advanced cursor (magic 0x85 at body offset 5122). Shipping the bare 18-byte header
+        // (Shape A) makes the parser over-read 5101 bytes of heap, place the player at a garbage
+        // tile, and read the header out-of-bounds → magic ≠ 0x85 → op81 ABORTS before the BuildArea
+        // alloc and before ProcessCameraReset → black screen. So the prefix is mandatory; we
+        // generate it from local state via [Op81GpiPrefix].
+        //
+        // The spawn tile is the SINGLE source of truth for all three coordinate facets that MUST
+        // agree (§4 coherence): (a) the op81 centre zone (header +4 X / +1,+2 Z), (b) the op81
+        // build-area corners (packedCoordA/B), and (c) the GPI prefix's local 30-bit tile. The
+        // centre zone and prefix tile come from `player.tile`; the first-light build-area uses the
+        // larger asymmetric map-square grid observed in production rev948 so the scene manager
+        // allocates the same map window before the op78 stream arrives.
+        val spawn = player.tile
+        val buildArea = player.viewport.loadFirstLightBuildArea(spawn)
+        val centreZone = spawn.zone                      // render-scene centre (positioned inside the grid)
+        // GPI prefix: local player's 30-bit tile == this same spawn tile; the skipped slot is the
+        // player's allocated index (== WorldLoginDetails.playerIndex == viewport.highResIndices[0]).
+        val gpiPrefix = Op81GpiPrefix.build(spawnTile = spawn, localPlayerIndex = player.index)
+        session.send(
+            RebuildNormalSimple(
+                zoneX = centreZone.x,                    // +4  centre zone X (absolute, BE u16)
+                zoneZ = centreZone.y,                    // +1/+2 centre zone Z (absolute, LE u16)
+                packedCoordA = buildArea.packedCoordA,   // +10 SW corner {minRegionX, minRegionZ}
+                packedCoordB = buildArea.packedCoordB,   // +14 NE corner {maxRegionX, maxRegionZ}
+                cameraRotation = 7,                      // harmless (§5): op81's camera anchor is a map-config flag, not this byte. Production ships 7. Kept so the wire matches; not the render lever.
+                sceneRootId = EnvVars.worldSceneRootId,
+                rebuildPrefix = gpiPrefix,               // Shape B: 5119-byte GPI init; body = 5119 + 18 = 5137
+            )
+        )
+        logTrace("World build area for ${player.account.username}: $buildArea centreZone=${centreZone.x},${centreZone.y} gpiPrefix=${gpiPrefix.size}B slot=${player.index}")
+        val sceneRegions = SceneMapRegionPlanner.regionsForScene(centreZone.x, centreZone.y)
+        logInfo(
+            "World scene map groups for ${player.account.username}: " +
+                SceneMapCacheDiagnostics.describe(Cache.get(), sceneRegions)
+        )
+
+        val tokenBytes = ByteArray(32).also { loginRandom.nextBytes(it) }
+        val token = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes)
+        session.send(HashedWorldToken(token))
+        session.send(MinimapState(0, 0))
+        session.send(JcoinsUpdate(INITIAL_DISPLAY_INT))
+        session.send(MinimapFlagA(1))
+        session.send(MinimapFlagB(1))
+        session.send(SetPlayerOp(2, "Follow", priority = true))
+        session.send(SetPlayerOp(3, "Trade with", priority = true))
+        session.send(SetPlayerOp(5, "Req Assist", priority = true))
+        session.send(SetPlayerOp(6, null, priority = true))
+        session.send(SetPlayerOp(7, "Examine", priority = true))
+        session.send(MidiSong(INITIAL_MIDI_SONG))
+        session.send(SetPlayerOp(4, "Duel", priority = true))
         session.send(ResetClientVarcache())
 
-        // 3. Stats (29 skills, all level 1 except Hitpoints=10 with 1154 xp)
+        sendVarpBaseline(session, player)
+    }
+
+    private suspend fun sendVarpBaseline(session: GameSession, player: Player) {
+        player.varps.seedDefaults(Rev948FirstLightVarpDefaults)
+        val emitted = player.varps.flush(session)
+        logTrace("World varp baseline for ${player.account.username}: ${emitted.size} packet(s)")
+    }
+
+    private suspend fun sendInitialStats(session: GameSession) {
         for (i in 0..28) {
             if (i == 3) session.send(UpdateStat(i, 1154, 10))
             else session.send(UpdateStat(i, 0, 1))
         }
-
-        // 4. Map build — place player at Lumbridge (tile 3204, 3204 = chunk 400, 400)
-        //
-        // REBUILD_NORMAL is 948 op 81 (varShort), a FIXED 18-byte body (see RebuildNormalSimple /
-        // Rev948ServerCodecsRebuild). It carries NO XTEA/map payload — the client loads the scene's
-        // map/loc/XTEA from the JS5 cache. Magic byte 0x85 at body offset 3 is mandatory.
-        //
-        // FIELD UNITS — per 948-5 handler 0x001daa70 analysis (networking-protocol-engineer):
-        //   * playerCoordX/Y are CHUNK coordinates, NOT tiles. The handler computes the local scene
-        //     focus as (val - sceneBaseChunks) * 8, so val must be in chunk units (8 tiles) for the
-        //     focus to land inside the 104-tile scene; raw tile values would push it far off-scene.
-        //   * srcPackedCoord1/2 carry the tile-precise position, packed (plane<<28)|(tileY<<14)|tileX;
-        //     the client uses x>>6 / y>>6 (map-square units) to instance the scene.
-        //   * worldAreaTypeId = 0: IGNORED for a normal overworld build. The handler only consults it
-        //     when the world-entity build manager (Client+0xca6, state field +0x3c == 4) is active
-        //     (instanced / world-entity regions). For a plain Lumbridge login the gate is false, so
-        //     the scene is built from the default world area (NullConfigType @0x015d4d60) using only
-        //     the two packed coords. 0 is therefore safe (an unknown id resolves to NullConfigType too).
-        //
-        // TODO(world-owner): confirm against a clean 18-byte Lumbridge op81 capture. The only capture
-        //   on hand was Fort Forinthry (a construct-region area), so playerCoordX/Y units (chunk vs
-        //   tile) and a non-zero worldAreaTypeId, if ever required, are not yet runtime-verified.
-        val chunkX = 400
-        val chunkZ = 400
-        val playerTileX = chunkX * 8 + 4    // tile centre within the chunk
-        val playerTileY = chunkZ * 8 + 4
-        val packedCoord = (0 shl 28) or ((playerTileY and 0x3FFF) shl 14) or (playerTileX and 0x3FFF)
-        session.send(
-            RebuildNormalSimple(
-                playerCoordX = chunkX,
-                playerCoordY = chunkZ,
-                cameraAngle = 0,
-                worldAreaTypeId = 0,
-                srcPackedCoord1 = packedCoord,
-                srcPackedCoord2 = packedCoord,
-            )
-        )
-
-        // 5. RuneCoin balance display
-        session.send(JcoinsUpdate(0))
-
-        // 6. Player right-click options (standard 4: Follow, Trade, Req Assist, Examine)
-        session.send(SetPlayerOp(3, "Follow"))
-        session.send(SetPlayerOp(4, "Trade with"))
-        session.send(SetPlayerOp(6, "Req Assist"))
-        session.send(SetPlayerOp(8, "Examine"))
-
-        // 7. Empty ignore list — 948 op 130 encoder is intentionally disabled (wire format
-        // unconfirmed, see Rev948ServerCodecsSocial); skip with a one-time INFO log.
-        session.sendIfSupported(UpdateIgnoreList(emptyList()))
     }
 
-    /**
-     * Open the character creation UI (interface 1349).
-     *
-     * Per docs/net/account-creation-sequence.md Phase 2, the full sequence involves ~40
-     * IF_SETPOSITION calls and ~800 IF_SETEVENTS2 calls to wire up all the sub-interfaces
-     * and enable click events on every option. This is a minimal first-pass — we send just
-     * the setup scripts and the top-level interface to see what the client renders.
-     *
-     * We explicitly do NOT send RUNCLIENTSCRIPT(1246) — that would prompt the client to
-     * enter a display name, but display names are managed via the web.
-     */
-    private suspend fun sendCharacterCreationUI(session: GameSession) {
-        // Pre-interface setup scripts (exact args from capture)
-        session.send(RunClientScript.of(16300, 0, 0, 0, 0))
-        session.send(RunClientScript.of(671, 0, 0, 0, 0))
-        session.send(RunClientScript.of(20611))
+    private suspend fun sendInitialInventories(session: GameSession) {
+        session.send(UpdateInvFull(inventoryId = 0x0313))
+        session.send(
+            UpdateInvFull(
+                inventoryId = 0x031B,
+                entries = listOf(InventoryEntry(itemId = 0xCD4B, quantity = 1000)),
+            )
+        )
+        session.send(UpdateInvFull(inventoryId = 0x037B))
+        session.send(
+            UpdateInvFull(
+                inventoryId = 0x005D,
+                flags = 0x2,
+                entries = listOf(InventoryEntry(itemId = 0x013B, quantity = 1, metadata = 0)),
+            )
+        )
+        session.send(
+            UpdateInvFull(
+                inventoryId = 0x005E,
+                flags = 0x2,
+                entries = listOf(
+                    InventoryEntry(itemId = -1, quantity = 0, metadata = 0),
+                    InventoryEntry(itemId = -1, quantity = 0, metadata = 0),
+                    InventoryEntry(itemId = -1, quantity = 0, metadata = 0),
+                    InventoryEntry(itemId = 0x04B5, quantity = 1, metadata = 0),
+                ),
+            )
+        )
+        session.send(UpdateInvFull(inventoryId = 0x026F))
+        session.send(
+            UpdateInvFull(
+                inventoryId = 0x037F,
+                entries = listOf(
+                    InventoryEntry(itemId = 0x03C0, quantity = 0),
+                    InventoryEntry(itemId = 0x224A, quantity = 0),
+                    InventoryEntry(itemId = 0x224C, quantity = 0),
+                    InventoryEntry(itemId = 0x224E, quantity = 0),
+                    InventoryEntry(itemId = 0xD64C, quantity = 0),
+                    InventoryEntry(itemId = 0xD64E, quantity = 0),
+                    InventoryEntry(itemId = 0xD650, quantity = 0),
+                    InventoryEntry(itemId = 0xD652, quantity = 0),
+                    InventoryEntry(itemId = 0xD654, quantity = 0),
+                    InventoryEntry(itemId = 0xD656, quantity = 0),
+                ),
+            )
+        )
+    }
 
-        // Open the character creation root interface per A1 §1.1 (op 68, 6B).
-        session.send(IfOpenTop(topLevelId = CHARACTER_CREATION_INTERFACE, subId = 0))
-
-        // TODO: IF_SETPOSITION ×40 + IF_SETEVENTS2 ×800 for sub-interfaces (see account-creation-sequence.md)
+    private suspend fun sendFirstLightTail(session: GameSession, player: Player) {
+        session.send(NpcInfoThunk())
+        session.send(TriggerOnDialogAbort())
+        session.send(ClearPendingUpdates())
+        session.send(NpcInfoBuilder.buildInit(player))
+        sendInitialStats(session)
+        session.send(SetPlayerOp2(0))
+        session.send(SetPlayerOp3(100))
+        session.send(ResetEntityLists())
+        session.send(SetMultiwayState(0))
+        session.send(ClanChannelFull(main = true))
+        for (slot in 0..7) {
+            session.send(
+                CutsceneData(
+                    group = 0,
+                    slot = slot,
+                    mode = 7,
+                    extendedMode = 2,
+                    shape = 0,
+                    flags = 0,
+                    id = 0,
+                    primaryLong = 0,
+                    primaryInt = 0,
+                    secondaryInt = 0,
+                    secondaryLong = 0,
+                    skipLength = 0,
+                )
+            )
+        }
+        for (slot in 0..7) {
+            session.send(PlayerInfoDecode(slot = slot, mode = 0))
+        }
+        session.send(RebuildRegion.firstLight())
+        session.send(MinimapFlagB(1))
+        session.send(MinimapFlagA(1))
+        session.send(TriggerOnDialogAbort())
     }
 
     /**
      * Dispatch loop for the world session.
      * Reads decoded packets from the session's read channel and dispatches to handlers.
-     * Sends periodic keepalives.
      */
     private suspend fun worldSessionLoop(session: GameSession) {
         var packetCount = 0L
-        var lastKeepaliveSent = System.currentTimeMillis()
-        var rateWindowStart = lastKeepaliveSent
+        var rateWindowStart = System.currentTimeMillis()
         var rateWindowCount = 0
 
         try {
-            // Send initial keepalive
-            session.send(NoTimeout())
-            session.flush()
-            logTrace("Sent initial NO_TIMEOUT to ${session.ip}")
-
             while (!session.disconnected) {
-                val packet = kotlinx.coroutines.withTimeoutOrNull(KEEPALIVE_INTERVAL_MS) {
+                val packet = kotlinx.coroutines.withTimeoutOrNull(SESSION_POLL_INTERVAL_MS) {
                     session.readChannel.receive()
                 }
 
@@ -565,17 +733,7 @@ object WorldServer {
                 // Flush any queued responses
                 session.flush()
 
-                // Send periodic keepalives — flushed immediately so they aren't delayed
-                // until the next loop iteration.
                 val now = System.currentTimeMillis()
-                if (now - lastKeepaliveSent > KEEPALIVE_INTERVAL_MS) {
-                    session.send(NoTimeout())
-                    session.flush()
-                    lastKeepaliveSent = now
-                }
-
-                // Windowed rate check (NOT a lifetime cap — a healthy client would trip
-                // a lifetime cap eventually). Disconnect so the socket actually closes.
                 if (now - rateWindowStart >= PACKET_RATE_WINDOW_MS) {
                     rateWindowStart = now
                     rateWindowCount = 0
@@ -656,8 +814,9 @@ object WorldServer {
         socialClient.sendClientPacket(username, packet)
     }
 
-    private const val KEEPALIVE_INTERVAL_MS = 15_000L
-
+    private const val SESSION_POLL_INTERVAL_MS = 1_000L
+    private const val INITIAL_DISPLAY_INT = -1381430710
+    private val INITIAL_MIDI_SONG = byteArrayOf(0x7E, 0x8C.toByte(), 0xE3.toByte(), 0x00, 0x00)
     /** Rolling window for the inbound packet-rate check. */
     private const val PACKET_RATE_WINDOW_MS = 10_000L
 
@@ -667,17 +826,6 @@ object WorldServer {
      * traffic while still catching floods quickly.
      */
     private const val MAX_PACKETS_PER_RATE_WINDOW = 2_000
-
-    /**
-     * Lumbridge spawn tile. Matches the op81 REBUILD_NORMAL focus chunk (400,400 -> tile centre
-     * 3204,3204) so the first PLAYER_INFO (op 22) teleport lands the avatar inside the built scene.
-     */
-    private const val SPAWN_TILE_X = 3204
-    private const val SPAWN_TILE_Y = 3204
-    private const val SPAWN_PLANE = 0
-
-    /** Top-level interface ID for the character creation / gamemode selection screen. */
-    private const val CHARACTER_CREATION_INTERFACE = 1349
 
     /** Top-level interface ID for the main in-game HUD. */
     private const val GAME_HUD_INTERFACE = 1477

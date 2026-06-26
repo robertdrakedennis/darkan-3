@@ -1,30 +1,39 @@
 package org.darkan.core.mongo
 
+import de.flapdoodle.embed.mongo.config.Net
 import de.flapdoodle.embed.mongo.distribution.Version
+import de.flapdoodle.embed.mongo.types.DatabaseDir
 import de.flapdoodle.embed.mongo.transitions.Mongod
 import de.flapdoodle.embed.mongo.transitions.RunningMongodProcess
 import de.flapdoodle.reverse.TransitionWalker
+import de.flapdoodle.reverse.transitions.Start
+import org.darkan.core.EnvVars
 import org.darkan.core.Logger
 import java.io.File
 import java.io.RandomAccessFile
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.nio.file.Files
+import java.nio.file.Path
+import kotlin.io.path.Path
 
 /**
  * Optional in-process MongoDB used for dev (`EMBEDDED_MONGO=true`).
  *
  * SHARED across processes: `:lobby` and `:world` are separate JVMs but must see the same data
- * (accounts, the lobby→world token bridge, …). The first process to start boots a mongod and
- * publishes its URI to [uriFile]; every later process (guarded by [lockFile]) reuses that running
- * instance instead of booting its own empty one — otherwise each process gets a private, empty DB
- * and nothing the lobby writes is visible to the world. Only the owner stops it.
+ * (accounts, the lobby→world token bridge, …). The first process to start boots a mongod on the
+ * fixed [EnvVars.embeddedMongoHost]:[EnvVars.embeddedMongoPort] with a persistent data dir; every
+ * later process detects the already-listening instance and reuses it instead of booting its own
+ * empty one — otherwise each process gets a private DB and nothing the lobby writes is visible to
+ * the world. Only the owner stops it.
  *
- * On the first ever run Flapdoodle downloads a mongod binary into `~/.embedmongo/`. The data lives
- * in a temp dir the owner's mongod cleans up on stop — fine for dev, NOT for prod.
+ * The fixed host/port + persistent [EnvVars.embeddedMongoDataDir] make reuse deterministic across
+ * processes; a cross-process file lock serializes the start-or-reuse decision so a lobby+world race
+ * can't boot two mongods on the same port. On the first ever run Flapdoodle downloads a mongod
+ * binary into `~/.embedmongo/`. The data dir persists between runs — fine for dev, NOT for prod.
  */
 object EmbeddedMongo {
     private val tmpDir = File(System.getProperty("java.io.tmpdir"))
-    private val uriFile = File(tmpDir, "darkan-embedded-mongo.uri")
     private val lockFile = File(tmpDir, "darkan-embedded-mongo.lock")
 
     private var running: TransitionWalker.ReachedState<RunningMongodProcess>? = null
@@ -37,28 +46,34 @@ object EmbeddedMongo {
         running?.let { return uri!! }
         uri?.let { return it }
 
+        val host = EnvVars.embeddedMongoHost
+        val port = EnvVars.embeddedMongoPort
+        val sharedUri = "mongodb://$host:$port"
+
         // Serialize start-or-reuse across processes so a lobby+world race can't boot two mongods.
         RandomAccessFile(lockFile, "rw").channel.use { channel ->
             channel.lock().use {
                 running?.let { return uri!! }
                 uri?.let { return it }
 
-                readPublishedUri()?.let { shared ->
-                    if (isListening(shared)) {
-                        Logger.log("EmbeddedMongo", "Reusing shared embedded mongod at $shared")
-                        uri = shared
-                        return shared
-                    }
+                if (canConnect(host, port)) {
+                    uri = sharedUri
+                    Logger.log("EmbeddedMongo", "Reusing shared embedded mongod at $sharedUri")
+                    return sharedUri
                 }
 
-                Logger.log("EmbeddedMongo", "Starting in-process mongod (first run downloads the binary)...")
-                val state = Mongod.instance().start(Version.Main.V7_0)
+                val databaseDir = Path(EnvVars.embeddedMongoDataDir).toAbsolutePath()
+                Files.createDirectories(databaseDir)
+                Logger.log(
+                    "EmbeddedMongo",
+                    "Starting shared embedded mongod at $sharedUri (dbPath=$databaseDir; first run downloads the binary)..."
+                )
+                val state = mongod(host, port, databaseDir).start(Version.Main.V7_0)
                 val addr = state.current().serverAddress
                 val started = "mongodb://${addr.host}:${addr.port}"
                 running = state
                 uri = started
-                uriFile.writeText(started)
-                Logger.log("EmbeddedMongo", "Embedded mongod listening at $started (shared via $uriFile)")
+                Logger.log("EmbeddedMongo", "Embedded mongod listening at $started (shared via $host:$port)")
                 return started
             }
         }
@@ -68,21 +83,26 @@ object EmbeddedMongo {
         running?.let {
             Logger.log("EmbeddedMongo", "Stopping embedded mongod")
             it.close()
-            uriFile.delete()
         }
         running = null
         uri = null
     }
 
-    private fun readPublishedUri(): String? =
-        runCatching { uriFile.takeIf { it.isFile }?.readText()?.trim()?.ifEmpty { null } }.getOrNull()
+    private fun mongod(host: String, port: Int, databaseDir: Path): Mongod {
+        return Mongod.builder()
+            .net(Start.to(Net::class.java).initializedWith(Net.of(host, port, false)))
+            .databaseDir(Start.to(DatabaseDir::class.java).initializedWith(DatabaseDir.of(databaseDir)))
+            .build()
+    }
 
-    private fun isListening(mongoUri: String): Boolean {
-        val hostPort = mongoUri.substringAfter("://").substringBefore("/")
-        val host = hostPort.substringBefore(":")
-        val port = hostPort.substringAfter(":", "27017").toIntOrNull() ?: return false
-        return runCatching {
-            Socket().use { it.connect(InetSocketAddress(host, port), 500); true }
-        }.getOrDefault(false)
+    private fun canConnect(host: String, port: Int): Boolean {
+        return try {
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(host, port), 250)
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }

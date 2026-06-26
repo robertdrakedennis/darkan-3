@@ -1,5 +1,6 @@
 package org.darkan.lobby
 
+import org.darkan.core.EnvVars
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.social.gateway.GatewayWorldInfo
 import org.darkan.core.worldlist.Country
@@ -18,12 +19,16 @@ object LobbyState {
     fun init() {
         // Default development world (removed when a real world server registers)
         worldList.put(World(
-            number = 300,
-            hostname = "localhost",
-            port = 43595,
-            activity = "Darkan",
-            country = Country.USA,
-            members = true,
+            number = EnvVars.worldId,
+            hostname = EnvVars.worldPublicHost,
+            port = EnvVars.worldPort,
+            activity = EnvVars.worldActivity.ifBlank { "-" },
+            country = Country.valueOf(EnvVars.worldCountry),
+            members = EnvVars.worldMembers,
+            quickchat = EnvVars.worldQuickChat,
+            pvp = EnvVars.worldPvp,
+            lootShare = EnvVars.worldLootShare,
+            highlighted = EnvVars.worldHighlighted,
         ))
     }
 

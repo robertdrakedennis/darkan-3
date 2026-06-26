@@ -18,9 +18,6 @@ import world.gregs.voidps.buffer.*
  *  - MessageClanChannel (MESSAGE_CLANCHANNEL_SYSTEM in 947-3): no direct 948 destination
  *    identified, but the new 948 op 105 MESSAGE_CLANCHANNEL is the likely successor.
  *
- * REMOVED (no 948 destination):
- *  - HashedWorldToken (was op 6) — TODO: identify 948 opcode for world-token nonce.
- *
  * ENCODERS DISABLED (wire WRONG/UNCONFIRMED — better no encoder than malformed bytes):
  *  - UpdateIgnoreList @ op 130 — handler 0x001d29c0 is a 64-bit-flag-mask friend/relationship
  *    DELTA (likely the true 948 UPDATE_FRIENDLIST), NOT ignore-pairs (SVR-B research doc B).
@@ -59,13 +56,20 @@ internal fun Codec.registerRev948ServerCodecsSocial() {
     // is retained. TODO: re-derive the exact 64-bit-mask field layout from 0x001d29c0 + a live
     // capture, then register the correct (friend-delta) encoder under its confirmed identity.
 
-    // CLANCHANNEL_FULL (op 9, varShort, 948) — handler-identity adjudication (2026-06-25): the
-    // official CLANCHANNEL_FULL is op9 (op67 is a DISTINCT member-roster packet, UNKNOWN_67). The
-    // prior op67 binding was wrong — it made op67 display the CLAN_CHANNEL_FULL fallback while op9
-    // had no encoder. Was op28 in 947-3. Format (clan name + members) matches op9's handler.
-    serverProt<ClanChannelFull>(opcode = 9, size = ProtSize.VarShort) { out ->
+    // CLANCHANNEL_FULL (op 67, varShort, 948) — RESTORED to op67 (2026-06-26, monorepo migration).
+    // The DEFINITIVE binary-derived capture table puts ClanChannelFull at op67, not op9:
+    //   - claude-re/findings/14-serverprot-table.md line 74: op67 = ClanChannelFull, var-short,
+    //     entry DAT_013a1520, capture-verified [0].
+    //   - claude-re/findings/12-opcode-map.md line 62: op67 = ClanChannelFull -> CLANCHANNEL_FULL
+    //     (Clans handler @ 0x00199130).
+    //   - claude-re/findings/01-opcodes-all.md line 89: op67 = ClanChannelFull, varShort.
+    // The reconciled-from-the-merge "op9 adjudication" silently moved this verified prot off op67
+    // (op9 has a BLANK capture name in 14-serverprot-table.md) — a real opcode collision the union
+    // introduced, where the monorepo's op9 oracle stub (s(9,"CLANCHANNEL_FULL")) overrode ours'
+    // captured op67 assignment. Ours' world-entry fixtures are the captured client payloads, so
+    // ours wins: ClanChannelFull is bound at op67. Was op28 in 947-3. Wire body unchanged.
+    serverProt<ClanChannelFull>(opcode = 67, size = ProtSize.VarShort) { out ->
         if (clanName == null || chatters == null) {
-            out.writeByte(0xFF)
             return@serverProt
         }
         out.writeByte(if (main) 0 else 1)
@@ -154,8 +158,6 @@ internal fun Codec.registerRev948ServerCodecsSocial() {
         out.writeByte(if (priority) 0 else 1)    // client visible = (byte == 0)
     }
 
-    // HASHED_WORLD_TOKEN (was op 6 in 947-3) — REMOVED in 948 / no clear destination.
-    // The 948 op 6 is LOC_PREFETCH (a zone packet), so the world-token nonce moved or was
-    // eliminated entirely. The login/session token-rotation path appears to be handled
-    // out-of-band in the lobby reconnect flow in 948. TODO: confirm via lobby login trace.
+    // HASHED_WORLD_TOKEN is registered in Rev948ServerCodecsMisc at op 54; production login
+    // replay shows it in the world bootstrap packet group, not the social packet group.
 }

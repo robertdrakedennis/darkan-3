@@ -31,32 +31,24 @@ import world.gregs.voidps.buffer.*
  * logic that depends on these packets must either be revision-gated or wait for a follow-up
  * RE pass that identifies the 948 destinations.
  *
- * Special case — WorldLoginDetails (opcode 2): the world-login response is sent pre-ISAAC
- * via `noIsaac=true` during the login state machine. The opcode 2 mapping is presumed to be
- * fixed by the client's login state machine (not the normal ProtEntry dispatch table), so it
- * is preserved at opcode 2 here. In the 948 main ServerProt table, opcode 2 happens to be
- * MESSAGE_QUICKCHAT_CLANCHAT — but that handler is never reached for this byte because the
- * client is in login state, not game-loop state, when it reads it.
- * **TODO:** verify the 948 client's world-login response opcode by tracing the login state
- *   machine in rs2client.948-2-2.
+ * NOTE — WorldLoginDetails is NOT registered here (and must NOT be). It used to be an op-2
+ * VarByte packet sent via `session.send(..., noIsaac=true)`, but that was WRONG: in world mode
+ * the client routes the post-SUCCESS result byte 2 to its server-client-var state
+ * (LoginStepDealWithFirstResponse → 0xfa), so it reads the smart-opcode byte `0x02` + the VarByte
+ * length byte `0x14` as a 2-byte BE varc-block length (=532), then walks ~532 bytes of the body +
+ * following ISAAC burst as varc ids → NULL GetVarcType → SIGSEGV
+ * (docs/protocol/lobby-world-switch-948.md §9.3). The world-login RESPONSE is a fixed THREE-PART
+ * pre-ISAAC stream (server-client-var block + players byte + login-data block), NOT a single
+ * framed packet, so it is now assembled and written raw by
+ * `WorldServer.writeWorldLoginResponse` (§9.6 Option 1). The `WorldLoginDetails` data class is
+ * retained — it carries the correct field VALUES for Part C's body (fields 1–11, §9.4). Do not
+ * re-register it as a codec entry: routing it back through `Session.encodePacket` would re-emit
+ * the smart-opcode/length framing that is the crash.
  */
 internal fun Codec.registerRev948ServerCodecsMisc() {
-    // WorldLoginDetails (opcode 2 — preserved from 947 — sent pre-ISAAC during world-login).
-    serverProt<WorldLoginDetails>(opcode = 2, size = ProtSize.VarByte) { out ->
-        out.writeByte(rights)
-        out.writeByte(modLevel)
-        out.writeBoolean(quickChat)
-        out.writeBoolean(verifiedEmail)
-        out.writeBoolean(aBool7322)
-        out.writeBoolean(quickChatOnly)
-        out.writeShort(playerIndex)
-        out.writeBoolean(members)
-        out.writeMedium(dob)
-        out.writeBoolean(memberWorld)
-        out.writeRSString(worldName)
-    }
-
-    // RESET_ALL_VARPS (op 5, 0B) — successor to 947-3 RESET_CLIENT_VARCACHE (op 48).
+    // RESET_CLIENT_VARCACHE (op 5, 0B) — confirmed by live 948 captures and Rev948ServerProtStubs.
+    // Do not confuse this normal game-stream packet with the raw pre-ISAAC world-login
+    // server-client-var block; adding a VarShort length here desyncs every following lobby packet.
     serverProt<ResetClientVarcache>(opcode = 5, size = 0)
 
     // SET_READY_FLAG (op 75, 0B) — was op 65 in 947-3.
@@ -74,6 +66,14 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
         out.writeInt(balance)
     }
 
+    serverProt<HashedWorldToken>(opcode = 54, size = ProtSize.VarByte) { out ->
+        out.writeRSString(token)
+    }
+
+    serverProt<MidiSong>(opcode = 95, size = 5) { out ->
+        out.writeFully(payload)
+    }
+
     // SET_WORLD_TARGET (op 212, varByte) — was op 187 in 947-3. Populates lobby login slot.
     serverProt<SetWorldTarget>(opcode = 212, size = ProtSize.VarByte) { out ->
         out.writeRSString(hostname)
@@ -84,10 +84,12 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
 
     // SWITCH_WORLD (op 213, varByte) — was op 179 in 947-3. Writes the WORLD-node target
     // (WorldSwitcher+0x20) and triggers the reconnect to host:port2.
-    // FIELD ORDER (handler 0x001aeba0, binary-verified): worldId FIRST, then host — op213 is
-    // worldId-first, UNLIKE op212 (host-first). Writing host-first made the client read worldId from
-    // the host bytes and the host from the remainder ("calhost") → connect to a garbage host → crash.
-    // port2 (+0x2a) is the port the client actually connects on; flag must be 1 (world target).
+    // FIELD ORDER per ground-truth 948-5 decompile of WorldData::SWITCH_WORLD @ 0x001aeba0
+    // (binary-verified): the handler reads worldId (BE u16) FIRST, then host (jstr), portA (BE u16),
+    // portB (BE u16), reconnectFlag (u8). This is worldId-first, UNLIKE op212 SET_WORLD_TARGET
+    // (host-first). Writing host-first made the client read worldId out of the host bytes and the
+    // host from the remainder ("calhost") → connect to a garbage host:port → crash. port2 (+0x2a)
+    // is the port the client actually connects on; flag must be 1 (world target).
     serverProt<SwitchWorld>(opcode = 213, size = ProtSize.VarByte) { out ->
         out.writeShort(worldId)
         out.writeRSString(hostname)
@@ -119,18 +121,117 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
         out.writeInt(scriptId)
     }
 
-    // NO_TIMEOUT (op 54, varByte) — was op 216 (size 0) in 947-3.
-    // 948 handler: FUN_000ef260 @ 0x000ef260 (empty body — no-op acknowledgement).
-    // Bound by main ServerProt::BindHandlers (entry 0x013a13e0).
-    // Wire format changed: 947-3 was 0-byte packet (just opcode); 948 is varByte with
-    // 0-length payload (opcode + length=0). The client doesn't read any bytes either way.
-    serverProt<NoTimeout>(opcode = 54, size = ProtSize.VarByte)
+    serverProt<ResetEntityLists>(opcode = 7, size = 0)
+    serverProt<DestroyZoneData>(opcode = 55, size = 0)
+    serverProt<NoopVarA>(opcode = 128, size = 0)
+    serverProt<ClearPendingUpdates>(opcode = 190, size = 0)
+    serverProt<TriggerOnDialogAbort>(opcode = 162, size = 0)
+
+    // ANTI_CHEAT_CHALLENGE behavior at op 174. The 948-5 symbol is the handler name
+    // `HandleAntiCheatChallenge`.
+    // Body is two BE u32 values. The client replies with op3 as BE first value, LE second value,
+    // then the client-side `*(*client + 0x534)` value biased by -128.
+    serverProt<AntiCheatChallenge>(opcode = 174, size = 8) { out ->
+        out.writeInt(challengeA)
+        out.writeInt(challengeB)
+    }
+
+    serverProt<MinimapState>(opcode = 73, size = 2) { out ->
+        out.writeByte(128 - first)
+        out.writeByte(128 - second)
+    }
+
+    serverProt<EntityAnimAtTile>(opcode = 154, size = 5) { out ->
+        out.writeByte(128 - value)
+        out.writeByte((target + 128) and 0xFF)
+        out.writeByte((target ushr 8) and 0xFF)
+        out.writeByte((cycleOffset + 128) and 0xFF)
+        out.writeByte((cycleOffset ushr 8) and 0xFF)
+    }
+
+    serverProt<SceneFlag>(opcode = 157, size = 1) { out ->
+        out.writeByte((-value) and 0xFF)
+    }
+
+    serverProt<CamSmoothReset>(opcode = 120, size = 0)
+
+    serverProt<SetMultiwayState>(opcode = 45, size = 1) { out ->
+        out.writeByte(state)
+    }
+
+    serverProt<MinimapFlagA>(opcode = 172, size = 1) { out ->
+        out.writeByte(value)
+    }
+
+    serverProt<MinimapFlagB>(opcode = 204, size = 1) { out ->
+        out.writeByte((-value) and 0xFF)
+    }
+
+    serverProt<SetNpcOp>(opcode = 1, size = ProtSize.VarByte) { out ->
+        if (text != null) {
+            out.writeRSString(text)
+            out.writeShort(if (cursor < 0) 0xFFFF else cursor)
+        }
+    }
+
+    serverProt<SetPlayerOp2>(opcode = 12, size = 2) { out ->
+        out.writeShort(value)
+    }
+
+    serverProt<SetPlayerOp3>(opcode = 13, size = 1) { out ->
+        out.writeByte(value)
+    }
+
+    serverProt<PlayerInfoDecode>(opcode = 104, size = 14) { out ->
+        out.writeByte(((slot and 0x7) shl 5) or (mode and 0x1F))
+        repeat(13) {
+            out.writeByte(0)
+        }
+    }
+
+    serverProt<CutsceneData>(opcode = 119, size = 35) { out ->
+        out.writeByte(group)
+        out.writeByte(slot)
+        out.writeByte(mode)
+        out.writeByte(extendedMode)
+        out.writeByte(((flags and 0x1) shl 3) or (shape and 0x7))
+        out.writeShort(id)
+        out.writeLong(primaryLong)
+        out.writeInt(primaryInt)
+        out.writeInt(secondaryInt)
+        out.writeLong(secondaryLong)
+        out.writeInt(skipLength)
+    }
+
+    serverProt<CamUpdate>(opcode = 77, size = ProtSize.VarShort) { out ->
+        var flags = 0
+        if (byteA0) flags = flags or 0x01
+        if (modeA8 != null) flags = flags or 0x08
+        if (modeC0 != null) flags = flags or 0x10
+        if (extended != null) flags = flags or 0x80
+
+        out.writeByte(flags)
+        modeA8?.let { out.writeByte(it) }
+        modeC0?.let { out.writeByte(it) }
+        extended?.let { out.writeCameraUpdateExtended(it) }
+    }
+
+    serverProt<UpdateIgnoreListRaw>(opcode = 130, size = ProtSize.VarByte) { out ->
+        out.writeLong(mask)
+        out.writeFully(encodedFields)
+        out.writeShort(entryId)
+    }
+
+    // NPC_INFO_THUNK zero-length path clears the client's world-entity NPC state. Non-empty
+    // payloads are a separate world-entity NPC envelope still preserved raw pending field split.
+    serverProt<NpcInfoThunk>(opcode = 209, size = ProtSize.VarShort) { out ->
+        out.writeFully(payload)
+    }
 
     // WORLDLIST_FETCH_REPLY (op 216, varShort) — was op 159 in 947-3.
-    // 948 handler: WorldData::WORLDLIST_FETCH_REPLY @ 0x0018fea0.
+    // 948-5 handler: WorldData::WORLDLIST_FETCH_REPLY @ 0x00190020.
     // Bound by main ServerProt::BindHandlers (entry 0x0139ffa0). Verified by reading the
-    // handler body: reads frame indicator, smart-encoded world list + counts identical to 947-3.
-    // Wire format: same byte layout as 947-3 (no changes detected in handler decompile).
+    // handler body: reads frame indicator, then reassembles a buffer whose header is [2, mode].
     serverProt<WorldListPacket>(opcode = 216, size = ProtSize.VarShort) { out ->
         val worlds = worldList.getWorldArray()
         val minWorldId = worlds.minOfOrNull { it.number } ?: 0
@@ -168,8 +269,8 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
                 if (world.highlighted) flags = flags or 0x10
                 out.writeInt(flags)
 
-                out.writeSmart(0)                       // actPres=0: no conditional activity
-                out.writeJagString(world.activity)
+                out.writeSmart(0)
+                out.writeJagString(world.activity.ifEmpty { "-" })
                 out.writeJagString(world.hostname)
             }
 
@@ -177,9 +278,11 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
             out.writeInt(worldList.revision)
         } else {
             out.writeByte(0)
+            out.writeInt(worldList.revision)
         }
 
         // 5. Player count section
+        // Each entry is [smart worldId-delta][u16 count].
         for (world in worlds) {
             out.writeSmart(world.number - minWorldId)
             out.writeShort(if (world.offline) -1 else world.playersOnline)
@@ -212,13 +315,71 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
     // -------------------------------------------------------------------------------
     // REMAINING packets — no 948 destination identified:
     // -------------------------------------------------------------------------------
-    // HashedWorldToken (was op 6 in 947-3) — no clear 948 destination. 948 op 6 is LOC_PREFETCH
-    //   (a zone packet), so the token nonce moved or was removed. TODO: trace world-token
-    //   delivery path in 948 login flow.
     // FriendlistLoaded — no 947-3 origin and no 948 destination. TODO: identify.
     //
     // VARP/VARC bit/large variants — handler bodies in ClientState::BindHandlers (0x000aa85e)
     //   at ops 10, 28, 47, 48, 51, 61, 64, 69 have wire-format differences from 947-3
     //   (endianness, byte transforms, field order all changed). See Rev948ServerCodecsVariable.kt
     //   for tentative registrations.
+}
+
+private suspend fun ByteWriteChannel.writeCameraUpdateExtended(update: CamUpdateExtended) {
+    var flags = 0
+    if (update.vector138 != null) flags = flags or 0x0001
+    if (update.vector150 != null) flags = flags or 0x0002
+    if (update.vector168 != null) flags = flags or 0x0004
+    if (update.vector180 != null) flags = flags or 0x0008
+    if (update.pair1e8 != null) flags = flags or 0x0010
+    if (update.pair1dc != null) flags = flags or 0x0020
+    if (update.byteA4 != null) flags = flags or 0x0040
+    if (update.ignored80 != null) flags = flags or 0x0080
+    if (update.flagsFcFd != null) flags = flags or 0x0100
+    if (update.scriptedCommandCount != null) flags = flags or 0x0200
+    if (update.pair118 != null) flags = flags or 0x0400
+    if (update.byte100 != null) flags = flags or 0x0800
+    if (update.envelope198 != null) flags = flags or 0x1000
+    if (update.scalar108 != null) flags = flags or 0x2000
+    if (update.scalar110 != null) flags = flags or 0x4000
+
+    writeShort(flags)
+    update.vector138?.let { writeCameraVector(it) }
+    update.vector150?.let { writeCameraVector(it) }
+    update.vector168?.let { writeCameraVector(it) }
+    update.vector180?.let { writeCameraVector(it) }
+    update.pair1e8?.let { writeCameraPair(it) }
+    update.pair1dc?.let { writeCameraPair(it) }
+    update.byteA4?.let { writeByte(it) }
+    update.ignored80?.let { writeInt(it) }
+    update.flagsFcFd?.let {
+        writeByte((if (it.first) 1 else 0) or (if (it.second) 2 else 0))
+    }
+    update.scriptedCommandCount?.let { writeByte(it) }
+    update.pair118?.let {
+        writeShort(it.id)
+        writeCameraFloat(it.value)
+    }
+    update.byte100?.let { writeByte(it) }
+    update.envelope198?.let {
+        writeCameraVector(it.first)
+        writeCameraVector(it.second)
+        writeCameraFloat(it.firstScalar)
+        writeCameraFloat(it.secondScalar)
+    }
+    update.scalar108?.let { writeCameraFloat(it) }
+    update.scalar110?.let { writeCameraFloat(it) }
+}
+
+private suspend fun ByteWriteChannel.writeCameraVector(value: CamVector3) {
+    writeCameraFloat(value.x)
+    writeCameraFloat(value.y)
+    writeCameraFloat(value.z)
+}
+
+private suspend fun ByteWriteChannel.writeCameraPair(value: CamFloatPair) {
+    writeCameraFloat(value.first)
+    writeCameraFloat(value.second)
+}
+
+private suspend fun ByteWriteChannel.writeCameraFloat(value: Float) {
+    writeInt(value.toRawBits())
 }

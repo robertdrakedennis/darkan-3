@@ -37,7 +37,7 @@ class Vars(val saved: MutableMap<Int, Int> = HashMap()) {
     /** Initialize with a session for network sync. Restores saved vars. */
     fun init(session: Session): Vars {
         this.session = session
-        varpValues = IntArray(Cache.get().fileCount(Index.CONFIGS, Config.VARP) + 1)
+        varpValues = IntArray(Cache.get().fileCount(Index.CONFIGS, Config.VAR_PLAYER) + 1)
         modified = HashSet()
         saved.forEach { (varId, value) -> setVar(varId, value) }
         return this
@@ -45,7 +45,7 @@ class Vars(val saved: MutableMap<Int, Int> = HashMap()) {
 
     /** Initialize without a session (offline/tool usage). */
     fun initOffline(): Vars {
-        varpValues = IntArray(Cache.get().fileCount(Index.CONFIGS, Config.VARP) + 1)
+        varpValues = IntArray(Cache.get().fileCount(Index.CONFIGS, Config.VAR_PLAYER) + 1)
         modified = HashSet()
         saved.forEach { (varId, value) -> setVar(varId, value) }
         return this

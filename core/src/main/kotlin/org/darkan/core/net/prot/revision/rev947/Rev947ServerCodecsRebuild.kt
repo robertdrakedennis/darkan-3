@@ -25,18 +25,25 @@ internal fun Codec.registerRev947ServerCodecsRebuild() {
     //   g2 (BE) chunkZ; g4 (BE) packedCoordA; g4 (BE) packedCoordB.
     // Magic byte MUST be exactly 0x7B or the handler returns PacketError::MESSAGE.
     //
-    // NOTE: RebuildNormalSimple now carries the 948 field names (the active build is 948-5). This
-    // legacy 947-3 encoder maps them onto the older 16-byte layout: playerCoordX/Y -> chunkX/Z,
-    // worldAreaTypeId -> regionLow, srcPackedCoord1/2 -> packedCoordA/B. 947 has no cameraAngle slot
-    // at this position and always force-refreshes on login.
+    // NOTE: RebuildNormalSimple carries the OURS'/948 field names (the active build is 948-5). This
+    // legacy 947-3 encoder maps them onto the older 16-byte layout — wire bytes are UNCHANGED from
+    // the original 947-3 RE; only the source field identifiers were remapped to ours' class:
+    //   zoneX        -> chunkX (BE u16)        (was playerCoordX)
+    //   zoneZ        -> chunkZ (BE u16)        (was playerCoordY)
+    //   regionLow    -> regionLow (LE u16)     (was worldAreaTypeId; ours keeps a `regionLow` slot
+    //                                           defaulting to 0, so 948 construction is unaffected)
+    //   packedCoordA -> packedCoordA (BE u32)  (was srcPackedCoord1)
+    //   packedCoordB -> packedCoordB (BE u32)  (was srcPackedCoord2)
+    // 947 has no cameraRotation/sceneRootId slot at this position and always force-refreshes on
+    // login; ours' cameraRotation/sceneRootId/rebuildPrefix fields are intentionally ignored here.
     serverProt<RebuildNormalSimple>(opcode = 90, size = ProtSize.VarShort) { out ->
-        out.writeShort(playerCoordX)            // chunkX (BE u16)
+        out.writeShort(zoneX)                   // chunkX (BE u16)
         out.writeByte(1)                        // forceRefresh — always refresh on login
-        out.writeShortLittle(worldAreaTypeId)   // regionLow (LE u16)
+        out.writeShortLittle(regionLow)         // regionLow (LE u16)
         out.writeByte(0x7B)                     // magic (947 = 0x7B)
-        out.writeShort(playerCoordY)            // chunkZ (BE u16)
-        out.writeInt(srcPackedCoord1)           // packedCoordA (BE u32)
-        out.writeInt(srcPackedCoord2)           // packedCoordB (BE u32)
+        out.writeShort(zoneZ)                   // chunkZ (BE u16)
+        out.writeInt(packedCoordA)              // packedCoordA (BE u32)
+        out.writeInt(packedCoordB)              // packedCoordB (BE u32)
     }
 
     // Multi-scene grid rebuild (op 172, varShort) — A2 §2 for INSTANCED regions.
