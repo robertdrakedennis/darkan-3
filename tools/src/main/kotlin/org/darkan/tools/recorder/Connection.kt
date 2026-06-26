@@ -1,5 +1,6 @@
 package org.darkan.tools.recorder
 
+import org.darkan.core.net.RequestOpcode
 import java.io.ByteArrayOutputStream
 import java.io.File
 
@@ -37,12 +38,22 @@ class Options(
     val failOnDesync: Boolean,
     val failOnTruncation: Boolean,
     val skipJs5: Boolean,
+    val probeUnknown: Boolean,
 ) {
-    fun roleForPort(port: Int): Role = when (port) {
-        js5Port -> Role.JS5
-        lobbyPort -> Role.LOBBY
-        worldPort -> Role.WORLD
+    fun roleForPort(port: Int): Role = when {
+        port == worldPort -> Role.WORLD
+        port == js5Port && port == lobbyPort -> Role.UNKNOWN
+        port == js5Port -> Role.JS5
+        port == lobbyPort -> Role.LOBBY
         else -> Role.UNKNOWN
+    }
+
+    fun roleForFirstClientByte(port: Int, byte: Int): Role? = when (byte and 0xFF) {
+        RequestOpcode.JS5_INIT -> Role.JS5
+        RequestOpcode.CONNECT_LOGIN,
+        RequestOpcode.LOGIN,
+        RequestOpcode.LOBBY -> if (port == worldPort) Role.WORLD else Role.LOBBY
+        else -> null
     }
 
     companion object {
@@ -50,7 +61,7 @@ class Options(
             require(args.isNotEmpty()) {
                 "usage: RecorderDeframe <capture.bin> [--out f.jsonl] [--seeds s0,s1,s2,s3] " +
                     "[--lobby-port 43596] [--world-port 43597] [--js5-port 8829] [--isaac-offset N|auto] " +
-                    "[--skip-js5] [--require-seeds] [--fail-on-desync] [--fail-on-truncation] [--strict]"
+                    "[--skip-js5] [--probe-unknown] [--require-seeds] [--fail-on-desync] [--fail-on-truncation] [--strict]"
             }
             val capture = File(args[0])
             var out: File? = null
@@ -63,6 +74,7 @@ class Options(
             var failOnDesync = false
             var failOnTruncation = false
             var skipJs5 = false
+            var probeUnknown = false
             var i = 1
             while (i < args.size) {
                 when (args[i]) {
@@ -76,6 +88,7 @@ class Options(
                     "--fail-on-desync" -> failOnDesync = true
                     "--fail-on-truncation" -> failOnTruncation = true
                     "--skip-js5" -> skipJs5 = true
+                    "--probe-unknown" -> probeUnknown = true
                     "--strict" -> {
                         requireSeeds = true
                         failOnDesync = true
@@ -85,7 +98,20 @@ class Options(
                 }
                 i++
             }
-            return Options(capture, out, seeds, lobby, world, js5, isaacOffset, requireSeeds, failOnDesync, failOnTruncation, skipJs5)
+            return Options(
+                capture,
+                out,
+                seeds,
+                lobby,
+                world,
+                js5,
+                isaacOffset,
+                requireSeeds,
+                failOnDesync,
+                failOnTruncation,
+                skipJs5,
+                probeUnknown,
+            )
         }
 
         /** Parse "s0,s1,s2,s3" — each int may be decimal or 0x-hex. */
@@ -155,6 +181,9 @@ object ConnectionAssembler {
                         val epoch = (epochOf[rec.fd] ?: -1) + 1
                         epochOf[rec.fd] = epoch
                         Acc(epoch, null, -1, Role.UNKNOWN)
+                    }
+                    if (rec.dir == Dir.OUT && rec.bytes.isNotEmpty() && acc.role == Role.UNKNOWN) {
+                        opts.roleForFirstClientByte(acc.port, rec.bytes[0].toInt())?.let { acc.role = it }
                     }
                     if (opts.skipJs5 && acc.role == Role.JS5) continue
                     when (rec.dir) {

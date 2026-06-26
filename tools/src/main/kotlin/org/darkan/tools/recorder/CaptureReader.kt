@@ -84,6 +84,38 @@ data class Capture(
     fun notes(): List<String> = records.filterIsInstance<CaptureRecord.Note>().map { it.text }
 }
 
+fun Capture.dedupeIo(): Capture {
+    var lastFd = Int.MIN_VALUE
+    var lastDir: Dir? = null
+    var lastLen = -1
+    var lastHead = -1
+    var lastTail = -1
+    var lastNs = Long.MIN_VALUE
+    var dropped = 0
+    val filtered = records.filterNot { record ->
+        if (record !is CaptureRecord.Io) return@filterNot false
+        val bytes = record.bytes
+        val head = bytes.firstOrNull()?.toInt()?.and(0xFF) ?: -1
+        val tail = bytes.lastOrNull()?.toInt()?.and(0xFF) ?: -1
+        val duplicate = record.fd == lastFd &&
+            record.dir == lastDir &&
+            bytes.size == lastLen &&
+            head == lastHead &&
+            tail == lastTail &&
+            record.tsNanos - lastNs in 0..2_000_000L
+        lastFd = record.fd
+        lastDir = record.dir
+        lastLen = bytes.size
+        lastHead = head
+        lastTail = tail
+        lastNs = record.tsNanos
+        if (duplicate) dropped++
+        duplicate
+    }
+    if (dropped > 0) System.err.println("[capture] deduped IO records: $dropped")
+    return copy(records = filtered)
+}
+
 object CaptureReader {
 
     fun read(file: File): Capture {

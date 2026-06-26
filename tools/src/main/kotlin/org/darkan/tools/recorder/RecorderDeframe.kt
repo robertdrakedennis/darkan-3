@@ -50,7 +50,7 @@ object RecorderDeframe {
     @JvmStatic
     fun main(args: Array<String>) {
         val opts = Options.parse(args)
-        val capture = CaptureReader.read(opts.captureFile)
+        val capture = CaptureReader.read(opts.captureFile).dedupeIo()
 
         System.err.println("[deframe] capture pid=${capture.pid} version=${capture.version} records=${capture.records.size}")
         capture.notes().forEach { System.err.println("[deframe] note: $it") }
@@ -63,16 +63,16 @@ object RecorderDeframe {
                 "[deframe] WARNING: no ISAAC seeds (no Seeds record in capture and no --seeds). " +
                     "Game streams cannot be opcode-decoded; only raw framing + JS5 will be emitted."
             )
-            if (opts.requireSeeds) {
-                System.err.println("[deframe] FAIL: --require-seeds set but no seeds were available")
-                exitProcess(2)
-            }
         } else {
             System.err.println("[deframe] seeds (raw C2S): ${rawSeeds.joinToString(", ") { "0x%08x".format(it) }}")
         }
 
         val codec = register948()
         val connections = ConnectionAssembler.assemble(capture, opts)
+        if (opts.requireSeeds && rawSeeds == null && connections.none { LoginSeedExtractor.extract(it) != null }) {
+            System.err.println("[deframe] FAIL: --require-seeds set but no seeds were available")
+            exitProcess(2)
+        }
 
         val out = opts.outFile?.bufferedWriter()
         var packetCount = 0
@@ -88,7 +88,20 @@ object RecorderDeframe {
                 "[deframe] connection epoch=${conn.epoch} fd=${conn.fd} role=${conn.role} " +
                     "peer=${conn.peer} c2s=${conn.c2s.size}B s2c=${conn.s2c.size}B"
             )
-            emit(connHeaderJson(conn, rawSeeds))
+            val extractedSeeds = LoginSeedExtractor.extract(conn)
+            val connSeeds = extractedSeeds ?: rawSeeds
+            val seedSource = when {
+                extractedSeeds != null -> "login-rsa"
+                rawSeeds != null -> "capture"
+                else -> ""
+            }
+            if (extractedSeeds != null && rawSeeds != null && !extractedSeeds.contentEquals(rawSeeds)) {
+                System.err.println(
+                    "[deframe] connection epoch=${conn.epoch} fd=${conn.fd} role=${conn.role} " +
+                        "uses login RSA seeds ${formatSeeds(extractedSeeds)} (capture seeds differ)"
+                )
+            }
+            emit(connHeaderJson(conn, connSeeds, seedSource))
 
             when (conn.role) {
                 Role.JS5 -> {
@@ -98,24 +111,23 @@ object RecorderDeframe {
                     emitJs5(conn, ::emit).also { packetCount += it }
                 }
                 Role.LOBBY, Role.WORLD -> {
-                    if (rawSeeds == null) {
+                    if (connSeeds == null) {
                         emit(rawDumpJson(conn, "no-seeds"))
                         continue
                     }
-                    val result = IsaacDeframer(codec, rawSeeds, opts.isaacOffset).deframe(conn, ::emit)
+                    val result = IsaacDeframer(codec, connSeeds, opts.isaacOffset).deframe(conn, ::emit)
                     packetCount += result.packets
                     desyncCount += result.desyncs
                     truncationCount += result.truncations
                 }
                 Role.UNKNOWN -> {
-                    // Unknown port: try ISAAC if seeds present, else raw dump.
-                    if (rawSeeds != null) {
+                    if (rawSeeds != null && opts.probeUnknown) {
                         val result = IsaacDeframer(codec, rawSeeds, opts.isaacOffset).deframe(conn, ::emit)
                         packetCount += result.packets
                         desyncCount += result.desyncs
                         truncationCount += result.truncations
                     } else {
-                        emit(rawDumpJson(conn, "unknown-role-no-seeds"))
+                        emit(rawDumpJson(conn, if (rawSeeds == null) "unknown-role-no-seeds" else "unknown-role"))
                     }
                 }
             }
@@ -165,7 +177,7 @@ object RecorderDeframe {
         return if (conn.c2s.isNotEmpty() || conn.s2c.isNotEmpty()) 1 else 0
     }
 
-    private fun connHeaderJson(conn: Connection, seeds: IntArray?): String = Json.obj(
+    private fun connHeaderJson(conn: Connection, seeds: IntArray?, seedSource: String): String = Json.obj(
         "record" to "connection",
         "epoch" to conn.epoch,
         "fd" to conn.fd,
@@ -173,9 +185,13 @@ object RecorderDeframe {
         "peer" to (conn.peer ?: "?"),
         "c2s_bytes" to conn.c2s.size,
         "s2c_bytes" to conn.s2c.size,
+        "seed_source" to seedSource,
         "seeds_raw_c2s" to (seeds?.joinToString(",") { "0x%08x".format(it) } ?: ""),
         "isaac_delta" to EnvVars.ISAAC_DELTA
     )
+
+    private fun formatSeeds(seeds: IntArray): String =
+        seeds.joinToString(", ") { "0x%08x".format(it) }
 
     private fun rawDumpJson(conn: Connection, reason: String): String = Json.obj(
         "record" to "raw_dump",

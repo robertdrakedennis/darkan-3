@@ -259,6 +259,10 @@ class IsaacDeframer(
         for (off in candidateOffsets) {
             val run = decodeFrom(raw, off, isServer, seed, maxOpcode)
             val currentBest = best
+            if (isExpectedWorldStart(conn, dir, startOffset, run)) {
+                best = run
+                break
+            }
             if (currentBest == null || run.packets > currentBest.packets || (run.packets == currentBest.packets && run.consumed > currentBest.consumed)) {
                 best = run
             }
@@ -310,6 +314,12 @@ class IsaacDeframer(
             if (chosen.truncationAt != null) 1 else 0,
         )
     }
+
+    private fun isExpectedWorldStart(conn: Connection, dir: String, startOffset: Int, run: DecodeRun): Boolean =
+        conn.role == Role.WORLD &&
+            dir == "S2C" &&
+            run.offset == startOffset &&
+            run.packets_.firstOrNull()?.opcode == 81
 
     private data class DecodedPacket(
         val opcode: Int,

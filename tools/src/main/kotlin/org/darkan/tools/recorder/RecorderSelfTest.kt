@@ -137,16 +137,17 @@ fun main() {
         write(postBytes)
     }.toByteArray()
 
-    fun c2sBytes(loginOpcode: Int): ByteArray = ByteArrayOutputStream().apply {
+    fun c2sBytes(loginOpcode: Int, includeWorldExtra: Boolean = false): ByteArray = ByteArrayOutputStream().apply {
         write(14)                                   // connection type
         write(loginOpcode)
         write(0); write(4)                          // BE block size = 4
         repeat(4) { write(0xBB) }                   // login block (4 bytes)
+        if (includeWorldExtra) write(26)
         write(c2sPost.toByteArray())                // ISAAC post-login
     }.toByteArray()
 
     val lobbyC2sBytes = c2sBytes(19)
-    val worldC2sBytes = c2sBytes(16)
+    val worldC2sBytes = c2sBytes(16, includeWorldExtra = true)
 
     // Write a synthetic capture file with both lobby and world connections.
     // Split each S2C stream across TWO IN records to exercise TCP reassembly.
@@ -164,6 +165,7 @@ fun main() {
         out(fd = 8, worldC2sBytes)
         val worldSplit = worldS2cBytes.size / 2
         inbound(fd = 8, worldS2cBytes.copyOfRange(0, worldSplit))
+        inbound(fd = 8, worldS2cBytes.copyOfRange(0, worldSplit))
         inbound(fd = 8, worldS2cBytes.copyOfRange(worldSplit, worldS2cBytes.size))
         seeds(seeds)
         close(fd = 8)
@@ -174,7 +176,18 @@ fun main() {
     // Run the real deframer to a JSONL string.
     val outFile = File.createTempFile("recorder-selftest-", ".jsonl")
     outFile.deleteOnExit()
-    RecorderDeframe.main(arrayOf(tmp.absolutePath, "--out", outFile.absolutePath, "--strict"))
+    RecorderDeframe.main(
+        arrayOf(
+            tmp.absolutePath,
+            "--out",
+            outFile.absolutePath,
+            "--strict",
+            "--lobby-port",
+            "43596",
+            "--js5-port",
+            "43596",
+        )
+    )
 
     val lines = outFile.readLines()
     // Extract decoded S2C and C2S packets in order.
