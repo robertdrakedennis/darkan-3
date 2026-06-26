@@ -56,7 +56,10 @@ object Bootstrap {
             ScriptExecutor.loadScripts()
             println("✅ loadScripts() completed. Found: ${ScriptExecutor.scripts.size} scripts")
 
-            Cache.init(resolveCacheDir())
+            // READ-ONLY: this is the live NXT client's own cache, open in another process. Writing it
+            // (even the journal_mode=WAL pragma) corrupts the indices the client has open and forces a
+            // re-download next launch. The server, which owns its cache, opens it read-write.
+            Cache.init(resolveCacheDir(), readOnly = true)
             VarBitDefinition.loadBaseVarMap()
             println("Initializing native access at base address 0x${baseAddr.toString(16)}")
             NativeAccess.init(MemorySegment.ofAddress(baseAddr).reinterpret(0x2000000L))

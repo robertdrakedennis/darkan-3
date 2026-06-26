@@ -89,13 +89,22 @@ interface Cache {
 
         /** Idempotently load the shared cache from [path] if none is set yet. */
         @JvmStatic
-        fun init(path: Path) {
+        fun init(path: Path) = init(path, readOnly = false)
+
+        /**
+         * Idempotently load the shared cache from [path]. Pass [readOnly] = true when [path] points at
+         * a cache owned by another process (the injected engine reading the live NXT client cache), so
+         * the SQLite files are opened `mode=ro` and never written — writing them corrupts the client's
+         * cache and triggers a full re-download. See [world.gregs.voidps.cache.sqlite.IndexFile].
+         */
+        @JvmStatic
+        fun init(path: Path, readOnly: Boolean) {
             if (instance != null) {
                 return
             }
             synchronized(lock) {
                 if (instance == null) {
-                    instance = SQLiteCache.load(path)
+                    instance = SQLiteCache.load(path, readOnly = readOnly)
                 }
             }
         }

@@ -20,10 +20,19 @@ import java.sql.SQLException
  * The constructor throws on any failure to open or initialise the database so the caller
  * can distinguish a broken index from an absent archive.
  */
-class IndexFile(path: Path) : Closeable {
+/**
+ * @param readOnly opens the database read-only (`mode=ro`) and performs NO writes — no journal-mode
+ * change, no table creation, no version/data writes. REQUIRED when reading a cache owned by another
+ * process (the injected engine reading the live NXT client's cache): writing it — even just the
+ * `journal_mode=WAL` header pragma — corrupts the indices the client has open, forcing it to
+ * re-download them. The server, which owns its cache, leaves this false to download/serve via JS5.
+ */
+class IndexFile(path: Path, private val readOnly: Boolean = false) : Closeable {
 
     private val lock = Any()
-    private val connection: Connection = DriverManager.getConnection("jdbc:sqlite:$path")
+    private val connection: Connection =
+        if (readOnly) DriverManager.getConnection("jdbc:sqlite:file:$path?mode=ro")
+        else DriverManager.getConnection("jdbc:sqlite:$path")
     private val getRawStatement: PreparedStatement
     private val getLengthStatement: PreparedStatement
     private val getVersionStatement: PreparedStatement
@@ -33,14 +42,17 @@ class IndexFile(path: Path) : Closeable {
 
     init {
         try {
-            connection.prepareStatement("PRAGMA journal_mode=WAL;").use { it.executeQuery().close() }
+            // A read-only connection must not issue journal_mode/CREATE TABLE — they write the file.
+            if (!readOnly) {
+                connection.prepareStatement("PRAGMA journal_mode=WAL;").use { it.executeQuery().close() }
+                connection.prepareStatement(
+                    "CREATE TABLE IF NOT EXISTS `cache`(`KEY` INTEGER PRIMARY KEY, `DATA` BLOB, `VERSION` INTEGER, `CRC` INTEGER);"
+                ).use { it.executeUpdate() }
+                connection.prepareStatement(
+                    "CREATE TABLE IF NOT EXISTS `cache_index`(`KEY` INTEGER PRIMARY KEY, `DATA` BLOB, `VERSION` INTEGER, `CRC` INTEGER);"
+                ).use { it.executeUpdate() }
+            }
             connection.prepareStatement("PRAGMA busy_timeout=30000;").use { it.executeQuery().close() }
-            connection.prepareStatement(
-                "CREATE TABLE IF NOT EXISTS `cache`(`KEY` INTEGER PRIMARY KEY, `DATA` BLOB, `VERSION` INTEGER, `CRC` INTEGER);"
-            ).use { it.executeUpdate() }
-            connection.prepareStatement(
-                "CREATE TABLE IF NOT EXISTS `cache_index`(`KEY` INTEGER PRIMARY KEY, `DATA` BLOB, `VERSION` INTEGER, `CRC` INTEGER);"
-            ).use { it.executeUpdate() }
             getRawStatement = connection.prepareStatement("SELECT DATA FROM cache WHERE KEY = ?")
             getLengthStatement = connection.prepareStatement("SELECT LENGTH(DATA) FROM cache WHERE KEY = ?")
             getVersionStatement = connection.prepareStatement("SELECT VERSION FROM cache WHERE KEY = ?")
@@ -183,6 +195,7 @@ class IndexFile(path: Path) : Closeable {
     }
 
     fun updateVersion(archiveId: Int, version: Int): Unit = synchronized(lock) {
+        if (readOnly) return
         try {
             connection.prepareStatement("UPDATE cache SET VERSION = ? WHERE KEY = ?").use { stmt ->
                 stmt.setInt(1, version)
@@ -195,7 +208,7 @@ class IndexFile(path: Path) : Closeable {
     }
 
     fun batchUpdateVersions(updates: Map<Int, Int>) {
-        if (updates.isEmpty()) return
+        if (readOnly || updates.isEmpty()) return
         synchronized(lock) {
             try {
                 connection.autoCommit = false
@@ -225,6 +238,7 @@ class IndexFile(path: Path) : Closeable {
     }
 
     fun putRaw(archiveId: Int, data: ByteArray, version: Int, crc: Int): Unit = synchronized(lock) {
+        if (readOnly) return
         try {
             connection.prepareStatement(
                 "INSERT OR REPLACE INTO cache (KEY, DATA, VERSION, CRC) VALUES (?, ?, ?, ?)"
@@ -241,6 +255,7 @@ class IndexFile(path: Path) : Closeable {
     }
 
     fun putRefTable(data: ByteArray, version: Int, crc: Int): Unit = synchronized(lock) {
+        if (readOnly) return
         try {
             connection.prepareStatement(
                 "INSERT OR REPLACE INTO cache_index (KEY, DATA, VERSION, CRC) VALUES (1, ?, ?, ?)"

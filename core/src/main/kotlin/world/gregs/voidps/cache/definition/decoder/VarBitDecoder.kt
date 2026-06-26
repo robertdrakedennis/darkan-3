@@ -22,13 +22,16 @@ class VarBitDecoder : ConfigDecoder<VarBitDefinition>(VAR_BIT) {
             1 -> {
                 domainId = buffer.readUnsignedByte().toByte()
                 domain = VarDomain.forId(domainId.toInt())
-                index = buffer.readUnsignedShort()
+                index = buffer.readBigSmart() // jag gSmart2or4 (2-or-4 byte var id)
             }
             2 -> {
                 startBit = buffer.readUnsignedByte()
                 endBit = buffer.readUnsignedByte()
             }
-            16 -> flags = buffer.readUnsignedByte()
+            // 0x10: presence flag, NO operand. VarBitType::DecodeType (948-5) just sets this+0x50 = 1.
+            // Newer schema than the old refs (opcodes 1/2 only); reading an operand here ate the
+            // terminator byte and threw BufferUnderflowException on the last record in the blob.
+            16 -> flags = 1
         }
     }
 }

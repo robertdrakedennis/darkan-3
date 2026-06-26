@@ -271,7 +271,8 @@ class SQLiteCache private constructor(
         fun load(
             path: Path,
             exponent: BigInteger? = null,
-            modulus: BigInteger? = null
+            modulus: BigInteger? = null,
+            readOnly: Boolean = false
         ): Cache {
             if (!Files.exists(path)) {
                 throw IllegalArgumentException("Cache directory not found: $path")
@@ -288,7 +289,7 @@ class SQLiteCache private constructor(
                             .removeSuffix(".jcache")
                             .toInt()
                         indexFiles[indexId] = try {
-                            IndexFile(file)
+                            IndexFile(file, readOnly)
                         } catch (e: Exception) {
                             logWarn("Skipping unreadable cache index $indexId ($file): ${e.message}", e)
                             null
