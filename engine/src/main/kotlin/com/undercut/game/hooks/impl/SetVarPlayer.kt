@@ -5,6 +5,7 @@ import com.undercut.game.hooks.Hook
 import com.undercut.game.hooks.HookManager
 import com.undercut.game.memory.NativeAccess.deref
 import com.undercut.game.memory.NativeAccess.getInt
+import com.undercut.game.net.PacketLogger
 import com.undercut.game.nxt.OFunctions
 import com.undercut.script.ScriptExecutor
 import com.undercut.script.event.impl.Varp
@@ -27,22 +28,23 @@ object SetVarPlayer {
                 if (prev != value) {
                     val wantsDebug = UI.wantsVarpDebug()
                     if (wantsDebug) {
-                        // println("[varp_$varId] $prev -> $value")
                         UI.addVarTableEntry("varp", varId, prev, value)
                     }
                     ScriptExecutor.pushEvent(Varp(varId, prev, value))
                     val varBits = VarBitDefinition.baseVarMap[VarDomain.PLAYER]?.get(varId)
+                    val deltas = ArrayList<PacketLogger.VarBitDelta>()
                     varBits?.forEach { bit ->
                         val vbPrev = bit.getValue(prev)
                         val vbValue = bit.getValue(value)
                         if (vbPrev != vbValue) {
                             ScriptExecutor.pushEvent(Varpbit(bit.id, vbPrev, vbValue))
+                            deltas.add(PacketLogger.VarBitDelta(bit.id, vbPrev, vbValue))
                             if (wantsDebug) {
-                                // println("\t[varpbit_${bit.id}] $vbPrev -> $vbValue")
                                 UI.addVarTableEntry("varpbit", bit.id, vbPrev, vbValue)
                             }
                         }
                     }
+                    PacketLogger.logVarp(varId, prev, value, deltas)
                 }
             } catch (e: Throwable) {
                 e.printStackTrace()
@@ -63,22 +65,23 @@ object SetVarPlayer {
                 if (prev != value) {
                     val debugEnabled = UIState.varpDebugEnabled.value
                     if (debugEnabled) {
-                        // println("[varp_$varId] $prev -> $value")
                         UI.addVarTableEntry("varp", varId, prev, value)
                     }
                     ScriptExecutor.pushEvent(Varp(varId, prev, value))
                     val varBits = VarBitDefinition.baseVarMap[VarDomain.PLAYER]?.get(varId)
+                    val deltas = ArrayList<PacketLogger.VarBitDelta>()
                     varBits?.forEach { bit ->
                         val vbPrev = bit.getValue(prev)
                         val vbValue = bit.getValue(value)
                         if (vbPrev != vbValue) {
                             ScriptExecutor.pushEvent(Varpbit(bit.id, vbPrev, vbValue))
+                            deltas.add(PacketLogger.VarBitDelta(bit.id, vbPrev, vbValue))
                             if (debugEnabled) {
-                                // println("\t[varpbit_${bit.id}] $vbPrev -> $vbValue")
                                 UI.addVarTableEntry("varpbit", bit.id, vbPrev, vbValue)
                             }
                         }
                     }
+                    PacketLogger.logVarp(varId, prev, value, deltas)
                 }
             } catch (e: Throwable) {
                 e.printStackTrace()

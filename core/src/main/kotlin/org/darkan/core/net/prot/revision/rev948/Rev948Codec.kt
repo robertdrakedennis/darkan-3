@@ -32,6 +32,8 @@ fun register948() = Codec.register(948) {
     registerRev948ServerCodecsZone()
     registerRev948ServerCodecsPlayerInfo()
     registerRev948ServerCodecsNpcInfo()
+    // S->C structured display decoders for the packet dumper (mirror of the client decoders).
+    registerRev948ServerDecoders()
     // Then fill in metadata for all remaining opcodes (putIfAbsent — won't overwrite real registrations)
     registerRev948ServerProtStubs()
     registerRev948ClientProtStubs()

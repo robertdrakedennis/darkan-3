@@ -5,6 +5,7 @@ import com.undercut.game.hooks.Hook
 import com.undercut.game.hooks.HookManager
 import com.undercut.game.memory.NativeAccess.deref
 import com.undercut.game.memory.NativeAccess.getInt
+import com.undercut.game.net.PacketLogger
 import com.undercut.game.nxt.OFunctions
 import com.undercut.script.ScriptExecutor
 import com.undercut.script.event.impl.Varc
@@ -30,16 +31,19 @@ object SetVarClient {
                     }
                     ScriptExecutor.pushEvent(Varc(varId, prev, value))
                     val varBits = VarBitDefinition.baseVarMap[VarDomain.CLIENT]?.get(varId)
+                    val deltas = ArrayList<PacketLogger.VarBitDelta>()
                     varBits?.forEach { bit ->
                         val vbPrev = bit.getValue(prev)
                         val vbValue = bit.getValue(value)
                         if (vbPrev != vbValue) {
                             ScriptExecutor.pushEvent(Varcbit(bit.id, vbPrev, vbValue))
+                            deltas.add(PacketLogger.VarBitDelta(bit.id, vbPrev, vbValue))
                             if (wantsDebug) {
                                 UI.addVarTableEntry("varcbit", bit.id, vbPrev, vbValue)
                             }
                         }
                     }
+                    PacketLogger.logVarc(varId, prev, value, deltas)
                 }
             } catch (e: Throwable) {
                 e.printStackTrace()

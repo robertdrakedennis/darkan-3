@@ -24,6 +24,19 @@ class Codec {
     private val serverEncoderOpcodes = mutableSetOf<Int>()
 
     /**
+     * S->C structured decoders, keyed by opcode — the mirror of [clientProtsByOpcode] for the
+     * OTHER direction. A server decoder reads a packet's payload (reversing that opcode's encoder)
+     * and returns a human-readable, gameval-linked line for the packet dumper. The result is a
+     * display String (not a reconstructed [ServerProt]) — the dumper only needs a readable line.
+     */
+    val serverDecodersByOpcode = mutableMapOf<Int, suspend Source.(Int) -> String>()
+
+    /** Register an S->C display decoder for [opcode] (mirror of the [clientProt] decoder registration). */
+    internal fun serverDecode(opcode: Int, decoder: suspend Source.(Int) -> String) {
+        serverDecodersByOpcode[opcode] = decoder
+    }
+
+    /**
      * Decoder-less packets (e.g. the per-second Ping keepalive) are stateless singletons —
      * resolve the reflective instance once per class and reuse it for every packet.
      */

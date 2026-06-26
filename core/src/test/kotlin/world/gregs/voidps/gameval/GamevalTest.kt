@@ -16,7 +16,7 @@ class GamevalTest {
     fun `resolves names from bundled dictionaries`() {
         assertEquals("zaros_spellbook", Gameval.varbit(0))
         assertEquals("swarm_walk", Gameval.seq(0))
-        assertEquals("hitsplat", Gameval.sprite(2))
+        assertEquals("hitsplat", Gameval.graphic(2))
         assertEquals("quickchat_listdialog_000", Gameval.varc(0))
         assertEquals("lastcastspell", Gameval.varp(0))
         assertEquals("100guide_eggs_overlay", Gameval.interfaceName(0))

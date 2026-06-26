@@ -34,7 +34,7 @@ object Gameval {
     const val VAR_NPC = "var_npc"
     const val VAR_CLAN = "var_clan"
     const val SEQ = "seq"
-    const val SPRITE = "graphic" // gameval file `graphic.json` actually names sprites (2D images)
+    const val GRAPHIC = "graphic" // Jagex cs2 `type graphic` = 2D sprites (hitsplat, icons); NOT spotanim
     const val INTERFACE = "interface"
     const val COMPONENT = "component"
     const val NPC = "npc"
@@ -110,6 +110,13 @@ object Gameval {
     /** Reverse lookup: the id whose name is [name] in [type], or `null` if absent. Names are unique per type. */
     fun id(type: String, name: String): Int? = reverseMap(type)[name]
 
+    /**
+     * Like [id] but throws if the name is unknown. Use for resolving compile-time-known id
+     * constants from their official gameval names, so a typo'd/renamed name fails loudly at
+     * load time instead of silently producing a wrong (null-coalesced) id.
+     */
+    fun requireId(type: String, name: String): Int = id(type, name) ?: error("Gameval: no $type named '$name'")
+
     /** True if [type] is bundled and has at least one entry. */
     fun has(type: String): Boolean = rawMap(type).isNotEmpty()
 
@@ -133,10 +140,11 @@ object Gameval {
     fun seq(id: Int): String? = name(SEQ, id)
     fun seqLabel(id: Int): String = label(SEQ, id)
 
-    /** Sprite names (2D images). The gameval file is `graphic.json` but it labels sprites — NOT
-     * spotanims; spotanims/projectiles have no gameval and are named via their linked `seq`. */
-    fun sprite(id: Int): String? = name(SPRITE, id)
-    fun spriteLabel(id: Int): String = label(SPRITE, id)
+    /** Graphic = 2D sprite names (Jagex cs2 `type graphic`: `hitsplat`, emote/stat icons, headicons).
+     * Distinct from spotanim (cache index 21) — index 67 has no spotanim mapping, and spotanims are
+     * named engine-side via their linked `seq`. */
+    fun graphic(id: Int): String? = name(GRAPHIC, id)
+    fun graphicLabel(id: Int): String = label(GRAPHIC, id)
 
     /** Top-level interface (file `interface`). */
     fun interfaceName(id: Int): String? = name(INTERFACE, id)
