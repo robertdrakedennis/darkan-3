@@ -1,0 +1,29 @@
+lobby/src/main/kotlin/org/darkan/lobby/server/ConfigServer.kt
+  s_d5e57ef96bdf83::t_326c5107458146 567
+  s_d5e57ef96bdf83::t_bf72fb67e5c16f 103-109
+  s_d5e57ef96bdf83::t_f1e9d17c551047 102,511-517,519,523-551,562-565,568
+  s_d5e57ef96bdf83::t_81b6da8d56b002 167-168
+  s_d5e57ef96bdf83::t_e5e88b18b09580 139
+  s_d5e57ef96bdf83::t_f3835a8001fd12 34-48,50-54,59,63
+  s_d5e57ef96bdf83::t_43cc2d773c9001 256-263,273-279
+  s_d5e57ef96bdf83::t_f201206afeb789 92,101,114-138,140-142
+  s_d5e57ef96bdf83::t_3186feb3b3403c 12,20-21
+  s_d5e57ef96bdf83::t_9783fcab606c36 581-592
+  s_d5e57ef96bdf83::t_3c7350a46ccc1f 143-144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "877e4dbd4eb9f9df5a0e000574208317c5d9a618",
+  "prompts": {},
+  "sessions": {
+    "s_d5e57ef96bdf83": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d8003d8-9cd7-4636-a625-5f685c43d380",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
