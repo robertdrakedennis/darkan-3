@@ -1,0 +1,63 @@
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948Codec.kt
+  s_e72106c71093c7::t_b69277a7a8eb16 9-11,13-14,30
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948ServerCodecsRebuild.kt
+  s_e72106c71093c7::t_e99e5469fbb0f0 22,75-76,78-81,90-112
+core/src/main/kotlin/org/darkan/core/net/prot/update/ActiveMaskKeys.kt
+  s_e72106c71093c7::t_48152754e5e9ef 5
+core/src/main/kotlin/world/gregs/voidps/cache/Cache.kt
+  s_3972e0d0c22c33::t_b55a978e1270c7 27-28,114
+core/src/main/kotlin/world/gregs/voidps/cache/config/decoder/PlayerVariableParameterDecoder.kt
+  s_3972e0d0c22c33::t_470e5cca8ece03 4,8,17
+core/src/main/kotlin/world/gregs/voidps/cache/sqlite/IndexFile.kt
+  s_3972e0d0c22c33::t_af0444b05768e8 28,45,87-97,116-127,262
+core/src/main/kotlin/world/gregs/voidps/cache/sqlite/SQLiteCache.kt
+  s_3972e0d0c22c33::t_9643559e40382b 75-83
+docs/HANDOFF-948-client-multifile-refetch.md
+  s_3972e0d0c22c33::t_add32b154b42e9 1-111
+lobby/src/main/kotlin/org/darkan/lobby/server/packet/WorldlistFetchHandler.kt
+  s_3972e0d0c22c33::t_13301117b20de6 14-15
+run-client-mac.sh
+  s_3972e0d0c22c33::t_d64e65c7a63c74 6,40-46,150,160-162
+tools/build.gradle.kts
+  s_fb5f564ca196cd::t_81a2ea71b320d7 132,134-139
+tools/src/main/kotlin/org/darkan/tools/WorldLoginProbe.kt
+  s_3972e0d0c22c33::t_194876e3f57b29 11,16-17,36,66-72,85-147,165-174,220-248,263-267,391,416,612-689
+world/src/main/kotlin/org/darkan/world/net/NpcInfoBuilder.kt
+  s_e72106c71093c7::t_5c74535aaf1387 130,146
+world/src/main/kotlin/org/darkan/world/net/PlayerInfoBuilder.kt
+  s_e72106c71093c7::t_dbccf19657eced 180-185,289,291-292,295,297-298,302-331,390
+world/src/main/kotlin/org/darkan/world/server/WorldServer.kt
+  s_3972e0d0c22c33::t_bcecc0cd2cd0ca 29,31,34,344,363-364,397-398,401-402,409-410,414-415,421,423-425,430,479,525-526,528-529,540,545-546,549,612-614,624-676,679-680,682,701-707
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "70735d4a029cbe3f17aa67d7fb5f65586cd75c8a",
+  "prompts": {},
+  "sessions": {
+    "s_3972e0d0c22c33": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d2bb7162-2225-4251-93cc-0800ce0b6469",
+        "model": "unknown"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    },
+    "s_e72106c71093c7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-af4c3e90bf6ff78d0",
+        "model": "unknown"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    },
+    "s_fb5f564ca196cd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a53039a84f0edb95a",
+        "model": "unknown"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
