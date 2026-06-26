@@ -26,6 +26,19 @@ class Rev948ZoneEncoderTest {
     }
 
     @Test
+    fun `UPDATE_ZONE_PARTIAL_FOLLOWS encodes rev948 scene-local header`() {
+        val actual = encodeBody(UpdateZonePartialFollows(level = 0, zoneX = 20, zoneY = 19))
+
+        val expected = byteArrayOf(
+            0x94.toByte(),
+            0x80.toByte(),
+            0x13,
+        )
+
+        assertEquals(expected.toHex(), actual.toHex())
+    }
+
+    @Test
     fun `UPDATE_ZONE_PARTIAL_ENCLOSED encodes rev948 loc anim subop`() {
         val actual = encodeBody(
             UpdateZonePartialEnclosed(

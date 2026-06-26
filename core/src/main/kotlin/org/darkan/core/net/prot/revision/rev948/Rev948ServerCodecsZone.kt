@@ -64,13 +64,12 @@ internal fun Codec.registerRev948ServerCodecsZone() {
 
     // UPDATE_ZONE_PARTIAL_FOLLOWS (op 41, 3B) — handler jag::packethandlers::ZoneUpdates::
     //   UPDATE_ZONE_PARTIAL_FOLLOWS @ 0x000ef150 (asm-verified — resolves the prior TODO).
-    //   Wire: [+0]=zoneX(raw unsigned byte), [+1]=level(byteAdd), [+2]=zoneY(raw signed byte).
+    //   Wire: [+0]=zoneX+128(raw unsigned byte), [+1]=level(byteAdd), [+2]=zoneY(raw signed byte).
     //   Handler: DAT_ac=base608-0x400+byte*8=zoneX ; DAT_a8=(byte+0x80)=level ;
     //            DAT_b0=base60c+(char)byte*8=zoneY.
-    //   The "3-byte header reorder" flagged by the delta doc is: level moved to the MIDDLE byte
-    //   (it is NOT last). zoneX raw first, zoneY raw last.
+    //   The 3-byte header order is: zoneX+128, level in the middle byte, zoneY last.
     serverProt<UpdateZonePartialFollows>(opcode = 41, size = 3) { out ->
-        out.writeByte(zoneX)
+        out.writeByte(zoneX + 128)
         out.writeByteAdd(level)
         out.writeByte(zoneY)
     }

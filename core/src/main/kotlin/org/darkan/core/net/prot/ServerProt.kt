@@ -1208,8 +1208,6 @@ data class SoundArea(
     val paramB: Int,
 ) : ServerProt
 
-// NOTE: LOC_ANIM is not modelled as ServerProt; emit it inline inside UpdateZonePartialEnclosed.
-
 // === Entity sync packets (per A4, A5) ===
 
 /**

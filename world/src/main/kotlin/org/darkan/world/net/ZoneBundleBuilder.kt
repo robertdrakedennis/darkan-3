@@ -24,24 +24,25 @@ object ZoneBundleBuilder {
         if (pendingMap.isEmpty()) return emptyList()
 
         val viewport = player.viewport
-        // The build area is the authoritative spatial gate (spec §4 / alerion §6): a zone update is
-        // visible only if its zone falls inside the build-area map-square grid. The grid bounds are
-        // in REGIONS (64-tile / 8-zone map-squares); convert to inclusive chunk (zone) bounds by
-        // `region*8 .. region*8+7`. The origin chunk (SW corner) is `minRegion*8` — relative zone
-        // offsets below are measured from it.
         val buildArea = viewport.buildArea
-        val originChunkX = buildArea.minRegion.x shl 3
-        val originChunkY = buildArea.minRegion.y shl 3
-        val minChunkX = originChunkX
-        val maxChunkX = (buildArea.maxRegion.x shl 3) + 7
-        val minChunkY = originChunkY
-        val maxChunkY = (buildArea.maxRegion.y shl 3) + 7
+        val minBuildChunkX = buildArea.minRegion.x shl 3
+        val maxBuildChunkX = (buildArea.maxRegion.x shl 3) + 7
+        val minBuildChunkY = buildArea.minRegion.y shl 3
+        val maxBuildChunkY = (buildArea.maxRegion.y shl 3) + 7
+        val originChunkX = ZoneStreamer.sceneBaseZone(viewport.buildAreaChunkX)
+        val originChunkY = ZoneStreamer.sceneBaseZone(viewport.buildAreaChunkY)
+        val minSceneChunkX = viewport.buildAreaChunkX - ZoneStreamer.SCENE_RADIUS_ZONES
+        val maxSceneChunkX = viewport.buildAreaChunkX + ZoneStreamer.SCENE_RADIUS_ZONES
+        val minSceneChunkY = viewport.buildAreaChunkY - ZoneStreamer.SCENE_RADIUS_ZONES
+        val maxSceneChunkY = viewport.buildAreaChunkY + ZoneStreamer.SCENE_RADIUS_ZONES
 
         val out = ArrayList<ServerProt>()
         for ((zoneId, packets) in pendingMap) {
             val zone = Zone(zoneId)
-            if (zone.x !in minChunkX..maxChunkX) continue
-            if (zone.y !in minChunkY..maxChunkY) continue
+            if (zone.x !in minBuildChunkX..maxBuildChunkX) continue
+            if (zone.y !in minBuildChunkY..maxBuildChunkY) continue
+            if (zone.x !in minSceneChunkX..maxSceneChunkX) continue
+            if (zone.y !in minSceneChunkY..maxSceneChunkY) continue
             if (packets.isEmpty()) continue
 
             val relX = zone.x - originChunkX

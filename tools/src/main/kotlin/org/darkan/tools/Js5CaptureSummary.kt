@@ -25,7 +25,7 @@ fun main(args: Array<String>) {
     val js5Port = args.getOrNull(1)?.toIntOrNull() ?: 43596
     val worldPort = args.getOrNull(2)?.toIntOrNull() ?: 43597
     val capture = CaptureReader.read(captureFile).dedupeIo()
-    val opts = Options(captureFile, null, null, js5Port, worldPort, js5Port, -1, false, false, false)
+    val opts = Options(captureFile, null, null, js5Port, worldPort, js5Port, -1, false, false, false, false)
     val js5Connections = ConnectionAssembler.assemble(capture, opts).filter { it.role == Role.JS5 }
 
     println("capture=${captureFile.name} pid=${capture.pid} records=${capture.records.size} js5Connections=${js5Connections.size}")
