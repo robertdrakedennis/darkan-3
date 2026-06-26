@@ -5,6 +5,7 @@ import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.definition.data.VarBitDefinition
 import world.gregs.voidps.cache.definition.data.VarBitDefinition.Companion.BIT_MASKS
 import world.gregs.voidps.cache.definition.data.VarDomain
+import world.gregs.voidps.gameval.Gameval
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import kotlinx.serialization.json.buildJsonArray
@@ -51,6 +52,7 @@ object VarTools {
                 val client = requireLoggedIn()
                 val node = client.playerVarDomain.hashTable[id]
                 put("varp_id", id)
+                put("varp_name", Gameval.varp(id) ?: "")
                 put("domain", "PLAYER")
                 if (node == null) {
                     put("value", 0)
@@ -91,6 +93,7 @@ object VarTools {
                 val type = Cache.varbit(id) ?: throw BadRequest("unknown varbit id $id")
                 val domain = type.domain
                 put("varbit_id", id)
+                put("varbit_name", Gameval.varbit(id) ?: "")
                 put("base_varp", type.baseVar)
                 put("start_bit", type.startBit)
                 put("end_bit", type.endBit)
@@ -146,6 +149,7 @@ object VarTools {
                 val client = requireLoggedIn()
                 val node = client.clientVarDomain.hashTable[id]
                 put("varc_id", id)
+                put("varc_name", Gameval.varc(id) ?: "")
                 put("domain", "CLIENT")
                 if (node == null) {
                     put("value", 0)
@@ -206,6 +210,7 @@ object VarTools {
                     for (r in window) {
                         add(buildJsonObject {
                             put("varp_id", r.id)
+                            put("varp_name", Gameval.varp(r.id) ?: "")
                             put("value", r.value)
                             putPtrField("node", r.nodeAddr)
                         })
@@ -270,6 +275,7 @@ object VarTools {
                     for (vb in varbits.sortedBy { it.id }) {
                         add(buildJsonObject {
                             put("varbit_id", vb.id)
+                            put("varbit_name", Gameval.varbit(vb.id) ?: "")
                             put("start_bit", vb.startBit)
                             put("end_bit", vb.endBit)
                             val maskWidth = (vb.endBit - vb.startBit).coerceIn(0, 31)

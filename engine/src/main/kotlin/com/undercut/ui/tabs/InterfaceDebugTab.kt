@@ -6,6 +6,7 @@ import com.undercut.game.nxt.interfaces.InterfaceComponent
 import com.undercut.script.api.interfaces
 import com.undercut.ui.UIState
 import com.undercut.ui.backend.dsl.scopes.*
+import world.gregs.voidps.gameval.Gameval
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import kotlin.math.min
@@ -87,7 +88,8 @@ object InterfaceDebugTab {
 
             UIState.interfaceDebugOpenInterfaces.sorted().forEach { id ->
                 val selected = UIState.interfaceDebugInterfaceId.value == id
-                val label = if (selected) ">> $id ##if$id" else "$id##if$id"
+                val shown = Gameval.interfaceLabel(id)
+                val label = if (selected) ">> $shown ##if$id" else "$shown##if$id"
                 button(label) {
                     UIState.interfaceDebugInterfaceId.value = id
                     UIState.interfaceDebugComponentId.value = -1
@@ -126,7 +128,7 @@ object InterfaceDebugTab {
             }
 
             val count = parent.size
-            text("Components (IF $ifId): $count")
+            text("Components (${Gameval.interfaceLabel(ifId)}): $count")
             separator()
             for (cid in 0 until min(count, MAX_COMPONENTS_SHOWN)) {
                 val comp = try { parent[cid] } catch (_: Throwable) { null } ?: continue
@@ -165,9 +167,11 @@ object InterfaceDebugTab {
         val txt = try { comp.text.take(20) } catch (_: Throwable) { "" }
         val itemId = try { comp.itemId } catch (_: Throwable) { 0 }
         val selected = UIState.interfaceDebugComponentId.value == cid
+        val compName = Gameval.component(comp.interfaceId, cid)?.substringAfter(':')
         val label = buildString {
             if (selected) append(">> ")
-            append("$cid [${getTypeName(type)}]")
+            if (compName != null) append("$cid \"$compName\"") else append("$cid")
+            append(" [${getTypeName(type)}]")
             if (txt.isNotBlank()) append(": \"$txt\"")
             if (itemId > 0) append(" [i:$itemId]")
         }
@@ -182,7 +186,7 @@ object InterfaceDebugTab {
 
     private fun ChildScope.renderComponentDetails(comp: InterfaceComponent) {
         try {
-            text("Component: ${comp.interfaceId}:${comp.componentId}")
+            text("Component: ${Gameval.componentLabel(comp.interfaceId, comp.componentId)}")
             button("Copy ID") { copyToClipboard("${comp.interfaceId}:${comp.componentId}") }
 
             separator()
@@ -205,7 +209,7 @@ object InterfaceDebugTab {
             }
             if (itemId != 0) {
                 text("Item"); nextColumn()
-                text("$itemId x$stackSize")
+                text("${Gameval.objLabel(itemId)} x$stackSize")
                 sameLine()
                 button("Copy##cpitem") { copyToClipboard("$itemId") }
                 nextColumn()

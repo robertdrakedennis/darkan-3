@@ -167,6 +167,10 @@ class SQLiteCache private constructor(
 
         val reader = BufferReader(decompressed)
         reader.readByte() // version byte
+        // Offsets here are 3-byte big-endian mediums, matching the headerSize math above
+        // (1 + (N+1) * 3). This path is only a fast guess for groups that happen to lead with
+        // 0x01; the validation below rejects any group whose table is not self-consistent so the
+        // caller falls back to the canonical chunked-trailer reader (parseLegacyMultiFile).
         val offsets = IntArray(fileCount + 1) { reader.readUnsignedMedium() }
 
         // Validate: first offset is the header end, offsets are non-decreasing, and the last

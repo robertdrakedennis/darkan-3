@@ -2,6 +2,7 @@ package com.undercut.mcp.tools
 
 import com.undercut.game.Skill
 import com.undercut.game.bootstrap.Bootstrap
+import world.gregs.voidps.gameval.Gameval
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import kotlinx.serialization.json.buildJsonArray
@@ -74,7 +75,11 @@ object PlayerTools {
                     })
                 }.onFailure { warnings.add("world_fine read failed: ${it.message}") }
 
-                runCatching { put("animation_id", self.animationId) }
+                runCatching {
+                    val a = self.animationId
+                    put("animation_id", a)
+                    put("animation_name", Gameval.seq(a) ?: "")
+                }
                 runCatching { put("is_moving", self.isMoving) }
                 runCatching { put("is_interacting", self.isInteracting) }
                 runCatching { put("interaction_sid", self.interactionSid) }

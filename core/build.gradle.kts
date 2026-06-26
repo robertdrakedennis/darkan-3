@@ -1,3 +1,5 @@
+import org.gradle.language.jvm.tasks.ProcessResources
+
 plugins {
     alias(libs.plugins.kotlin.serialization)
 }
@@ -30,4 +32,16 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+// Bundle the RE gameval id<->name dictionaries (re-resources/gamevals/*.json, a submodule) into
+// :core's jar under /gamevals so the Gameval facility (world.gregs.voidps.gameval) can load them
+// from the classpath at runtime. This makes the names available to the server AND to the injected
+// engine shadowJar (which has no repo files at runtime) without any external file dependency.
+tasks.named<ProcessResources>("processResources") {
+    from(rootProject.file("re-resources/gamevals")) {
+        into("gamevals")
+        include("*.json")
+    }
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
 }

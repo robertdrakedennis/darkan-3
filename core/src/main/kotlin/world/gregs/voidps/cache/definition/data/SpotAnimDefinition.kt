@@ -4,7 +4,7 @@ import world.gregs.voidps.cache.Definition
 import world.gregs.voidps.cache.definition.Extra
 import world.gregs.voidps.cache.definition.Recolourable
 
-data class GraphicDefinition(
+data class SpotAnimDefinition(
     override var id: Int = -1,
     var modelId: Int = 0,
     var animationId: Int = -1,
@@ -27,7 +27,7 @@ data class GraphicDefinition(
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
 
-        other as GraphicDefinition
+        other as SpotAnimDefinition
 
         if (id != other.id) return false
         if (modelId != other.modelId) return false
@@ -83,6 +83,6 @@ data class GraphicDefinition(
         return result
     }
     companion object {
-        val EMPTY = GraphicDefinition()
+        val EMPTY = SpotAnimDefinition()
     }
 }

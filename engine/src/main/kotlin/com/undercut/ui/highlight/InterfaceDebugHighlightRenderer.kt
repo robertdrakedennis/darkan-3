@@ -9,6 +9,7 @@ import com.undercut.ui.UIState
 import com.undercut.ui.backend.dsl.ImGuiDsl.backgroundDrawList
 import com.undercut.ui.backend.dsl.utils.ImGuiColors
 import com.undercut.ui.backend.rendering.ImGUIRender
+import world.gregs.voidps.gameval.Gameval
 
 /**
  * While the Interface Debug tab is open, faintly outlines the component currently selected there
@@ -46,7 +47,7 @@ object InterfaceDebugHighlightRenderer {
             val fill = (ImGuiColors.WHITE and 0x00FFFFFF) or (28 shl 24)
             rectFilled(tl, br, fill, rounding = 3f)
             rect(tl, br, outline, rounding = 3f, thickness = 1.5f)
-            text(Vector2f(sr.x.toFloat() + 3f, sr.y.toFloat() - 15f), outline, "$ifId:$compId")
+            text(Vector2f(sr.x.toFloat() + 3f, sr.y.toFloat() - 15f), outline, Gameval.componentLabel(ifId, compId))
         }
     }
 }

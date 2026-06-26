@@ -16,6 +16,7 @@ import com.undercut.script.api.inventory
 import com.undercut.script.api.varps
 import com.undercut.ui.UIState
 import com.undercut.ui.backend.dsl.scopes.*
+import world.gregs.voidps.gameval.Gameval
 
 object QuestHelperTab {
     fun ChildScope.render() {
@@ -209,7 +210,7 @@ object QuestHelperTab {
         if (active.stageVarbit >= 0) {
             sameLine()
             val live = if (loggedIn()) safe { varps.getVarBit(active.stageVarbit) } ?: -1 else -1
-            text("   (varbit ${active.stageVarbit} = $live / ${active.stageVarbitCompleteValue})")
+            text("   (${Gameval.varbitLabel(active.stageVarbit)} = $live / ${active.stageVarbitCompleteValue})")
         }
     }
 
@@ -270,7 +271,7 @@ object QuestHelperTab {
             }
             is QuestAction.ConversationHighlight -> "  • Click dialog option: \"${a.text}\""
             is QuestAction.InventoryHighlight -> "  • Use inventory item: ${a.displayName}"
-            is QuestAction.InterfaceComponentHighlight -> "  • Click: ${a.label.ifBlank { "interface ${a.interfaceId}:${a.componentId}" }}"
+            is QuestAction.InterfaceComponentHighlight -> "  • Click: ${a.label.ifBlank { Gameval.componentLabel(a.interfaceId, a.componentId) }}"
             QuestAction.ContinueConversation -> "  • Press 'continue' in dialog"
             QuestAction.ResetInstance -> "  • Reset the instance"
             is QuestAction.PathGuide -> "  • Follow path (${a.waypoints.size} waypoints)${if (a.instance) " [instance]" else ""}"

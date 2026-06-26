@@ -3,6 +3,7 @@ import com.undercut.game.target
 
 import com.undercut.game.Skill
 import world.gregs.voidps.type.Tile
+import world.gregs.voidps.gameval.Gameval
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.hooks.impl.SDLKeycode
 import com.undercut.game.hooks.impl.keyDown
@@ -603,7 +604,7 @@ fun openClosestBank(checkReachable: Boolean = false, range: Int = 20): Boolean {
             if (bankObj.hasOption(op))
                 return bankObj.interact(op)
         }
-        println("Bank object had unsupported action: ${bankObj.name()} ${bankObj.typeId}")
+        println("Bank object had unsupported action: ${bankObj.name()} ${bankObj.typeId} (${Gameval.locLabel(bankObj.typeId)})")
     }
 
     findClosestNPC(range, checkReachable) { it.name().contains("Bank") || it.hasOption("Bank") }?.let { bankNpc ->
@@ -612,7 +613,7 @@ fun openClosestBank(checkReachable: Boolean = false, range: Int = 20): Boolean {
                 return bankNpc.interact(op)
         }
         println(
-            "Bank npc had unsupported action: ${bankNpc.name} ${bankNpc.typeId}, might be too far away ${
+            "Bank npc had unsupported action: ${bankNpc.name} ${bankNpc.typeId} (${Gameval.npcLabel(bankNpc.typeId)}), might be too far away ${
                 bankNpc.tile.getDistance(
                     localPlayer.tile
                 )
@@ -628,14 +629,14 @@ fun loadLastPresetClosestBank(checkReachable: Boolean = false, range: Int = 20):
     }?.let { bankObj ->
         if (bankObj.hasOption("Load Last Preset from"))
             return bankObj.interact("Load Last Preset from")
-        println("Bank object had unsupported action: ${bankObj.name()} ${bankObj.typeId}")
+        println("Bank object had unsupported action: ${bankObj.name()} ${bankObj.typeId} (${Gameval.locLabel(bankObj.typeId)})")
     }
 
     findClosestNPC(range, checkReachable) { it.name().contains("Bank") || it.hasOption("Bank") }?.let { bankNpc ->
         if (bankNpc.hasOption("Load Last Preset from"))
             return bankNpc.interact("Load Last Preset from")
         println(
-            "Bank npc had unsupported action: ${bankNpc.name} ${bankNpc.typeId}, might be too far away ${
+            "Bank npc had unsupported action: ${bankNpc.name} ${bankNpc.typeId} (${Gameval.npcLabel(bankNpc.typeId)}), might be too far away ${
                 bankNpc.tile.getDistance(
                     localPlayer.tile
                 )

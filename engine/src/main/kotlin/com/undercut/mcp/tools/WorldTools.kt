@@ -1,7 +1,9 @@
 package com.undercut.mcp.tools
 
 import world.gregs.voidps.type.Tile
+import world.gregs.voidps.gameval.Gameval
 import com.undercut.game.bootstrap.Bootstrap
+import com.undercut.game.spotAnimName
 import com.undercut.game.nxt.ItemStackNode
 import com.undercut.game.nxt.entity.GroundItem
 import com.undercut.game.nxt.entity.ItemStack
@@ -183,7 +185,11 @@ object WorldTools {
                             put("type_id", npc.typeId)
                             runCatching { put("name", npc.name()) }
                             runCatching { putTile(npc.tile) }
-                            runCatching { put("animation_id", npc.animationId) }
+                            runCatching {
+                                val a = npc.animationId
+                                put("animation_id", a)
+                                put("animation_name", Gameval.seq(a) ?: "")
+                            }
                             runCatching {
                                 put("current_hp", npc.currentHealth)
                                 put("max_hp", npc.maxHealth)
@@ -195,7 +201,11 @@ object WorldTools {
                                 runCatching { put("is_combat_target", npc.isCombatTarget) }
                                 runCatching { putPtrField("graph_node", npc.graphNode.ptr.address()) }
                                 runCatching { put("hidden_menuop_flags", npc.hiddenMenuOpFlags) }
-                                runCatching { put("render_anim", npc.renderAnim) }
+                                runCatching {
+                                    val ra = npc.renderAnim
+                                    put("render_anim", ra)
+                                    put("render_anim_name", Gameval.seq(ra) ?: "")
+                                }
                             }
                         })
                     }
@@ -257,7 +267,11 @@ object WorldTools {
                             runCatching { put("server_index", p.serverIndex) }
                             runCatching { put("name", p.name) }
                             runCatching { putTile(p.tile) }
-                            runCatching { put("animation_id", p.animationId) }
+                            runCatching {
+                                val a = p.animationId
+                                put("animation_id", a)
+                                put("animation_name", Gameval.seq(a) ?: "")
+                            }
                             runCatching { put("is_moving", p.isMoving) }
                             runCatching { put("is_interacting", p.isInteracting) }
                             runCatching { put("interaction_sid", p.interactionSid) }
@@ -334,6 +348,7 @@ object WorldTools {
                                 for (gi in row.items) {
                                     add(buildJsonObject {
                                         put("item_id", gi.id)
+                                        put("item_name", Gameval.obj(gi.id) ?: "")
                                         put("amount", gi.amount)
                                         runCatching { put("name", gi.name) }
                                     })
@@ -404,7 +419,9 @@ object WorldTools {
                         add(buildJsonObject {
                             putAddr(obj.memPointer.address())
                             put("id", obj.id)
+                            put("name_gameval", Gameval.loc(obj.id) ?: "")
                             put("type_id", obj.typeId)
+                            put("type_name", Gameval.loc(obj.typeId) ?: "")
                             runCatching { put("name", obj.name()) }
                             putTile(obj.tile)
                             runCatching { put("shape", obj.shape.name) }
@@ -468,6 +485,7 @@ object WorldTools {
                         add(buildJsonObject {
                             putAddr(p.ptr.address())
                             put("id", p.id)
+                            put("spotanim_name", spotAnimName(p.id) ?: "")
                             put("locked_to_server_index", p.lockedToServerIndex)
                             runCatching { putTile(p.tile) }
                         })
@@ -524,6 +542,7 @@ object WorldTools {
                         add(buildJsonObject {
                             putAddr(sa.ptr.address())
                             put("id", sa.id)
+                            put("spotanim_name", spotAnimName(sa.id) ?: "")
                             runCatching { putTile(sa.tile) }
                             put("created_clientcycle", sa.createdClientcycle)
                             put("cycles_alive", sa.cyclesAlive)

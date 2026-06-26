@@ -12,6 +12,7 @@ import com.undercut.game.nxt.OLocationType
 import com.undercut.game.nxt.entity.Entity
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.definition.data.ObjectDefinition
+import world.gregs.voidps.gameval.Gameval
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout.ADDRESS
 
@@ -64,7 +65,7 @@ class Location(ptr: MemorySegment) : Entity(ptr), SceneObject {
 //        get() = defs.shapes.slot
 
     override fun toString(): String {
-        return "[$id (${getName()}), $type, $rotation, ${tile}, clipType: ${getDef().clipType}]"
+        return "[${Gameval.locLabel(id)} (${getName()}), $type, $rotation, ${tile}, clipType: ${getDef().clipType}]"
     }
 }
 

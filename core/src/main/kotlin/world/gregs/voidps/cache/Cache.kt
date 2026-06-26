@@ -157,8 +157,8 @@ interface Cache {
             StructDecoder().load(get())
         }
 
-        @JvmStatic val graphics: Array<GraphicDefinition> by lazy {
-            GraphicDecoder().load(get())
+        @JvmStatic val spotAnims: Array<SpotAnimDefinition> by lazy {
+            SpotAnimDecoder().load(get())
         }
 
         @JvmStatic val bas: Array<BASDefinition> by lazy {
@@ -210,7 +210,7 @@ interface Cache {
         private val varbitDefinitions by lazy { Definitions(VarBitDecoder(), get()) }
         private val animationDefinitions by lazy { Definitions(AnimationDecoder(), get()) }
         private val basDefinitions by lazy { Definitions(BASDecoder(), get()) }
-        private val graphicDefinitions by lazy { Definitions(GraphicDecoder(), get()) }
+        private val spotAnimDefinitions by lazy { Definitions(SpotAnimDecoder(), get()) }
         private val interfaceDefinitions by lazy { Definitions(InterfaceDecoder(), get()) }
         private val fontDefinitions by lazy { Definitions(FontDecoder(), get()) }
 
@@ -222,7 +222,7 @@ interface Cache {
         @JvmStatic fun varbit(id: Int): VarBitDefinition? = varbitDefinitions.getOrNull(id)
         @JvmStatic fun animation(id: Int): AnimationDefinition? = animationDefinitions.getOrNull(id)
         @JvmStatic fun bas(id: Int): BASDefinition? = basDefinitions.getOrNull(id)
-        @JvmStatic fun graphic(id: Int): GraphicDefinition? = graphicDefinitions.getOrNull(id)
+        @JvmStatic fun spotAnim(id: Int): SpotAnimDefinition? = spotAnimDefinitions.getOrNull(id)
         @JvmStatic fun interfaceDef(id: Int): InterfaceDefinition? = interfaceDefinitions.getOrNull(id)
         @JvmStatic fun font(id: Int): FontDefinition? = fontDefinitions.getOrNull(id)
 

@@ -82,16 +82,10 @@ class NPCDecoder(val members: Boolean = true) : DefinitionDecoder<NPCDefinition>
             }
             119 -> walkMask = buffer.readByte().toByte()
             121 -> {
-                translations = arrayOfNulls(modelIds!!.size)
-                val length = buffer.readUnsignedByte()
-                for (count in 0 until length) {
-                    val index = buffer.readUnsignedByte()
-                    translations!![index] = intArrayOf(
-                        buffer.readByte(),
-                        buffer.readByte(),
-                        buffer.readByte()
-                    )
-                }
+                // RS3 948: a count of model translations, each 4 raw bytes (NOT the OSRS
+                // index+xyz form, which crashed by indexing translations[byte] into modelIds).
+                val count = buffer.readUnsignedByte()
+                translations = Array<IntArray?>(count) { IntArray(4) { buffer.readByte() } }
             }
             122 -> hitbarSprite = buffer.readUnsignedShort()
             123 -> height = buffer.readUnsignedShort()
@@ -129,7 +123,7 @@ class NPCDecoder(val members: Boolean = true) : DefinitionDecoder<NPCDefinition>
             137 -> attackCursor = buffer.readUnsignedShort()
             // Opcode 138: overhead sprite (bigSmart for rev 727)
             138 -> armyIcon = buffer.readBigSmart()
-            139 -> spriteId = buffer.readUnsignedShort()
+            139 -> spriteId = buffer.readBigSmart() // bigSmart (2-or-4 bytes), not a plain short
             140 -> ambientSoundVolume = buffer.readUnsignedByte()
             141 -> visiblePriority = true
             142 -> mapFunction = buffer.readUnsignedShort()

@@ -6,12 +6,13 @@ import com.undercut.ui.UIState
 import com.undercut.ui.backend.dsl.scopes.*
 import com.undercut.ui.backend.dsl.utils.ImGuiTableColumnFlags
 import com.undercut.ui.backend.dsl.utils.ImGuiTableFlags
+import world.gregs.voidps.gameval.Gameval
 
 object InventoryTab {
     fun ChildScope.render() {
         text("Inventory")
 
-        // Build a custom combo with selectable entries, binding directly to external inventory ID
+        // Quick-pick for the common containers
         val types = UI.InventoryType.entries
         val current = types.firstOrNull { it.id == UIState.inventoryId.value } ?: UI.InventoryType.BACKPACK
         combo("InventoryType", current.displayName) {
@@ -22,12 +23,37 @@ object InventoryTab {
                     }
                 }
         }
-         
+
         text("Inventory ID:")
         sameLine()
         group {
             inputInt("##invid", UIState.inventoryId.value) { newVal ->
                 UIState.inventoryId.value = newVal
+            }
+        }
+        sameLine()
+        text(Gameval.inv(UIState.inventoryId.value)?.let { "($it)" } ?: "(unknown inv)")
+
+        // Search ALL inventories by their gameval dev-name (e.g. "bank", "equipment", "bond_pouch")
+        inputText("Find inventory", UIState.inventoryNameSearch)
+        val invQuery = UIState.inventoryNameSearch.value.trim()
+        if (invQuery.isNotEmpty()) {
+            val matches = Gameval.entries(Gameval.INV).asSequence()
+                .filter { it.value.contains(invQuery, ignoreCase = true) || it.key.toString() == invQuery }
+                .sortedBy { it.key }
+                .take(40)
+                .toList()
+            child("invMatches", height = 130f) {
+                if (matches.isEmpty()) {
+                    text("No inventories match")
+                } else {
+                    matches.forEach { (id, name) ->
+                        selectable("$name ($id)", id == UIState.inventoryId.value) {
+                            UIState.inventoryId.value = id
+                            loadInventory(id)
+                        }
+                    }
+                }
             }
         }
 
@@ -41,7 +67,7 @@ object InventoryTab {
             UIState.inventoryData.clear()
         }
 
-        inputText("Search", UIState.inventorySearchText)
+        inputText("Item search", UIState.inventorySearchText)
 
         separator()
 

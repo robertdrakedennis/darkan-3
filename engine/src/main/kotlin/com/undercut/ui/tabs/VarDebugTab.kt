@@ -5,6 +5,7 @@ import com.undercut.script.api.varps
 import com.undercut.ui.UIState
 import com.undercut.ui.backend.dsl.scopes.*
 import com.undercut.ui.backend.dsl.utils.ImGuiTableFlags
+import world.gregs.voidps.gameval.Gameval
 
 object VarDebugTab {
     fun ChildScope.render() {
@@ -119,7 +120,7 @@ object VarDebugTab {
                     text(if (watch.readModeIndex == 0) "getVar" else "getVarbit")
 
                     nextColumn()
-                    text(watch.id.toString())
+                    text(varLabel(watch.domainIndex, watch.readModeIndex, watch.id))
 
                     nextColumn()
                     text(watch.live.toString())
@@ -206,7 +207,7 @@ object VarDebugTab {
                     nextColumn()
                     text(entry.type)
                     nextColumn()
-                    text(entry.id.toString())
+                    text(changeVarLabel(entry.type, entry.id))
                     nextColumn()
                     text(entry.prevValue.toString())
                     nextColumn()
@@ -214,6 +215,20 @@ object VarDebugTab {
                 }
             }
         }
+    }
+
+    private fun varLabel(domainIndex: Int, readModeIndex: Int, id: Int): String = when {
+        domainIndex == 0 && readModeIndex == 1 -> Gameval.varbitLabel(id)
+        domainIndex == 0 -> Gameval.varpLabel(id)
+        readModeIndex == 1 -> id.toString() // client varbits have no gameval dictionary
+        else -> Gameval.varcLabel(id)
+    }
+
+    private fun changeVarLabel(type: String, id: Int): String = when (type) {
+        "varp" -> Gameval.varpLabel(id)
+        "varpbit" -> Gameval.varbitLabel(id)
+        "varc" -> Gameval.varcLabel(id)
+        else -> id.toString() // varcbit has no gameval dictionary
     }
 
     private fun readValue(domainIndex: Int, readModeIndex: Int, id: Int): Int {

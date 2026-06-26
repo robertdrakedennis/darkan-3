@@ -3,17 +3,17 @@ package world.gregs.voidps.cache.definition.decoder
 import world.gregs.voidps.buffer.read.Reader
 import world.gregs.voidps.cache.DefinitionDecoder
 import world.gregs.voidps.cache.Index.SPOTANIMS
-import world.gregs.voidps.cache.definition.data.GraphicDefinition
+import world.gregs.voidps.cache.definition.data.SpotAnimDefinition
 
-class GraphicDecoder : DefinitionDecoder<GraphicDefinition>(SPOTANIMS) {
+class SpotAnimDecoder : DefinitionDecoder<SpotAnimDefinition>(SPOTANIMS) {
 
-    override fun create(size: Int) = Array(size) { GraphicDefinition(it) }
+    override fun create(size: Int) = Array(size) { SpotAnimDefinition(it) }
 
     override fun getFile(id: Int) = id and 0xff
 
     override fun getArchive(id: Int) = id ushr 8
 
-    override fun GraphicDefinition.read(opcode: Int, buffer: Reader) {
+    override fun SpotAnimDefinition.read(opcode: Int, buffer: Reader) {
         when (opcode) {
             // Opcode 1: model ID (bigSmart for rev 727)
             1 -> modelId = buffer.readBigSmart()

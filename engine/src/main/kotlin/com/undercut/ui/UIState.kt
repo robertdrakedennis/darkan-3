@@ -38,6 +38,7 @@ object UIState {
     }
     val varcSearchText = stringState("", 128)
     val inventorySearchText = stringState("", 128)
+    val inventoryNameSearch = stringState("", 128)
     val buffsDebuffsSearchText = stringState("", 128)
     val entitySearchText = stringState("", 128)
     val packetSearchText = stringState("", 128)
@@ -164,6 +165,7 @@ object UIState {
         statusFilterIndex.close()
         varcSearchText.close()
         inventorySearchText.close()
+        inventoryNameSearch.close()
         buffsDebuffsSearchText.close()
         entitySearchText.close()
         mcpEnabled.close()

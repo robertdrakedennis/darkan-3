@@ -8,6 +8,7 @@ import com.undercut.game.nxt.entity.GroundItem
 import com.undercut.game.nxt.entity.location.SceneObject
 import com.undercut.game.nxt.entity.npc.NPC
 import com.undercut.script.Script
+import world.gregs.voidps.gameval.Gameval
 import kotlin.math.floor
 
 enum class SpecialType {
@@ -258,7 +259,7 @@ private suspend fun Script.bobStorage(items: List<Item?>, amounts: List<Any>, wi
 
     for ((item, amount) in items.zip(amounts)) {
         if (item == null) continue
-        println("Item: $item Amount: $amount")
+        println("Item: $item Amount: $amount (${Gameval.obj(item.id) ?: ""})")
 
         val bobItem = if (withdraw) bobStorage.getItem(item.id) else bobPlayerInventory.getItem(item.id)
 

@@ -8,6 +8,7 @@ import com.undercut.game.nxt.ORenderModel
 import com.undercut.game.nxt.entity.npc.NPC
 import com.undercut.mcp.tools.MemoryTools.safeCall
 import com.undercut.mcp.tools.MemoryTools.validateAddress
+import world.gregs.voidps.gameval.Gameval
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import kotlinx.serialization.json.buildJsonObject
@@ -80,8 +81,8 @@ object EntityTools {
                 result.appendLine("Address: 0x${npc.ptr.address().toString(16)}")
                 result.appendLine("Server Index: ${npc.serverIndex}")
                 result.appendLine("Name: ${npc.name}")
-                result.appendLine("NPC ID: ${npc.id}")
-                result.appendLine("Type ID: ${npc.typeId}")
+                result.appendLine("NPC ID: ${Gameval.npcLabel(npc.id)}")
+                result.appendLine("Type ID: ${Gameval.npcLabel(npc.typeId)}")
 
                 try {
                     val tile = npc.tile
@@ -126,10 +127,10 @@ object EntityTools {
 
                 // Animation
                 try {
-                    result.appendLine("Animation ID: ${npc.animationId}")
+                    result.appendLine("Animation ID: ${Gameval.seqLabel(npc.animationId)}")
                     val anim = npc.animation
                     if (anim != null) {
-                        result.appendLine("Animation: id=${anim.id}, frame=${anim.currentFrame}")
+                        result.appendLine("Animation: id=${Gameval.seqLabel(anim.id)}, frame=${anim.currentFrame}")
                     }
                 } catch (e: Throwable) {
                     result.appendLine("Animation: ERROR (${e.message})")

@@ -4,6 +4,7 @@ import org.darkan.core.Logger.logError
 import java.io.Closeable
 import java.nio.file.Path
 import java.sql.Connection
+import java.sql.Driver
 import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.SQLException
@@ -263,6 +264,19 @@ class IndexFile(path: Path) : Closeable {
             connection.close()
         } catch (e: SQLException) {
             logError("Failed to close index file", e)
+        }
+    }
+
+    companion object {
+        init {
+            // The injected engine loads :core via a child URLClassLoader that DriverManager's
+            // ServiceLoader auto-registration never scans, so a plain getConnection("jdbc:sqlite:…")
+            // fails with "No suitable driver found". Register the driver explicitly through this
+            // class's loader (a no-op on the server's normal classpath where it auto-registers).
+            runCatching {
+                val driver = Class.forName("org.sqlite.JDBC").getDeclaredConstructor().newInstance() as Driver
+                DriverManager.registerDriver(driver)
+            }
         }
     }
 }

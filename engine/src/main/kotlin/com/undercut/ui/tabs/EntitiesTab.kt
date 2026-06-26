@@ -5,6 +5,8 @@ import com.undercut.game.nxt.MainState
 import com.undercut.script.api.*
 import com.undercut.ui.UIState
 import com.undercut.ui.backend.dsl.scopes.*
+import com.undercut.game.spotAnimLabel
+import com.undercut.game.spotAnimName
 import com.undercut.ui.backend.dsl.utils.ImGuiTableColumnFlags
 import com.undercut.ui.backend.dsl.utils.ImGuiTableFlags
 
@@ -157,7 +159,7 @@ object EntitiesTab {
                         nextColumn()
                         text(spots.size.toString())
                         nextColumn()
-                        text(spots.joinToString(", ") { "${it.id} (${it.timeAliveMillis}ms)" })
+                        text(spots.joinToString(", ") { "${spotAnimLabel(it.id)} (${it.timeAliveMillis}ms)" })
                         nextColumn()
                         text("")
                         nextColumn()
@@ -195,7 +197,7 @@ object EntitiesTab {
                         nextColumn()
                         text(spots.size.toString())
                         nextColumn()
-                        text(spots.joinToString(", ") { "${it.id} (${it.timeAliveMillis}ms)" })
+                        text(spots.joinToString(", ") { "${spotAnimLabel(it.id)} (${it.timeAliveMillis}ms)" })
                         nextColumn()
                         text("")
                         nextColumn()
@@ -218,7 +220,7 @@ object EntitiesTab {
                     nextColumn()
                     text(spotAnim.id.toString())
                     nextColumn()
-                    text("SpotAnim ${spotAnim.id}")
+                    text(spotAnimName(spotAnim.id) ?: "SpotAnim ${spotAnim.id}")
                     nextColumn()
                     text("${spotAnimTile.x}, ${spotAnimTile.y}, ${spotAnimTile.plane}")
                     nextColumn()
@@ -240,7 +242,7 @@ object EntitiesTab {
                     nextColumn()
                     text(projectile.id.toString())
                     nextColumn()
-                    text("Projectile ${projectile.id}")
+                    text(spotAnimName(projectile.id) ?: "Projectile ${projectile.id}")
                     nextColumn()
                     text("${projectileTile.x}, ${projectileTile.y}, ${projectileTile.plane}")
                     nextColumn()

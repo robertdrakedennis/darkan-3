@@ -28,6 +28,8 @@ import com.undercut.ui.backend.native.ImageHelper.getNoiseTexture
 import com.undercut.ui.backend.native.SpriteRotation
 import com.undercut.ui.backend.native.spriteTexture
 import com.undercut.ui.backend.rendering.ImGUIRender
+import com.undercut.game.spotAnimLabel
+import world.gregs.voidps.gameval.Gameval
 import com.undercut.ui.tabs.*
 import java.io.File
 import java.io.FileOutputStream
@@ -180,7 +182,7 @@ object UI {
                                     }
 
                                     if (npc.animationId > 0) {
-                                        text(xy.transform(0f, yOffset), overlayColor, "Anim: ${npc.animationId}")
+                                        text(xy.transform(0f, yOffset), overlayColor, "Anim: ${Gameval.seqLabel(npc.animationId)}")
                                         yOffset += 13f
                                     }
 
@@ -199,7 +201,7 @@ object UI {
                             val xy = WorldToScreen.getEstimatedTileCenter(fine)
                             if (xy != null) {
                                 tile(fine, overlayColor)
-                                text(xy.transform(0f, -26f), overlayColor, "${sa.id})")
+                                text(xy.transform(0f, -26f), overlayColor, spotAnimLabel(sa.id))
                             }
                         }
                     }
@@ -210,7 +212,7 @@ object UI {
                             val xy = WorldToScreen.getEstimatedTileCenter(fine)
                             if (xy != null) {
                                 tile(fine, overlayColor)
-                                text(xy.transform(0f, -26f), overlayColor, "${p.id})")
+                                text(xy.transform(0f, -26f), overlayColor, spotAnimLabel(p.id))
                             }
                         }
                     }

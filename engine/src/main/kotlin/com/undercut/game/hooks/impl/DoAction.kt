@@ -4,6 +4,7 @@ import com.undercut.game.tileOfSceneLocal
 import com.undercut.game.tileOfLocal
 
 import world.gregs.voidps.type.Tile
+import world.gregs.voidps.gameval.Gameval
 import com.undercut.game.bootstrap.Bootstrap
 import com.undercut.game.hooks.Hook
 import com.undercut.game.hooks.HookManager
@@ -54,15 +55,15 @@ object DoAction {
                         ScriptExecutor.pushEvent(ManualDoAction(knownAction, Tile.of(entry.param2, entry.param3, localPlayer.plane)))
                     }
                     DoActionOpcode.COMPONENT, DoActionOpcode.COMPONENT_SIXPLUS -> {
-                        println("\tOpNum: ${entry.param1} IFSlot(${interfaceIdFromHash(entry.param3)}, ${componentIdFromHash(entry.param3)}, ${entry.param2})")
+                        println("\tOpNum: ${entry.param1} IFSlot(${Gameval.interfaceLabel(interfaceIdFromHash(entry.param3))}, ${Gameval.componentLabel(interfaceIdFromHash(entry.param3), componentIdFromHash(entry.param3))}, ${entry.param2})")
                         ScriptExecutor.pushEvent(ManualDoAction(knownAction, IFSlot(interfaceIdFromHash(entry.param3), componentIdFromHash(entry.param3), entry.param2)))
                     }
                     DoActionOpcode.SELECT_COMPONENT -> {
-                        println("\tOpNum: ${entry.param1} IFSlot(${interfaceIdFromHash(entry.param3)}, ${componentIdFromHash(entry.param3)}, ${entry.param2})")
+                        println("\tOpNum: ${entry.param1} IFSlot(${Gameval.interfaceLabel(interfaceIdFromHash(entry.param3))}, ${Gameval.componentLabel(interfaceIdFromHash(entry.param3), componentIdFromHash(entry.param3))}, ${entry.param2})")
                         ScriptExecutor.pushEvent(ManualDoAction(knownAction, IFSlot(interfaceIdFromHash(entry.param3), componentIdFromHash(entry.param3), entry.param2)))
                     }
                     DoActionOpcode.DIALOGUE -> {
-                        println("\tOpNum: ${entry.param1} IFSlot(${interfaceIdFromHash(entry.param3)}, ${componentIdFromHash(entry.param3)}, ${entry.param2})")
+                        println("\tOpNum: ${entry.param1} IFSlot(${Gameval.interfaceLabel(interfaceIdFromHash(entry.param3))}, ${Gameval.componentLabel(interfaceIdFromHash(entry.param3), componentIdFromHash(entry.param3))}, ${entry.param2})")
                     }
                     DoActionOpcode.OBJECT_1, DoActionOpcode.OBJECT_2, DoActionOpcode.OBJECT_3, DoActionOpcode.OBJECT_4, DoActionOpcode.OBJECT_5, DoActionOpcode.OBJECT_6 -> {
                         val loc: EntityTypeContainer? = if (entry.target.address() != 0L) EntityTypeContainer(entry.target.toShared().value(0x18L)) else null
@@ -74,7 +75,7 @@ object DoAction {
                             }
                             if (obj != null) {
                                 ScriptExecutor.pushEvent(ManualDoAction(knownAction, obj))
-                                println("\t${obj.javaClass.simpleName}: realId: ${obj.id} visibleId: ${obj.typeId} name: ${obj.name()} tile: ${obj.tile}")
+                                println("\t${obj.javaClass.simpleName}: realId: ${Gameval.locLabel(obj.id)} visibleId: ${Gameval.locLabel(obj.typeId)} name: ${obj.name()} tile: ${obj.tile}")
                             }
                         }
                     }
@@ -83,13 +84,13 @@ object DoAction {
                     DoActionOpcode.SELECT_GROUND_ITEM -> {
                         val name = entry.targetString.toString().replace(Regex("<[^>]*>"), "").trim()
                         val tile = Tile.of(entry.param2, entry.param3, localPlayer.plane)
-                        println("\tGroundItem: id: ${entry.param1} name: $name tile: $tile")
+                        println("\tGroundItem: id: ${entry.param1} (${Gameval.obj(entry.param1) ?: ""}) name: $name tile: $tile")
                         ScriptExecutor.pushEvent(ManualDoAction(knownAction, ManualGroundItem(entry.param1, name, tile)))
                     }
                     DoActionOpcode.NPC_1, DoActionOpcode.NPC_2, DoActionOpcode.NPC_3, DoActionOpcode.NPC_4, DoActionOpcode.NPC_5, DoActionOpcode.NPC_6 -> {
                         val npc = if (entry.target.address() != 0L) NPC(entry.target.toShared().value(0x2000L)) else null
                         if (npc != null) {
-                            println("\tNPC: addr: ${Bootstrap.client.npcManager[npc.serverIndex]?.address()?.toString(16)} sid: ${npc.serverIndex} realId: ${npc.id} visibleId: ${npc.typeId} name: ${npc.name}")
+                            println("\tNPC: addr: ${Bootstrap.client.npcManager[npc.serverIndex]?.address()?.toString(16)} sid: ${npc.serverIndex} realId: ${Gameval.npcLabel(npc.id)} visibleId: ${Gameval.npcLabel(npc.typeId)} name: ${npc.name}")
                             ScriptExecutor.pushEvent(ManualDoAction(knownAction, npc))
                         }
                     }

@@ -9,6 +9,7 @@ import com.undercut.ui.backend.dsl.scopes.*
 import com.undercut.ui.backend.dsl.utils.ImGuiTableFlags
 import com.undercut.util.Configuration
 import com.undercut.util.DiscordWebhook
+import world.gregs.voidps.gameval.Gameval
 
 object SettingsTab {
     fun ChildScope.render() {
@@ -160,7 +161,12 @@ object SettingsTab {
                     nextColumn()
                     text(entry.type)
                     nextColumn()
-                    text(entry.id.toString())
+                    text(when (entry.type) {
+                        "varp" -> Gameval.varpLabel(entry.id)
+                        "varpbit", "varcbit" -> Gameval.varbitLabel(entry.id)
+                        "varc" -> Gameval.varcLabel(entry.id)
+                        else -> entry.id.toString()
+                    })
                     nextColumn()
                     text(entry.prevValue.toString())
                     nextColumn()
