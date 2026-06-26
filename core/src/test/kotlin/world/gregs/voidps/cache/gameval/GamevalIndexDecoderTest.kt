@@ -54,16 +54,51 @@ class GamevalIndexDecoderTest {
         for ((archive, type) in GamevalIndex.TYPE_BY_ARCHIVE) {
             val count = all[type]?.size ?: -1
             println("[gameval67]   archive %-3d -> %-18s : %d entries".format(archive, type, count))
+            // Combined var_* archives ALSO yield a per-domain varbit table (when the domain has any).
+            GamevalIndex.VAR_DOMAIN_BY_ARCHIVE[archive]?.let { domain ->
+                all[domain.varbitType]?.let { println("[gameval67]   archive %-3d -> %-18s : %d entries".format(archive, domain.varbitType, it.size)) }
+            }
         }
-        assertEquals(GamevalIndex.TYPE_BY_ARCHIVE.size, all.size, "every index-67 archive should decode to a type")
+        // Every non-var archive yields one type; every combined var archive yields var_<domain> plus
+        // (for the 5 domains that have varbits) varbit_<domain>.
+        val expectedTypes = GamevalIndex.TYPE_BY_ARCHIVE.size +
+            GamevalIndex.VAR_DOMAINS.count { all[it.varbitType]?.isNotEmpty() == true }
+        assertEquals(expectedTypes, all.size, "every index-67 archive should decode to its type(s)")
+        for ((_, type) in GamevalIndex.TYPE_BY_ARCHIVE) {
+            assertTrue(all.containsKey(type), "type $type should be present")
+        }
 
         // --- Spot assertions (raw cache is UPPERCASE; the decoder lowercases to RSCM dev-names) ---
-        // Note: index 67 has NO `varbit` archive, so the brief's `varbit[0]` example is N/A here;
-        // `var_player[0]` and `seq[0]` are the equivalent triple-confirmed checks.
         assertEquals("swarm_walk", all["seq"]?.get(0), "seq 0")
-        assertEquals("lastcastspell", all["var_player"]?.get(0), "var_player 0")
         assertEquals("hans", all["npc"]?.get(0), "npc 0")
         assertEquals("mcannonremains", all["obj"]?.get(0), "obj 0")
+
+        // --- Combined var/varbit split (verified against the real beta bytes) ---
+        // var-part keeps the original archive ids; varbit-part is rebased (id - offset) with the
+        // leading `_` stripped — see GamevalIndexDecoder.splitVarDomain.
+        assertEquals("lastcastspell", all["var_player"]?.get(0), "var_player 0")
+        assertEquals(10056, all["var_player"]?.size, "var_player var-part size")
+        assertEquals("zaros_spellbook", all["varbit_player"]?.get(0), "varbit_player 0")
+        assertEquals("popup_kerapac_dnd_shown", all["varbit_player"]?.get(1), "varbit_player 1")
+        assertEquals(50171, all["varbit_player"]?.size, "varbit_player varbit-part size")
+        // Other domains: both halves appear (npc has both; counts from the real beta data).
+        assertEquals(167, all["var_npc"]?.size, "var_npc var-part size")
+        assertEquals(938, all["varbit_npc"]?.size, "varbit_npc varbit-part size")
+        assertTrue(all.containsKey("varbit_clan") && all.containsKey("varbit_clan_setting") && all.containsKey("varbit_object"),
+            "every var domain with varbits must yield a varbit_<domain> table")
+        // Domains without varbits yield no varbit table.
+        assertTrue(!all.containsKey("varbit_client") && !all.containsKey("varbit_player_group"),
+            "var_client / var_player_group have no varbits, so no varbit_<domain> table")
+
+        // --- Per-domain helpers agree with the bulk decode ---
+        assertEquals(all["var_player"], decoder.decode(cache, "var_player"))
+        assertEquals(all["varbit_player"], decoder.decode(cache, "varbit_player"))
+        assertEquals(all["var_npc"], decoder.decodeVar(cache, "npc"))
+        assertEquals(all["varbit_npc"], decoder.decodeVarbit(cache, "npc"))
+        // The raw archive accessor returns the UN-split combined map (10056 + 50171).
+        assertEquals(60227, decoder.decodeArchive(cache, GamevalIndex.archiveId("var_player")!!)?.size, "raw var_player archive is combined")
+        // varbit_<domain> resolves to the same combined archive as var_<domain>.
+        assertEquals(61, GamevalIndex.archiveId("varbit_player"), "varbit_player -> archive 61")
 
         // --- Composite-keyed `component` archive ---
         val components = decoder.decodeComponents(cache)

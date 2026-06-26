@@ -163,9 +163,9 @@ object SettingsTab {
                     nextColumn()
                     text(when (entry.type) {
                         "varp" -> Gameval.varpLabel(entry.id)
-                        "varpbit", "varcbit" -> Gameval.varbitLabel(entry.id)
+                        "varpbit" -> Gameval.varbitLabel(entry.id) // player varbit (varbit_player)
                         "varc" -> Gameval.varcLabel(entry.id)
-                        else -> entry.id.toString()
+                        else -> entry.id.toString() // varcbit: client varbits have no gameval
                     })
                     nextColumn()
                     text(entry.prevValue.toString())

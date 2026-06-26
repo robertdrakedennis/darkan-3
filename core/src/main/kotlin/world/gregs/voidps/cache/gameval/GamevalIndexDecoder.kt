@@ -31,13 +31,32 @@ import world.gregs.voidps.cache.Cache
  * Because the produced names match the bundled gamevals exactly, this is an alternate, cache-backed
  * source for [world.gregs.voidps.gameval.Gameval] — it could later load names from a real index-67
  * cache instead of the bundled json (not wired up here).
+ *
+ * ### Combined var/varbit domains
+ * Each `var_*` archive is a **combined** namespace (see [GamevalIndex.VAR_DOMAINS]): entries whose
+ * dev-name starts with `_` are that domain's **varbits**, the rest are its **vars**. [decode]
+ * therefore emits TWO tables for every such archive — `var_<domain>` and `varbit_<domain>` — applying
+ * [splitVarDomain]:
+ * - **var-part** (`var_<domain>`): entries whose name does NOT start with `_`, keeping their archive
+ *   id (those ids are the real game var ids).
+ * - **varbit-part** (`varbit_<domain>`): entries whose name starts with `_`, rebased to `id - offset`
+ *   (the leading `_` stripped), where `offset` is the smallest `_`-entry id in the archive.
+ *
+ * Verified from the real beta bytes: `var_player` (archive 61) → 10056 vars + 50171 varbits at
+ * offset 12865; the union of the stripped `_`-names across every var domain reproduces the legacy
+ * bundled `varbit.json` (53,359 names) exactly. Non-var archives are unaffected — they still decode
+ * to a single `typeName -> (id -> name)` table. The lower-level [decodeArchive]/[decodeFile] return
+ * the RAW combined map (no split); only [decode] and the per-domain [decodeVar]/[decodeVarbit]
+ * helpers apply the split.
  */
 class GamevalIndexDecoder {
 
     /**
      * Decodes every gameval type present in [cache]'s index 67 into `typeName -> (id -> name)`.
      * For [GamevalIndex.COMPONENT] the inner-map keys are the packed `(interfaceId << 16) |
-     * componentId` ints (use [decodeComponents] for the friendlier `"iface:comp"` view).
+     * componentId` ints (use [decodeComponents] for the friendlier `"iface:comp"` view). Each
+     * combined `var_*` archive is split into both `var_<domain>` and `varbit_<domain>` entries (the
+     * latter omitted when the domain has no varbits) — see the class KDoc and [splitVarDomain].
      */
     fun decode(cache: Cache): Map<String, Map<Int, String>> {
         val result = LinkedHashMap<String, Map<Int, String>>()
@@ -47,22 +66,90 @@ class GamevalIndexDecoder {
                 logWarn("Unknown gameval index-67 archive $archive — naming it '$type'")
             }
             val data = cache.data(GamevalIndex.INDEX, archive, 0) ?: continue
-            result[type] = decodeFile(data, type)
+            val combined = decodeFile(data, type)
+            val domain = GamevalIndex.VAR_DOMAIN_BY_ARCHIVE[archive]
+            if (domain == null) {
+                result[type] = combined
+            } else {
+                val split = splitVarDomain(combined)
+                result[domain.varType] = split.vars
+                if (split.varbits.isNotEmpty()) result[domain.varbitType] = split.varbits
+            }
         }
         return result
     }
 
-    /** Decodes a single gameval [type]'s `id -> name` table, or `null` if it is not in index 67. */
+    /**
+     * Decodes a single gameval [type]'s `id -> name` table, or `null` if it is not in index 67. For
+     * a `var_<domain>` / `varbit_<domain>` type this returns the split var-part / varbit-part
+     * respectively (consistent with [decode]); all other types return their raw table.
+     */
     fun decode(cache: Cache, type: String): Map<Int, String>? {
+        GamevalIndex.VAR_DOMAIN_BY_VARBIT_TYPE[type]?.let { return decodeVarbit(cache, it.domain) }
+        GamevalIndex.VAR_DOMAIN_BY_VAR_TYPE[type]?.let { return decodeVar(cache, it.domain) }
         val archive = GamevalIndex.archiveId(type) ?: return null
         val data = cache.data(GamevalIndex.INDEX, archive, 0) ?: return null
         return decodeFile(data, type)
     }
 
-    /** Decodes a single index-67 [archive]'s `id -> name` table, or `null` if it has no data. */
+    /**
+     * Decodes a single index-67 [archive]'s RAW `id -> name` table (no var/varbit split applied),
+     * or `null` if it has no data. For a combined `var_*` archive this returns the un-split combined
+     * map; use [decodeVar]/[decodeVarbit] (or [decode]) for the split halves.
+     */
     fun decodeArchive(cache: Cache, archive: Int): Map<Int, String>? {
         val data = cache.data(GamevalIndex.INDEX, archive, 0) ?: return null
         return decodeFile(data, GamevalIndex.typeName(archive))
+    }
+
+    /**
+     * The var-part of a combined var [domain] (`player`, `npc`, `clan`, `clan_setting`, `object`,
+     * `client`, `player_group`) — entries whose name does NOT start with `_`, keeping their archive
+     * id (the real game var ids). `null` if the domain's archive has no data; an unknown domain also
+     * yields `null`. See [splitVarDomain].
+     */
+    fun decodeVar(cache: Cache, domain: String): Map<Int, String>? =
+        decodeCombinedDomain(cache, domain)?.let { splitVarDomain(it).vars }
+
+    /**
+     * The varbit-part of a combined var [domain] — entries whose name starts with `_`, rebased to
+     * `id - offset` with the leading `_` stripped (`offset` = smallest `_`-entry id). Returns an
+     * empty map for a domain with no varbits (e.g. `client`, `player_group`); `null` if the domain's
+     * archive has no data or the domain is unknown. See [splitVarDomain].
+     */
+    fun decodeVarbit(cache: Cache, domain: String): Map<Int, String>? =
+        decodeCombinedDomain(cache, domain)?.let { splitVarDomain(it).varbits }
+
+    /** Decodes the RAW combined map for var [domain], or `null` if unknown / no data. */
+    private fun decodeCombinedDomain(cache: Cache, domain: String): Map<Int, String>? {
+        val varDomain = GamevalIndex.VAR_DOMAIN_BY_NAME[domain] ?: return null
+        val data = cache.data(GamevalIndex.INDEX, varDomain.archive, 0) ?: return null
+        return decodeFile(data, varDomain.varType)
+    }
+
+    /**
+     * Splits a combined var-domain [combined] `id -> name` table into its var-part and varbit-part,
+     * per the proven rule (see the class KDoc):
+     * - **vars**: entries whose name does NOT start with [GamevalIndex.VARBIT_PREFIX], ids kept.
+     * - **varbits**: entries whose name DOES, rebased to `id - offset` with the leading prefix
+     *   stripped, where `offset` is the smallest varbit-entry id (`null`/empty when no varbits).
+     */
+    fun splitVarDomain(combined: Map<Int, String>): VarSplit {
+        val prefix = GamevalIndex.VARBIT_PREFIX
+        val offset = combined.entries
+            .filter { it.value.startsWith(prefix) }
+            .minOfOrNull { it.key }
+        val vars = LinkedHashMap<Int, String>()
+        val varbits = LinkedHashMap<Int, String>()
+        for ((id, name) in combined) {
+            if (name.startsWith(prefix)) {
+                // offset is non-null here: at least this varbit entry exists.
+                varbits[id - offset!!] = name.removePrefix(prefix)
+            } else {
+                vars[id] = name
+            }
+        }
+        return VarSplit(vars, varbits)
     }
 
     /**
@@ -140,6 +227,15 @@ class GamevalIndexDecoder {
         val lower = raw.lowercase()
         return if (component) lower.replaceFirst("__", ":") else lower
     }
+
+    /**
+     * The two halves of a split combined var-domain archive (see [splitVarDomain]).
+     *
+     * @property vars the var-part (`var_<domain>`), entries keyed by their original archive id.
+     * @property varbits the varbit-part (`varbit_<domain>`), entries rebased to `id - offset` with
+     *   their leading `_` stripped; empty for a domain that has no varbits.
+     */
+    data class VarSplit(val vars: Map<Int, String>, val varbits: Map<Int, String>)
 
     companion object {
         private const val VERSION_DENSE = 1

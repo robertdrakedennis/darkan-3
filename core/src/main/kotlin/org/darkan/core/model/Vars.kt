@@ -2,11 +2,14 @@ package org.darkan.core.model
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import org.darkan.core.EnvVars
+import org.darkan.core.Logger
 import org.darkan.core.net.Session
 import org.darkan.core.net.prot.*
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.Config
 import world.gregs.voidps.cache.Index
+import world.gregs.voidps.gameval.Gameval
 
 /**
  * Player variable state machine. Handles varps and varbits with automatic
@@ -59,6 +62,7 @@ class Vars(val saved: MutableMap<Int, Int> = HashMap()) {
         varpValues[id] = value
         if (save) saved[id] = value
         modified.add(id)
+        if (EnvVars.debug) Logger.log("Vars", "varp ${Gameval.varpLabel(id)} = $value")
     }
 
     /** Set and persist a varp. */
@@ -74,8 +78,10 @@ class Vars(val saved: MutableMap<Int, Int> = HashMap()) {
         val shiftedMask = mask shl defs.startBit
         val varpValue = (varpValues[defs.index] and shiftedMask.inv()) or
                 ((cappedValue shl defs.startBit) and shiftedMask)
-        if (varpValue != varpValues[defs.index])
+        if (varpValue != varpValues[defs.index]) {
+            if (EnvVars.debug) Logger.log("Vars", "varbit ${Gameval.varbitPlayerLabel(id)} = $cappedValue (packs varp ${Gameval.varpLabel(defs.index)})")
             setVar(defs.index, varpValue, forceSend, save)
+        }
     }
 
     /** Set and persist a varbit. */

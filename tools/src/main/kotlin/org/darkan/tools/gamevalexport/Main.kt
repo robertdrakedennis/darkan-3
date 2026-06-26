@@ -18,8 +18,12 @@ import kotlin.system.exitProcess
  * Generates our own prettified gameval JSON from a real cache **index 67** (gameval / RSCM), decoded
  * via [GamevalIndexDecoder]. One `<type>.json` per gameval type, sorted by id, with metadata. Reads a
  * cache dir READ-ONLY (default `./data/betacache`, fetched by `betaScanner --download 67`) and never
- * touches the live cache. Only the 35 index-67 types are (re)written; other files (e.g. varbit.json,
- * which index 67 does not contain) are left untouched.
+ * touches the live cache.
+ *
+ * Each combined `var_*` archive is split into `var_<domain>.json` (the vars) AND `varbit_<domain>.json`
+ * (the varbits) — the varbit file is skipped for domains with no varbits (`var_client`,
+ * `var_player_group`). The legacy combined `varbit.json` is deleted (replaced by the per-domain
+ * varbit files). Other, non-index-67 files in the output dir are left untouched.
  *
  * Run: `./gradlew :tools:gamevalExport -Pargs="--cache ./data/betacache --out re-resources/gamevals"`
  */
@@ -65,26 +69,48 @@ fun main(args: Array<String>) {
     val json = Json { prettyPrint = true; prettyPrintIndent = "  " }
 
     var totalEntries = 0
-    for ((archive, type) in GamevalIndex.TYPE_BY_ARCHIVE) {
-        val sorted: List<Pair<String, String>> = if (type == GamevalIndex.COMPONENT) {
-            components.entries
-                .sortedWith(compareBy({ it.key.substringBefore(':').toIntOrNull() ?: 0 }, { it.key.substringAfter(':').toIntOrNull() ?: 0 }))
-                .map { it.key to it.value }
-        } else {
-            (all[type] ?: emptyMap()).entries.sortedBy { it.key }.map { it.key.toString() to it.value }
-        }
+    var filesWritten = 0
+
+    fun writeType(type: String, archive: Int, sorted: List<Pair<String, String>>) {
         val obj = buildJsonObject {
             put("revision", revision)
             put("source", "$source cache index ${GamevalIndex.INDEX} archive $archive")
             put("date", date)
             putJsonObject("entries") { for ((k, v) in sorted) put(k, v) }
         }
-        val file = out.resolve("$type.json")
-        Files.writeString(file, json.encodeToString(JsonObject.serializer(), obj))
-        println("  wrote %-18s %7d entries".format(type, sorted.size))
+        Files.writeString(out.resolve("$type.json"), json.encodeToString(JsonObject.serializer(), obj))
+        println("  wrote %-20s %7d entries".format(type, sorted.size))
         totalEntries += sorted.size
+        filesWritten++
     }
-    println("Done: ${GamevalIndex.TYPE_BY_ARCHIVE.size} types, $totalEntries entries -> $out")
+
+    for ((archive, type) in GamevalIndex.TYPE_BY_ARCHIVE) {
+        val sorted: List<Pair<String, String>> = if (type == GamevalIndex.COMPONENT) {
+            components.entries
+                .sortedWith(compareBy({ it.key.substringBefore(':').toIntOrNull() ?: 0 }, { it.key.substringAfter(':').toIntOrNull() ?: 0 }))
+                .map { it.key to it.value }
+        } else {
+            // For combined var_* archives this is the split var-part (see GamevalIndexDecoder.decode).
+            (all[type] ?: emptyMap()).entries.sortedBy { it.key }.map { it.key.toString() to it.value }
+        }
+        writeType(type, archive, sorted)
+
+        // Combined var archives also yield a per-domain varbit table; write it when non-empty.
+        val domain = GamevalIndex.VAR_DOMAIN_BY_ARCHIVE[archive]
+        if (domain != null) {
+            val varbits = all[domain.varbitType] ?: emptyMap()
+            if (varbits.isNotEmpty()) {
+                writeType(domain.varbitType, archive, varbits.entries.sortedBy { it.key }.map { it.key.toString() to it.value })
+            }
+        }
+    }
+
+    // The old combined varbit.json is superseded by the per-domain varbit_<domain>.json files.
+    if (Files.deleteIfExists(out.resolve("varbit.json"))) {
+        println("  removed obsolete varbit.json (replaced by varbit_<domain>.json)")
+    }
+
+    println("Done: $filesWritten files, $totalEntries entries -> $out")
 }
 
 private fun printUsage() {
@@ -95,7 +121,8 @@ private fun printUsage() {
           --out <dir>       output dir for <type>.json (default re-resources/gamevals)
           --revision <n>    revision stamped into the json (default 947)
           --source <s>      source stamped into the json (default content.beta.runescape.com)
-        Only the ${GamevalIndex.INDEX}-index types are written; other gameval files are left untouched.
+        Each combined var_* archive is split into var_<domain>.json + varbit_<domain>.json; the legacy
+        combined varbit.json is removed. Other, non-index-${GamevalIndex.INDEX} files are left untouched.
         """.trimIndent(),
     )
 }

@@ -28,11 +28,26 @@ import java.util.concurrent.ConcurrentHashMap
 object Gameval {
 
     // --- Type-name constants (filename stems under /gamevals/) ---
-    const val VARBIT = "varbit"
+    // Vars and varbits share index-67 archives but ship as SEPARATE per-domain files: each `var_*`
+    // archive is split into `var_<domain>` (the vars) and `varbit_<domain>` (the varbits) — see
+    // world.gregs.voidps.cache.gameval.GamevalIndexDecoder. Player varbits are "the" varbits, so the
+    // bare [VARBIT] alias / [varbit] accessor read the player domain (the old combined `varbit.json`
+    // is gone, replaced by these per-domain files).
     const val VAR_CLIENT = "var_client"
     const val VAR_PLAYER = "var_player"
     const val VAR_NPC = "var_npc"
     const val VAR_CLAN = "var_clan"
+    const val VAR_CLAN_SETTING = "var_clan_setting"
+    const val VAR_OBJECT = "var_object"
+    const val VAR_PLAYER_GROUP = "var_player_group"
+    const val VARBIT_PLAYER = "varbit_player"
+    const val VARBIT_NPC = "varbit_npc"
+    const val VARBIT_CLAN = "varbit_clan"
+    const val VARBIT_CLAN_SETTING = "varbit_clan_setting"
+    const val VARBIT_OBJECT = "varbit_object"
+
+    /** Bare "varbit" == the player varbit domain (player varbits are "the" varbits). */
+    const val VARBIT = VARBIT_PLAYER
     const val SEQ = "seq"
     const val GRAPHIC = "graphic" // Jagex cs2 `type graphic` = 2D sprites (hitsplat, icons); NOT spotanim
     const val INTERFACE = "interface"
@@ -125,8 +140,29 @@ object Gameval {
 
     // --- Typed convenience wrappers (thin views over name/label) ---
 
+    /** Player varbit (file `varbit_player`) — the default/"the" varbit domain. */
     fun varbit(id: Int): String? = name(VARBIT, id)
     fun varbitLabel(id: Int): String = label(VARBIT, id)
+
+    /** Player varbit (file `varbit_player`) — explicit alias of [varbit]. */
+    fun varbitPlayer(id: Int): String? = name(VARBIT_PLAYER, id)
+    fun varbitPlayerLabel(id: Int): String = label(VARBIT_PLAYER, id)
+
+    /** NPC varbit (file `varbit_npc`). */
+    fun varbitNpc(id: Int): String? = name(VARBIT_NPC, id)
+    fun varbitNpcLabel(id: Int): String = label(VARBIT_NPC, id)
+
+    /** Clan varbit (file `varbit_clan`). */
+    fun varbitClan(id: Int): String? = name(VARBIT_CLAN, id)
+    fun varbitClanLabel(id: Int): String = label(VARBIT_CLAN, id)
+
+    /** Clan-setting varbit (file `varbit_clan_setting`). */
+    fun varbitClanSetting(id: Int): String? = name(VARBIT_CLAN_SETTING, id)
+    fun varbitClanSettingLabel(id: Int): String = label(VARBIT_CLAN_SETTING, id)
+
+    /** Object varbit (file `varbit_object`). */
+    fun varbitObject(id: Int): String? = name(VARBIT_OBJECT, id)
+    fun varbitObjectLabel(id: Int): String = label(VARBIT_OBJECT, id)
 
     /** Client var (file `var_client`). */
     fun varc(id: Int): String? = name(VAR_CLIENT, id)
