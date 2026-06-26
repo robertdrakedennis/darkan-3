@@ -9,6 +9,7 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
+import lzma.sdk.lzma.Encoder
 import org.darkan.core.EnvVars
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logTrace
@@ -16,6 +17,8 @@ import org.darkan.core.Logger.logWarn
 import org.darkan.lobby.social.SocialGateway
 import world.gregs.voidps.cache.file.FileProvider
 import world.gregs.voidps.cache.secure.Whirlpool
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.math.BigInteger
 import java.net.URLDecoder
 import java.util.Base64
@@ -28,18 +31,36 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
     /**
      * Precomputed per-OS client binary metadata for jav_config + binary serving.
      *
-     * @param path           absolute/relative filesystem path to the (raw, decompressed) binary
+     * Two serve modes, selected per-OS by [lzmaEncoded]:
+     *  - RAW (linux/windows): the rs3linux LD_PRELOAD patcher disables the launcher's
+     *    LZMA decompression flag (patcher/src/lib.rs §6 "Patch 4"), so the launcher saves
+     *    whatever bytes we send verbatim — [downloadBytes] is the raw binary.
+     *  - LZMA-alone (macos): the RuneScape.app wrapper keeps LZMA decompression ENABLED
+     *    (the mac dylib only patches RSA + codebase regex — the LZMA-flag patch is
+     *    "rs3linux-launcher-only"), so we must serve a single-stream LZMA-alone (.lzma)
+     *    payload that the wrapper decompresses back to the raw binary. [downloadBytes] is
+     *    the LZMA-encoded payload.
+     *
+     * In both modes, [crc] and [hash] are computed over the RAW (decompressed) binary —
+     * the launcher verifies the result AFTER decompression — while [size] (download) is the
+     * length of [downloadBytes] (what the launcher actually downloads off the wire).
+     *
+     * @param path           filesystem path to the (raw, decompressed) binary
      * @param downloadName    download_name_0 value the launcher expects ("rs2client" / "rs2client.exe")
-     * @param crc             CRC32 of the raw binary (download_crc_0)
-     * @param hash            RSA-signed Whirlpool hash (download_hash_0)
-     * @param size            raw binary size in bytes (download)
+     * @param downloadBytes   the bytes served on the wire (raw, or LZMA-alone for macos)
+     * @param crc             CRC32 of the RAW binary (download_crc_0)
+     * @param hash            RSA-signed Whirlpool hash of the RAW binary (download_hash_0)
+     * @param size            length of [downloadBytes] in bytes (download)
+     * @param lzmaEncoded     true if [downloadBytes] is LZMA-alone encoded (macos slot)
      */
     private data class BinaryInfo(
         val path: String,
         val downloadName: String,
+        val downloadBytes: ByteArray,
         val crc: Long,
         val hash: String,
         val size: Long,
+        val lzmaEncoded: Boolean,
     )
 
     // Per-OS registry, precomputed eagerly at construction. The "linux" entry is the
@@ -68,13 +89,7 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
             val (path, downloadName) = spec
             val file = java.io.File(path)
             if (file.exists()) {
-                registry[os] = BinaryInfo(
-                    path = path,
-                    downloadName = downloadName,
-                    crc = computeBinaryCrc(path),
-                    hash = computeBinaryHash(path),
-                    size = file.length(),
-                )
+                registry[os] = buildBinaryInfo(os, path, downloadName)
             } else {
                 logWarn("Client binary for OS '$os' not found at $path — it will not be served")
             }
@@ -83,15 +98,48 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         // Guarantee a "linux" fallback entry even if the linux file is missing, so
         // defaultBinary is always resolvable (size/crc 0 → matches prior missing-file behavior).
         if (!registry.containsKey("linux")) {
-            registry["linux"] = BinaryInfo(
-                path = EnvVars.clientBinaryPath,
-                downloadName = "rs2client",
-                crc = computeBinaryCrc(EnvVars.clientBinaryPath),
-                hash = computeBinaryHash(EnvVars.clientBinaryPath),
-                size = java.io.File(EnvVars.clientBinaryPath).let { if (it.exists()) it.length() else 0L },
-            )
+            registry["linux"] = buildBinaryInfo("linux", EnvVars.clientBinaryPath, "rs2client")
+        }
+        // Guarantee a "macos" entry. The RuneScape.app wrapper keeps LZMA decompression ON
+        // (neither mac patcher disables it), so it MUST receive an LZMA-alone payload. When no
+        // macos-specific binary is staged, fall back to the default client binary but LZMA-encode
+        // it (os="macos" → buildBinaryInfo sets lzma=true). Without this, a binaryType=3 request
+        // falls back to the RAW linux default and the wrapper fails with "Error saving file (14)".
+        if (!registry.containsKey("macos")) {
+            registry["macos"] = buildBinaryInfo("macos", EnvVars.clientBinaryPath, "rs2client")
         }
         return registry
+    }
+
+    /**
+     * Read the raw binary at [path] and build its serve metadata. The macos slot is served
+     * LZMA-alone-encoded (the wrapper decompresses it); every other OS is served raw (the
+     * rs3linux patcher disables the launcher's decompression). CRC + hash always cover the
+     * RAW bytes; [BinaryInfo.size] is the served (possibly compressed) length.
+     */
+    private fun buildBinaryInfo(os: String, path: String, downloadName: String): BinaryInfo {
+        val file = java.io.File(path)
+        if (!file.exists()) {
+            return BinaryInfo(path, downloadName, ByteArray(0), 0L, "", 0L, lzmaEncoded = false)
+        }
+        val rawBytes = file.readBytes()
+        val lzma = os == "macos"
+        val downloadBytes = if (lzma) {
+            val encoded = encodeLauncherLzmaAlone(rawBytes)
+            logInfo("LZMA-alone encoded macos binary: ${rawBytes.size} raw -> ${encoded.size} download bytes")
+            encoded
+        } else {
+            rawBytes
+        }
+        return BinaryInfo(
+            path = path,
+            downloadName = downloadName,
+            downloadBytes = downloadBytes,
+            crc = computeBinaryCrc(rawBytes),
+            hash = computeBinaryHash(rawBytes, os),
+            size = downloadBytes.size.toLong(),
+            lzmaEncoded = lzma,
+        )
     }
 
     /** Resolve a binaryType query param to one of "linux"/"windows"/"macos". null/4/unknown → linux. */
@@ -116,7 +164,8 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
         for (os in listOf("linux", "windows", "macos")) {
             val info = binaries[os]
             if (info != null) {
-                logInfo("  $os -> ${info.path} (crc=${info.crc}, size=${info.size}, present)")
+                val mode = if (info.lzmaEncoded) "lzma" else "raw"
+                logInfo("  $os -> ${info.path} (crc=${info.crc}, download=${info.size}, $mode, present)")
             } else {
                 val expected = when (os) {
                     "linux" -> EnvVars.clientBinaryPath
@@ -204,9 +253,14 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
                         // Serve the client binary so the launcher can download it. The launcher
                         // appends ?binaryType=N (&fileName=NAME) when fetching the binary.
                         //
-                        // The binary is served RAW (uncompressed): the LD_PRELOAD patcher disables
-                        // rs3linux's LZMA decompression flag (patcher/src/lib.rs §6), so the launcher
-                        // saves whatever bytes we send verbatim — they must be the raw client binary.
+                        // Serve mode is OS-conditional (see BinaryInfo.downloadBytes):
+                        //  - linux/windows → RAW: the rs3linux LD_PRELOAD patcher disables the
+                        //    launcher's LZMA decompression flag (patcher/src/lib.rs §6 "Patch 4"),
+                        //    so the launcher saves whatever bytes we send verbatim.
+                        //  - macos → LZMA-alone: the RuneScape.app wrapper keeps LZMA decompression
+                        //    ENABLED (the mac dylib only patches RSA + codebase regex), so we serve
+                        //    a single-stream LZMA-alone payload it decompresses back to the binary.
+                        //    Serving raw to the mac wrapper triggers "Error saving file (14)".
                         val binaryType = call.request.queryParameters["binaryType"]?.toIntOrNull()
                         val os = if (binaryType != null) {
                             binaryTypeToOs(binaryType)
@@ -216,14 +270,13 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
                             if (fileName != null && fileName.endsWith(".exe", ignoreCase = true)) "windows" else "linux"
                         }
                         val info = binaryForOs(os)
-                        var file = java.io.File(info.path)
-                        if (!file.exists()) {
-                            logWarn("Client binary for os=$os missing at ${info.path} — falling back to ${EnvVars.clientBinaryPath}")
-                            file = java.io.File(EnvVars.clientBinaryPath)
-                        }
-                        if (file.exists()) {
-                            logInfo("Serving client binary (os=$os): ${file.absolutePath} (${file.length()} bytes)")
-                            call.respondFile(file)
+                        if (info.downloadBytes.isNotEmpty()) {
+                            val mode = if (info.lzmaEncoded) "LZMA-alone" else "raw"
+                            logInfo("Serving client binary (os=$os, $mode): ${info.path} (${info.size} download bytes)")
+                            call.respondBytes(info.downloadBytes, ContentType.Application.OctetStream)
+                        } else if (defaultBinary.downloadBytes.isNotEmpty()) {
+                            logWarn("Client binary for os=$os missing at ${info.path} — falling back to linux default")
+                            call.respondBytes(defaultBinary.downloadBytes, ContentType.Application.OctetStream)
                         } else {
                             call.respondText("Client binary not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
                         }
@@ -455,12 +508,45 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
     }
 
     companion object {
-        private fun computeBinaryCrc(path: String): Long {
-            val file = java.io.File(path)
-            if (!file.exists()) return 0L
+        // LZMA-alone (.lzma) encoder settings for the macos download payload. These mirror
+        // what Jagex serves and what the unpatched RuneScape.app wrapper expects: 8 MiB
+        // dictionary, 32 fast bytes, BT4 match finder, lc/lp/pb = 3/0/2, no end marker.
+        private const val LZMA_DICTIONARY_SIZE = 8 * 1024 * 1024
+        private const val LZMA_FAST_BYTES = 32
+
+        private fun computeBinaryCrc(data: ByteArray): Long {
             val crc = CRC32()
-            crc.update(file.readBytes())
+            crc.update(data)
             return crc.value
+        }
+
+        /**
+         * Encode [data] as a single-stream LZMA-alone (.lzma) payload: 5-byte coder
+         * properties + 8-byte little-endian uncompressed length + the LZMA bitstream.
+         * This is the format the macOS RuneScape.app wrapper decompresses on download
+         * (its LZMA decompression flag is left enabled — unlike the rs3linux launcher,
+         * which the LD_PRELOAD patcher patches to save raw bytes).
+         */
+        private fun encodeLauncherLzmaAlone(data: ByteArray): ByteArray {
+            val output = ByteArrayOutputStream()
+            val encoder = Encoder()
+            check(encoder.setDictionarySize(LZMA_DICTIONARY_SIZE))
+            check(encoder.setNumFastBytes(LZMA_FAST_BYTES))
+            check(encoder.setMatchFinder(Encoder.EMatchFinderTypeBT4))
+            check(encoder.setLcLpPb(3, 0, 2))
+            encoder.setEndMarkerMode(false)
+            encoder.writeCoderProperties(output)
+            writeLittleEndianLong(output, data.size.toLong())
+            ByteArrayInputStream(data).use { input ->
+                encoder.code(input, output, data.size.toLong(), -1L, null)
+            }
+            return output.toByteArray()
+        }
+
+        private fun writeLittleEndianLong(output: ByteArrayOutputStream, value: Long) {
+            repeat(8) { index ->
+                output.write(((value ushr (index * 8)) and 0xFF).toInt())
+            }
         }
 
         /**
@@ -473,12 +559,13 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
          *
          * We sign with our own RSA private key; the LD_PRELOAD patcher replaces
          * the launcher's embedded public modulus with ours so verification passes.
+         *
+         * [data] is always the RAW (decompressed) binary — both rs3linux and the macOS
+         * wrapper verify the result AFTER decompression — so the same hash is correct for
+         * the raw-served (linux) and LZMA-served (macos) slots.
          */
-        private fun computeBinaryHash(path: String): String {
-            val file = java.io.File(path)
-            if (!file.exists()) return ""
-
-            val data = file.readBytes()
+        private fun computeBinaryHash(data: ByteArray, os: String): String {
+            if (data.isEmpty()) return ""
 
             // Compute Whirlpool hash (64 bytes)
             val wp = Whirlpool()
@@ -491,10 +578,18 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
             message[0] = 0x01
             System.arraycopy(whirlpoolHash, 0, message, 1, 64)
 
-            // RSA sign with the login key — rs3linux's embedded public key is
-            // patched by DARKAN_RSA_MODULUS which is the login modulus hex.
-            val modulus = BigInteger(EnvVars.loginRsaModulus)
-            val exponent = BigInteger(EnvVars.loginRsaExponent)
+            // RSA sign with the key the TARGET launcher verifies with — the signature size
+            // must match the launcher's embedded key, or it can't be verified at all:
+            //  - rs3linux embeds a 1024-bit key, patched from the LOGIN modulus
+            //    (DARKAN_RSA_MODULUS) → sign with login (128-byte signature).
+            //  - the macOS RuneScape.app wrapper embeds a 4096-bit key, patched from the JS5
+            //    modulus (DARKAN_JS5_RSA_MODULUS, the 1024-hex one its dylib writes) → sign
+            //    with JS5 (512-byte signature). A login-signed (128-byte) hash can't verify
+            //    against the wrapper's 4096-bit key, so it rejects jav_config with
+            //    "Error saving file (14)" BEFORE it ever requests the binary.
+            val useJs5 = os == "macos"
+            val modulus = if (useJs5) BigInteger(EnvVars.js5RsaModulus) else BigInteger(EnvVars.loginRsaModulus)
+            val exponent = if (useJs5) BigInteger(EnvVars.js5RsaExponent) else BigInteger(EnvVars.loginRsaExponent)
             val messageBigInt = BigInteger(1, message) // positive BigInteger
             val signature = messageBigInt.modPow(exponent, modulus)
 
