@@ -1,0 +1,351 @@
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948ServerCodecsMisc.kt
+  s_d5e57ef96bdf83::t_af496f750cd91a 87-92
+  s_0a794134c004c8::t_39fcc5779e2622 34-46,49-51,69-76,124-229,232,234,272-273,281,285,325-385
+core/src/main/kotlin/org/darkan/core/mongo/EmbeddedMongo.kt
+  s_d5e57ef96bdf83::t_efaca513ae1636 24-28,30-33,49-52,59-62,65-71,76
+  s_d5e57ef96bdf83::t_4d868c56a631e8 3,5,9-10,16-18,91-96,98-106
+core/src/main/kotlin/org/darkan/core/net/prot/ServerProt.kt
+  s_d5e57ef96bdf83::t_f07097a01f98a5 1071-1073,1075-1078
+  s_d5e57ef96bdf83::t_beb5741d1d01e9 153-154,158-163
+  s_d5e57ef96bdf83::t_e281f95479bb0e 126-129
+  s_d5e57ef96bdf83::t_f97209d84eb540 178-180
+  s_d5e57ef96bdf83::t_c3c2fdf05d8bd4 164-166
+  s_89062ca2603360::t_5f4f9f28235f63 53,56,59,62,65,69,75,81,91,94,104,109,112,115,118,121,133,136,139,144,147,169,172,184,187,195,198,201,211,218,225,232,237,241,244,247,254,261-458,476,833,883,887,889,891,902,904-905,907-908,918,924-938,940-949,952-1068,1087,1098,1101,1105-1106,1115,1120,1123,1127,1136,1144,1154-1165,1168,1171-1172,1175,1178,1187,1195,1204,1215,1222,1229,1236,1243,1255,1282,1303
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev947/Rev947ServerCodecsRebuild.kt
+  s_d5e57ef96bdf83::t_934839599ef2e9 28-38,40,42,44-46
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev947/Rev947ServerCodecsZone.kt
+  s_d5e57ef96bdf83::t_0c445a1ea5ffc6 144-147,149-152
+lobby/src/main/kotlin/org/darkan/lobby/server/ConfigServer.kt
+  s_d5e57ef96bdf83::t_e305deecd98f7a 206-209
+  s_d5e57ef96bdf83::t_1302da4dce3c49 302-303
+  s_d5e57ef96bdf83::t_98ffd412200281 495
+  s_d5e57ef96bdf83::t_d0d0ef3a07a35c 304
+  s_3cdc7bd0109ce9::t_10e3c0da3e66f3 20-21,147-150,160-161,288-289,294-297,387,404,413-420,424-427,512
+core/src/main/kotlin/org/darkan/core/net/prot/Codec.kt
+  s_d5e57ef96bdf83::t_aa31f494c1876d 79
+  s_d5e57ef96bdf83::t_40ab27a5ba10ba 17,172,174-181,184-185,192-196,198-199
+  s_d5e57ef96bdf83::t_6785a3e16f6dfe 64
+  s_d5e57ef96bdf83::t_52083c1fc272d3 18-25
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948ServerCodecsSocial.kt
+  s_d5e57ef96bdf83::t_a150f62b56f922 59-71
+  s_d5e57ef96bdf83::t_39051e7b5e4c8a 161-162
+lobby/src/main/kotlin/org/darkan/lobby/server/packet/IfButtonHandler.kt
+  s_d5e57ef96bdf83::t_f201737cd639a5 14,16-21
+  s_d5e57ef96bdf83::t_6c97dd51f7c2aa 3,6,13,28-29,31-32,34-38,41-45,47-48,50-53,55-71
+claude-re/PROGRESS.md
+  s_d5e57ef96bdf83::t_c41b4eb8efe9a6 1-516
+claude-re/README.md
+  s_d5e57ef96bdf83::t_79c35f80f88271 1-37
+claude-re/findings/00-OVERVIEW.md
+  s_d5e57ef96bdf83::t_b03fc1e6a3c8a7 1-33
+claude-re/findings/00-SESSION-SUMMARY.md
+  s_d5e57ef96bdf83::t_bb25cb5b820169 1-55
+claude-re/findings/01-opcodes-all.md
+  s_d5e57ef96bdf83::t_c05a727a01bf77 1-115
+claude-re/findings/02-world-s2c-sequence.md
+  s_d5e57ef96bdf83::t_571ccb4d8cc4a6 1-791
+claude-re/findings/10-prot-registration.md
+  s_d5e57ef96bdf83::t_41def1e41de5e4 1-3924
+claude-re/findings/11-handlers-all.md
+  s_d5e57ef96bdf83::t_ddb37a923476b7 1-244
+claude-re/findings/12-opcode-map.md
+  s_d5e57ef96bdf83::t_c9ade87a4b317b 1-117
+claude-re/findings/13-dispatch.md
+  s_d5e57ef96bdf83::t_71205a0ee143ca 1-1785
+claude-re/findings/14-serverprot-table.md
+  s_d5e57ef96bdf83::t_060aebe605dbb0 1-226
+claude-re/findings/15-bitparse.md
+  s_d5e57ef96bdf83::t_d1c7b278725dac 1-201
+claude-re/findings/16-gpi-decoders.md
+  s_d5e57ef96bdf83::t_b6b769accc340d 1-1352
+claude-re/findings/17-coord-reader.md
+  s_d5e57ef96bdf83::t_648fb02a4c292e 1-26
+claude-re/findings/18-appearance.md
+  s_d5e57ef96bdf83::t_793f9f8447c712 1-2685
+claude-re/findings/19-scramble.md
+  s_d5e57ef96bdf83::t_61c63a911ba5e9 1-238
+claude-re/findings/20-interfaces.md
+  s_d5e57ef96bdf83::t_be50f5b9457d7b 1-3408
+claude-re/findings/21-player.md
+  s_d5e57ef96bdf83::t_c4e9922ae9dcf3 1-3419
+claude-re/findings/22-inventory.md
+  s_d5e57ef96bdf83::t_cf64881af28e0e 1-2241
+claude-re/findings/23-world-state.md
+  s_d5e57ef96bdf83::t_73eaa2c61a28a2 1-16039
+claude-re/findings/24-js5.md
+  s_d5e57ef96bdf83::t_2cf5a3da3b7d53 1-29171
+claude-re/findings/24-other.md
+  s_d5e57ef96bdf83::t_79397a005e7606 1-12059
+claude-re/findings/29-session-payloads.md
+  s_d5e57ef96bdf83::t_9606f254a3ea19 1-593
+claude-re/findings/30-session-decoded.md
+  s_d5e57ef96bdf83::t_f695a3b589a1bc 1-380
+claude-re/findings/31-player-complete.md
+  s_d5e57ef96bdf83::t_7b1080d0760183 1-36
+claude-re/findings/32-player-varps.md
+  s_d5e57ef96bdf83::t_cdf8ce288a362d 1-505
+claude-re/findings/33-lobby.md
+  s_d5e57ef96bdf83::t_348d9fd946f51a 1-343
+claude-re/findings/34-login-flow.md
+  s_d5e57ef96bdf83::t_be593983c956d4 1-32
+claude-re/findings/35-c2s.md
+  s_d5e57ef96bdf83::t_5d8058b5e2cdac 1-28
+claude-re/findings/36-worldlist-complete.md
+  s_d5e57ef96bdf83::t_6f1f3559a7f480 1-139
+claude-re/findings/37-session-flow.md
+  s_d5e57ef96bdf83::t_158cc66e17fae7 1-33
+claude-re/findings/38-world-entry-timeline.md
+  s_d5e57ef96bdf83::t_d274e3ce4f59e4 1-30
+claude-re/scripts/DumpApp.java
+  s_d5e57ef96bdf83::t_17e5be9e342334 1-10
+claude-re/scripts/DumpBitParse.java
+  s_d5e57ef96bdf83::t_087bc4f316dadb 1-11
+claude-re/scripts/DumpCat.java
+  s_d5e57ef96bdf83::t_1a8192d0b782f4 1-33
+claude-re/scripts/DumpCoord.java
+  s_d5e57ef96bdf83::t_cc6111dca4ab54 1-10
+claude-re/scripts/DumpDispatch.java
+  s_d5e57ef96bdf83::t_2cd48bccf60b02 1-31
+claude-re/scripts/DumpEntry.java
+  s_d5e57ef96bdf83::t_cd3951490d9a62 1-13
+claude-re/scripts/DumpEntry2.java
+  s_d5e57ef96bdf83::t_3f6541f37de6bf 1-12
+claude-re/scripts/DumpHandlers.java
+  s_d5e57ef96bdf83::t_a2f080aa048f6a 1-32
+claude-re/scripts/DumpJs5.java
+  s_d5e57ef96bdf83::t_8d7183cc3dd405 1-41
+claude-re/scripts/DumpNpcGpi.java
+  s_d5e57ef96bdf83::t_30e49e50f463cf 1-14
+claude-re/scripts/DumpProt.java
+  s_d5e57ef96bdf83::t_9a479d3f30bca6 1-40
+claude-re/scripts/DumpRest.java
+  s_d5e57ef96bdf83::t_e57ede6bc8c9b6 1-10
+claude-re/scripts/DumpRest2.java
+  s_d5e57ef96bdf83::t_dfae2619d07cb1 1-10
+claude-re/scripts/FindAppearance.java
+  s_d5e57ef96bdf83::t_c51f281e8088c0 1-7
+claude-re/scripts/FindCipher.java
+  s_d5e57ef96bdf83::t_3533c8e5149a39 1-13
+claude-re/scripts/FindScramble.java
+  s_d5e57ef96bdf83::t_5daaf38638fec1 1-12
+claude-re/scripts/SmokeTest.java
+  s_d5e57ef96bdf83::t_57239ecb93fb2f 1-8
+core/src/main/kotlin/org/darkan/core/model/Vars.kt
+  s_d5e57ef96bdf83::t_a668d05c24455a 40,48
+core/src/main/kotlin/org/darkan/core/net/JS5Server.kt
+  s_d5e57ef96bdf83::t_dd05c731147def 17-19,28-57,128,130-133,135-149,157-158,170-173,188-197,246-249,260-261,269,275,293,297,306-307,309-311,330-347
+core/src/main/kotlin/org/darkan/core/net/Session.kt
+  s_d5e57ef96bdf83::t_0948c0a6ddb30b 52,128-129,134,137-138,147,151-171,189,199,264,268,277-283,285,312-350,382-383
+core/src/main/kotlin/org/darkan/core/net/login/LoginToken.kt
+  s_d5e57ef96bdf83::t_e6754a151dcc5a 71,77-81,105-116,135-145,175-187
+core/src/main/kotlin/org/darkan/core/net/login/RsaCredentialTail.kt
+  s_d5e57ef96bdf83::t_3751ec4a73042a 1-107
+core/src/main/kotlin/org/darkan/core/net/prot/ClientProt.kt
+  s_d5e57ef96bdf83::t_1fa2ced1886b46 17-21,24-25,66-67
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948ClientCodecs.kt
+  s_d5e57ef96bdf83::t_03a33b314f79d7 51-67,131-134,173-204
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948ClientProtStubs.kt
+  s_d5e57ef96bdf83::t_bd7cdd9558f94c 7-8,11-14,180-183
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948Codec.kt
+  s_d5e57ef96bdf83::t_eb1391bef2534c 9-11,13-14,30
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948ServerCodecsInterface.kt
+  s_d5e57ef96bdf83::t_4701ffdd1f1fb1 170
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948ServerCodecsInventory.kt
+  s_d5e57ef96bdf83::t_b7fe7714a79edf 1-34
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948ServerCodecsRebuild.kt
+  s_d5e57ef96bdf83::t_ddf5265568eaeb 11-12,14-18,21-22,25-58,60,62-72,75-81,90-112
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948ServerCodecsUpdateMasks.kt
+  s_d5e57ef96bdf83::t_fe2bd5c10a0cda 14-38,50-56,69-93,99-105,107
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948ServerCodecsZone.kt
+  s_d5e57ef96bdf83::t_534ab637841f30 67,70,72,87-93,101,103,105-106,109,111-112,145,148-150,231-250
+core/src/main/kotlin/org/darkan/core/net/prot/update/ActiveMaskKeys.kt
+  s_d5e57ef96bdf83::t_da96ebfb0a662e 5
+core/src/main/kotlin/org/darkan/core/net/prot/update/PlayerAppearanceEncoder.kt
+  s_d5e57ef96bdf83::t_f2f3e1102e1491 1-243
+core/src/main/kotlin/org/darkan/core/net/prot/update/UpdateMaskHeader.kt
+  s_d5e57ef96bdf83::t_a19a8cbe8076c3 1-54
+core/src/main/kotlin/org/darkan/core/net/session/GameSession.kt
+  s_d5e57ef96bdf83::t_d97b23d0a8b6c7 6,17-42
+core/src/main/kotlin/org/darkan/core/social/gateway/GatewayProtocol.kt
+  s_d5e57ef96bdf83::t_347850f268c583 119,128
+core/src/main/kotlin/org/darkan/core/worldlist/WorldList.kt
+  s_d5e57ef96bdf83::t_6ef0cf31b067d9 7-15,17,27,35,53-58
+core/src/main/kotlin/world/gregs/voidps/cache/config/decoder/PlayerVariableParameterDecoder.kt
+  s_d5e57ef96bdf83::t_942e6135bc8c60 4,8,17
+core/src/main/kotlin/world/gregs/voidps/cache/file/FileProvider.kt
+  s_d5e57ef96bdf83::t_26457524e7ce81 60-61,82,118-120
+core/src/main/kotlin/world/gregs/voidps/cache/file/type/MemoryFileProvider.kt
+  s_d5e57ef96bdf83::t_016c74ba7fbc38 21-22
+core/src/main/kotlin/world/gregs/voidps/cache/sqlite/IndexFile.kt
+  s_d5e57ef96bdf83::t_26aac9ef23bb7e 28,45,87-97,116-127,262
+core/src/main/kotlin/world/gregs/voidps/cache/sqlite/SQLiteCache.kt
+  s_d5e57ef96bdf83::t_d94b07f7de402e 75-83,146-152,157-166,168-169,171-181
+core/src/test/kotlin/org/darkan/core/net/login/LoginTokenTest.kt
+  s_d5e57ef96bdf83::t_12379ce6914da4 1-75
+core/src/test/kotlin/org/darkan/core/net/prot/Rev948ClientCodecTest.kt
+  s_d5e57ef96bdf83::t_2f2e64f121eabf 1-365
+core/src/test/kotlin/org/darkan/core/net/prot/Rev948InventoryCodecTest.kt
+  s_d5e57ef96bdf83::t_14c783d427fc89 1-70
+core/src/test/kotlin/org/darkan/core/net/prot/Rev948WorldListCodecTest.kt
+  s_d5e57ef96bdf83::t_99e52fad7e7ae8 1-89
+core/src/test/kotlin/org/darkan/core/net/prot/Rev948ZoneCodecTest.kt
+  s_d5e57ef96bdf83::t_0aa23cab4100db 1-79
+core/src/test/kotlin/org/darkan/core/net/prot/Rev948ZoneEncoderTest.kt
+  s_d5e57ef96bdf83::t_dcac7e6458e922 1-73
+core/src/test/kotlin/org/darkan/core/net/prot/WorldSwitchEncoderTest.kt
+  s_d5e57ef96bdf83::t_78495a9021c0a5 1-289
+core/src/test/kotlin/org/darkan/core/net/prot/update/PlayerAppearanceEncoderTest.kt
+  s_d5e57ef96bdf83::t_e70da36552980a 1-216
+core/src/test/kotlin/org/darkan/core/net/prot/update/UpdateMaskHeaderTest.kt
+  s_d5e57ef96bdf83::t_8c83c305d8824b 1-35
+core/src/test/kotlin/org/darkan/core/net/session/GameSessionTest.kt
+  s_d5e57ef96bdf83::t_144dcc1ccfca12 1-192
+core/src/test/kotlin/world/gregs/voidps/cache/file/FileProviderTest.kt
+  s_d5e57ef96bdf83::t_eac481ace80d83 1-181
+lobby/build.gradle.kts
+  s_d5e57ef96bdf83::t_b0cbda6816042c 23-35
+lobby/src/main/kotlin/org/darkan/lobby/LobbyState.kt
+  s_d5e57ef96bdf83::t_542e502a41f436 3,22-31
+lobby/src/main/kotlin/org/darkan/lobby/Main.kt
+  s_d5e57ef96bdf83::t_5751c9d99bdc24 40
+lobby/src/main/kotlin/org/darkan/lobby/server/Rev948LobbyBaseline.kt
+  s_d5e57ef96bdf83::t_cdc7ec5134496e 1-96
+lobby/src/main/kotlin/org/darkan/lobby/server/packet/ClientLifecycleHandlers.kt
+  s_d5e57ef96bdf83::t_92f2c3aafc3bb7 1-14
+lobby/src/main/kotlin/org/darkan/lobby/server/packet/SceneGraphReportHandler.kt
+  s_d5e57ef96bdf83::t_e0dba0d1252efd 1-9
+lobby/src/main/kotlin/org/darkan/lobby/server/packet/WorldlistFetchHandler.kt
+  s_d5e57ef96bdf83::t_ae675f42437dd9 14-15
+lobby/src/main/kotlin/org/darkan/lobby/social/SocialGateway.kt
+  s_d5e57ef96bdf83::t_e113d1fa3a1191 37-38,521-524,553-556,566-569,587-590,595-598,608-609
+lobby/src/main/resources/lobby/rev948-lobby-baseline-vars.tsv
+  s_d5e57ef96bdf83::t_f57a4430eb7822 1-1579
+lobby/src/test/kotlin/org/darkan/lobby/server/LobbyLoginResponseTest.kt
+  s_d5e57ef96bdf83::t_d9547c0ce038b2 1-162
+lobby/src/test/kotlin/org/darkan/lobby/server/packet/IfButtonHandlerTest.kt
+  s_d5e57ef96bdf83::t_cb18d2e7c19df2 1-139
+lobby/src/test/kotlin/org/darkan/lobby/server/packet/WorldlistFetchHandlerTest.kt
+  s_d5e57ef96bdf83::t_6123866bf3ab04 1-87
+run-client-mac.sh
+  s_d5e57ef96bdf83::t_a7d83a84efe17b 1-168
+world/build.gradle.kts
+  s_d5e57ef96bdf83::t_d2fa098d4f21a2 22-29
+world/src/main/kotlin/org/darkan/world/Main.kt
+  s_d5e57ef96bdf83::t_0619a6673aa551 11,33,38-39
+world/src/main/kotlin/org/darkan/world/entity/Appearance.kt
+  s_d5e57ef96bdf83::t_286e6d97833a06 4-7,41-56
+world/src/main/kotlin/org/darkan/world/entity/Entity.kt
+  s_d5e57ef96bdf83::t_b259fec110c779 22
+world/src/main/kotlin/org/darkan/world/entity/Player.kt
+  s_d5e57ef96bdf83::t_99c8741e65b4e8 34-38,45-47
+world/src/main/kotlin/org/darkan/world/entity/Rev948FirstLightVarpDefaults.kt
+  s_d5e57ef96bdf83::t_f7b625cf082c2a 1-44
+world/src/main/kotlin/org/darkan/world/entity/VarpManager.kt
+  s_d5e57ef96bdf83::t_455fff42c5ceea 1-116
+world/src/main/kotlin/org/darkan/world/net/FirstLightSceneBootstrap.kt
+  s_d5e57ef96bdf83::t_2263b3eaa350f4 1-92
+world/src/main/kotlin/org/darkan/world/net/GameHud.kt
+  s_d5e57ef96bdf83::t_035c2dac907291 1-227
+world/src/main/kotlin/org/darkan/world/net/NpcInfoBuilder.kt
+  s_d5e57ef96bdf83::t_fe81abbc1bdcb9 7-8,130,146,148,173-174,185
+world/src/main/kotlin/org/darkan/world/net/Op81GpiPrefix.kt
+  s_d5e57ef96bdf83::t_318e1b52f7d7bb 1-126
+world/src/main/kotlin/org/darkan/world/net/PlayerInfoBuilder.kt
+  s_d5e57ef96bdf83::t_96b6d3abf7724f 8,14-16,18-26,28-31,38-41,43-56,58-62,64-74,76-116,119-122,124-134,136-149,152-154,156-192,194-196,203-205,208,210,212,214-215,219,223-224,235-236,238-242,253-254,258-259,263-267,269,275-280,289,291-292,295-298,302-331,337,339,342-346,354-358,360,365,367,369-371,375,378-379,383,385-395,400-401,407,413-421,423-434,440-442,447,449-450,453-454,457,466-476,479-482,493-512,514-516,521
+world/src/main/kotlin/org/darkan/world/net/SceneMapCacheDiagnostics.kt
+  s_d5e57ef96bdf83::t_b903abc1b25758 1-20
+world/src/main/kotlin/org/darkan/world/net/SceneMapRegionPlanner.kt
+  s_d5e57ef96bdf83::t_54c442c90eeef4 1-16
+world/src/main/kotlin/org/darkan/world/net/ZoneBundleBuilder.kt
+  s_d5e57ef96bdf83::t_519e9a44224f4e 3,12-15,20,27-37,42-45,48-51,53,59,62-63,71,77
+world/src/main/kotlin/org/darkan/world/net/ZoneStreamer.kt
+  s_d5e57ef96bdf83::t_1f55e2e644c412 1-117
+world/src/main/kotlin/org/darkan/world/server/ServerClientVarBlock.kt
+  s_d5e57ef96bdf83::t_28dfc7c32960f3 1-176
+world/src/main/kotlin/org/darkan/world/server/WorldServer.kt
+  s_d5e57ef96bdf83::t_caf836ea8eb2ce 19-20,24-25,28,30,32-36,40,45-46,53,55-57,59,64,77,169-177,225-241,243,300-318,346-427,431,473-477,479-496,498-523,526-538,541-544,546-548,550-553,555-562,564-575,578-584,587-592,594-608,610-611,613-616,619-624,626-672,674-709,718,723,817-819
+world/src/main/kotlin/org/darkan/world/server/WorldTick.kt
+  s_d5e57ef96bdf83::t_88b92aa1322aa0 12-13,17,21,44-45,48,100,102,106-107,115-118,129,140-142,149-164
+world/src/main/kotlin/org/darkan/world/server/packet/AntiCheatChallengeResponseHandler.kt
+  s_d5e57ef96bdf83::t_37dd938da2e232 1-24
+world/src/main/kotlin/org/darkan/world/server/packet/MapBuildCompleteHandler.kt
+  s_d5e57ef96bdf83::t_f90d525d866e5a 1-12
+world/src/main/kotlin/org/darkan/world/server/packet/SceneGraphReportHandler.kt
+  s_d5e57ef96bdf83::t_0d955591f41cb6 1-12
+world/src/main/kotlin/org/darkan/world/world/BuildArea.kt
+  s_d5e57ef96bdf83::t_57360009501ac6 1-186
+world/src/main/kotlin/org/darkan/world/world/Viewport.kt
+  s_d5e57ef96bdf83::t_4ef263ca0fb16d 4,47-54,56-85,89-98
+world/src/main/resources/world/rev948-first-light-varps.tsv
+  s_d5e57ef96bdf83::t_b9353fa0947533 1-1604
+world/src/test/kotlin/org/darkan/world/entity/Rev948FirstLightVarpDefaultsTest.kt
+  s_d5e57ef96bdf83::t_ce146c0682941b 1-18
+world/src/test/kotlin/org/darkan/world/entity/VarpManagerTest.kt
+  s_d5e57ef96bdf83::t_dc620988c7fdfc 1-127
+world/src/test/kotlin/org/darkan/world/net/GameHudTest.kt
+  s_d5e57ef96bdf83::t_aea3d88cee8225 1-168
+world/src/test/kotlin/org/darkan/world/net/Op81GpiPrefixTest.kt
+  s_d5e57ef96bdf83::t_af715eff052b22 1-168
+world/src/test/kotlin/org/darkan/world/net/PlayerInfoBuilderInitTest.kt
+  s_d5e57ef96bdf83::t_c4c0dbe73ded5b 1-149
+world/src/test/kotlin/org/darkan/world/net/ZoneStreamerTest.kt
+  s_d5e57ef96bdf83::t_8a1031f6182a40 1-143
+world/src/test/kotlin/org/darkan/world/server/ServerClientVarBlockTest.kt
+  s_d5e57ef96bdf83::t_8ecebacb4a240c 1-43
+world/src/test/kotlin/org/darkan/world/world/BuildAreaTest.kt
+  s_d5e57ef96bdf83::t_41aa1e57b3c7ce 1-116
+core/src/main/kotlin/org/darkan/core/EnvVars.kt
+  s_d5e57ef96bdf83::t_23ad29346d1bd3 39-41,49-54,81,85,90
+core/src/main/kotlin/world/gregs/voidps/cache/Cache.kt
+  s_a2037af7d7b96a::t_616bea410cf17f 49-50,260
+lobby/src/main/kotlin/org/darkan/lobby/server/LoginServer.kt
+  s_3cdc7bd0109ce9::t_cb842e34689370 23-24,31,63,84,92,118,128,139,150-153,155-158,172,174,182,191,198,203-204,221-228,232,264-266,268,272-329,383,401-411,414-418,426-428,430,440,442,444,467,527,547-548,552,571,575-576,633-669
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "ff263af70aaca59c3655175b149813f656564c17",
+  "prompts": {},
+  "sessions": {
+    "s_0a794134c004c8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a616770893ee0fdf3",
+        "model": "unknown"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    },
+    "s_3cdc7bd0109ce9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a60bc7702933c5dfa",
+        "model": "unknown"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    },
+    "s_89062ca2603360": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aac2cb32a5d12a3c6",
+        "model": "unknown"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    },
+    "s_a2037af7d7b96a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a68ef4e481e1b535e",
+        "model": "unknown"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    },
+    "s_d5e57ef96bdf83": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d8003d8-9cd7-4636-a625-5f685c43d380",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
