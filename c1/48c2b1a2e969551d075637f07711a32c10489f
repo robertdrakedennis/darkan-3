@@ -1,0 +1,37 @@
+core/src/main/kotlin/org/darkan/core/net/prot/ServerProtZone.kt
+  s_9907f8fcaf3549::t_d5eb3f9a06d5cd 1-157
+core/src/main/kotlin/org/darkan/core/net/prot/ServerProtRebuild.kt
+  s_9907f8fcaf3549::t_d5eb3f9a06d5cd 1-176
+core/src/main/kotlin/org/darkan/core/net/prot/ServerProtInterfaces.kt
+  s_9907f8fcaf3549::t_d5eb3f9a06d5cd 1-201
+core/src/main/kotlin/org/darkan/core/net/prot/ServerProtSocial.kt
+  s_9907f8fcaf3549::t_d5eb3f9a06d5cd 1-257
+core/src/main/kotlin/org/darkan/core/net/prot/ServerProtClan.kt
+  s_9907f8fcaf3549::t_d5eb3f9a06d5cd 1-116
+core/src/main/kotlin/org/darkan/core/net/prot/ServerProtEntitySync.kt
+  s_9907f8fcaf3549::t_d5eb3f9a06d5cd 1-54
+core/src/main/kotlin/org/darkan/core/net/prot/ServerProtVariables.kt
+  s_9907f8fcaf3549::t_d5eb3f9a06d5cd 1-37
+core/src/main/kotlin/org/darkan/core/net/prot/ServerProtWorldInit.kt
+  s_9907f8fcaf3549::t_d5eb3f9a06d5cd 1-109
+core/src/main/kotlin/org/darkan/core/net/prot/ServerProtMisc.kt
+  s_9907f8fcaf3549::t_d5eb3f9a06d5cd 1-251
+core/src/main/kotlin/org/darkan/core/net/prot/ServerProt.kt
+  s_9907f8fcaf3549::t_713f6212a03401 10-13,15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "c148c2b1a2e969551d075637f07711a32c10489f",
+  "prompts": {},
+  "sessions": {
+    "s_9907f8fcaf3549": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0299578f-9d32-4d57-ae22-c664814afe72",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
