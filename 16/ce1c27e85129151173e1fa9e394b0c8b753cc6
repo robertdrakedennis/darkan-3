@@ -1,0 +1,40 @@
+world/src/main/kotlin/org/darkan/world/server/packet/MapBuildCompleteHandler.kt
+  s_9907f8fcaf3549::t_b32e7cb5b9ab4d 8-12
+world/src/main/kotlin/org/darkan/world/server/packet/PingHandler.kt
+  s_9907f8fcaf3549::t_76306e009ddae4 7
+world/src/main/kotlin/org/darkan/world/server/packet/SceneGraphReportHandler.kt
+  s_9907f8fcaf3549::t_28e1e0c5bd420d 8-11
+lobby/src/main/kotlin/org/darkan/lobby/server/packet/ClientLifecycleHandlers.kt
+  s_9907f8fcaf3549::t_986d0108c62a98 8-13
+  s_9907f8fcaf3549::t_b61b1ca13b1571 18-23
+core/src/main/kotlin/org/darkan/core/net/prot/revision/rev948/Rev948ServerCodecsUpdateMasks.kt
+  s_9907f8fcaf3549::t_865f621cbd1ebe 32-38
+  s_9907f8fcaf3549::t_d989d68c54a669 52-61,63-68,70,74,78
+lobby/src/main/kotlin/org/darkan/lobby/server/packet/PingHandler.kt
+  s_9907f8fcaf3549::t_b906e743dd7c2e 7
+lobby/src/main/kotlin/org/darkan/lobby/server/packet/SceneGraphReportHandler.kt
+  s_9907f8fcaf3549::t_cfda7bcb4ce033 7
+NETWORKING_AUDIT.md
+  s_9907f8fcaf3549::t_9b9cfd5c7cee75 1-146
+world/src/main/kotlin/org/darkan/world/server/WorldServer.kt
+  s_9907f8fcaf3549::t_8706b0e096c63a 56-57
+  s_9907f8fcaf3549::t_f3da11ca73e4a2 181-184
+core/src/main/kotlin/org/darkan/core/net/login/WorldLoginTokens.kt
+  s_9907f8fcaf3549::t_df4cf8296415fd 26-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "16ce1c27e85129151173e1fa9e394b0c8b753cc6",
+  "prompts": {},
+  "sessions": {
+    "s_9907f8fcaf3549": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0299578f-9d32-4d57-ae22-c664814afe72",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
