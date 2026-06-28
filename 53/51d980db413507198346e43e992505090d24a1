@@ -1,0 +1,46 @@
+world/src/main/kotlin/org/darkan/world/server/WorldServer.kt
+  s_9907f8fcaf3549::t_110df03befde4f 29,31
+  s_9907f8fcaf3549::t_a0ccdd30f78540 410
+  s_9907f8fcaf3549::t_375dde976eaa0b 403
+  s_9907f8fcaf3549::t_040b93ace267f2 737
+world/src/main/kotlin/org/darkan/world/net/PlayerInfoEncoder.kt
+  s_9907f8fcaf3549::t_1bc658745e6f04 1-291
+world/src/main/kotlin/org/darkan/world/net/NpcInfoEncoder.kt
+  s_9907f8fcaf3549::t_1ea0db9ad662f0 1-126
+world/src/main/kotlin/org/darkan/world/net/PlayerMovementEncoder.kt
+  s_9907f8fcaf3549::t_c1bf446d039f5f 1-157
+world/src/main/kotlin/org/darkan/world/net/PlayerExtInfoEncoder.kt
+  s_9907f8fcaf3549::t_7878e9066ac3c7 1-155
+world/src/main/kotlin/org/darkan/world/net/Op81GpiPrefix.kt
+  s_9907f8fcaf3549::t_8212477d50ab56 12
+  s_9907f8fcaf3549::t_35baf4d76d80d1 20
+world/src/main/kotlin/org/darkan/world/net/NpcMovementEncoder.kt
+  s_9907f8fcaf3549::t_d8059f72dc4b1b 1-83
+world/src/test/kotlin/org/darkan/world/net/PlayerInfoBuilderInitTest.kt
+  s_9907f8fcaf3549::t_c2c340762d0cc8 21
+  s_9907f8fcaf3549::t_907935facf283d 129,153
+  s_9907f8fcaf3549::t_971a93e95b2273 133
+  s_9907f8fcaf3549::t_aac544393add30 105,110,117,155
+  s_9907f8fcaf3549::t_7a6b8f9e0aa19d 72,170
+world/src/main/kotlin/org/darkan/world/server/WorldTick.kt
+  s_9907f8fcaf3549::t_229578e26c6c25 14-15
+  s_9907f8fcaf3549::t_f3cb8f267dd258 128-129,131
+world/src/main/kotlin/org/darkan/world/net/NpcExtInfoEncoder.kt
+  s_9907f8fcaf3549::t_3448ab94e0e6fb 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "5351d980db413507198346e43e992505090d24a1",
+  "prompts": {},
+  "sessions": {
+    "s_9907f8fcaf3549": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0299578f-9d32-4d57-ae22-c664814afe72",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
