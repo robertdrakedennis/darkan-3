@@ -4,6 +4,7 @@ import org.darkan.core.net.prot.Ping
 import org.darkan.core.net.prot.handler.PacketHandler
 import org.darkan.core.net.session.GameSession
 
+/** TERMINAL: client keepalive — no server action required (the server sends its own keepalive on a timer). */
 class PingHandler : PacketHandler<GameSession, Ping> {
     override suspend fun handle(player: GameSession, packet: Ping) {
         // Keepalive — nothing to do. Server sends its own keepalive on a timer.

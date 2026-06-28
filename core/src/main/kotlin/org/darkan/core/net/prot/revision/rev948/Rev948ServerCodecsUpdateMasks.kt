@@ -29,12 +29,13 @@ import org.darkan.core.net.prot.update.UpdateMask
  *   mode 3 — scalar: `wire = (-0x80-value)&0xFF`; buffer: each `(b+0x80)&0xFF`, REVERSED
  * So APPEARANCE: length byte = mode 3 = `(-0x80 - L) & 0xFF`; body = mode 2 = every byte `+0x80`.
  *
- * **The other scrambled-scalar encoders below STILL use the now-retired `writeByte(0)` mode prefix
- * (`sByte`/`sShort`/`sMedium`).** They are LATENT — none are emitted on the first-light path (only
- * APPEARANCE is), and re-auditing all 36 per-block `.rodata` bases is out of scope here (doc §6/§8
- * defers it: "trace them when those masks are actually sent"). They are left as-is so this change
- * is surgical to the only block that ships; when FACE_DIRECTION/FORCED_MOVEMENT/etc. are wired, each
- * must be re-pointed at its own `table[blockBase + fieldIndex]` transform per doc §6 action item 2.
+ * **The other scrambled-scalar encoders below now FAIL LOUD** (`sByte`/`sShort`/`sMedium` throw).
+ * They are LATENT — none are emitted on the first-light path (only APPEARANCE is) — and emitting the
+ * now-retired `writeByte(0)` mode prefix silently DESYNCS the client, so rather than ship known-wrong
+ * bytes the guards throw if any of these masks is ever actually sent under 948. Re-auditing all 36
+ * per-block `.rodata` bases is out of scope here (doc §6/§8 defers it: "trace them when those masks
+ * are actually sent"); when FACE_DIRECTION/FORCED_MOVEMENT/etc. are wired, each must be re-pointed at
+ * its own `table[blockBase + fieldIndex]` transform per doc §6 action item 2, replacing the guard.
  * This is FLAGGED for the ghidra-reverse-engineer agent (per-block base map).
  *
  * Only blocks with DEFINITIVE identity (named fn / exact offset / 0xffff-clear semantics) and a
@@ -48,22 +49,33 @@ internal fun registerRev948ServerCodecsUpdateMasks() {
 }
 
 /**
- * LEGACY mode-prefix scrambled-scalar helpers — emit a `writeByte(0)` mode selector then the plain
- * BE value. **These are WRONG per `re-resources/docs/net/serverprot/player-appearance-948.md` §6** (the mode is a fixed
- * `.rodata` table, not on the wire) but are kept for the not-yet-emitted blocks below to keep this
- * change surgical to APPEARANCE. Do NOT use these for any block that actually ships — re-point at the
- * block's `table[base + fieldIndex]` transform first. See the file-level doc.
+ * FAIL-LOUD guards for the not-yet-RE'd 948 scrambled-scalar ext-info fields.
+ *
+ * The earlier implementation emitted a `writeByte(0)` mode selector + the plain value. That is **WRONG**
+ * (`re-resources/docs/net/serverprot/player-appearance-948.md` §6 — the scramble mode is a fixed client
+ * `.rodata` table, NOT a wire byte), so it silently DESYNCS the client. None of these blocks ship on the
+ * first-light path today, so rather than emit known-wrong bytes the helpers now THROW: any code path that
+ * actually tries to send FORCED_MOVEMENT / OVERHEAD_OPACITY / FACE_DIRECTION / VISIBILITY_FLAG /
+ * MODEL_OVERRIDE_ID / COMBAT_LEVEL_HEADBAR_ID under 948 fails loudly here instead of corrupting the stream.
+ * To wire one of these, re-point it at its block's `table[blockBase + fieldIndex]` transform first
+ * (per doc §6 action item 2), then replace the guard with the real encode. See NETWORKING_AUDIT.md (Phase 0).
  */
+private fun scrambled948NotImplemented(kind: String, value: Int): Nothing = error(
+    "948 scrambled ext-info $kind transform is not yet reverse-engineered (value=$value). The retired " +
+        "writeByte(0) mode prefix DESYNCS the client (player-appearance-948.md §6). Re-point this block at " +
+        "its table[blockBase+fieldIndex] transform before emitting it on the wire — see NETWORKING_AUDIT.md.",
+)
+
 private fun world.gregs.voidps.buffer.write.BufferWriter.sByte(value: Int) {
-    writeByte(0); writeByte(value)
+    scrambled948NotImplemented("byte", value)
 }
 
 private fun world.gregs.voidps.buffer.write.BufferWriter.sShort(value: Int) {
-    writeByte(0); writeShort(value)
+    scrambled948NotImplemented("short", value)
 }
 
 private fun world.gregs.voidps.buffer.write.BufferWriter.sMedium(value: Int) {
-    writeByte(0); writeMedium(value)
+    scrambled948NotImplemented("medium", value)
 }
 
 /**

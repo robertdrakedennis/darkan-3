@@ -1,6 +1,5 @@
 package org.darkan.core.net.prot.handler
 
-import kotlinx.coroutines.runBlocking
 import org.darkan.core.Logger.logError
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logWarn
@@ -44,9 +43,6 @@ object PacketHandlers {
         PACKET_HANDLERS[clazz] = handler
     }
 
-    @Suppress("UNCHECKED_CAST")
-    fun <T> getHandler(packet: Class<out ClientProt>) = PACKET_HANDLERS[packet] as? PacketHandler<T, ClientProt>
-
     /**
      * Suspend dispatch for coroutine callers (the lobby/world session loops).
      */
@@ -62,13 +58,5 @@ object PacketHandlers {
             return
         }
         handler.handle(player, packet)
-    }
-
-    /**
-     * Blocking dispatch for Java callers (e.g. Player.processPackets on the world thread).
-     * Handlers that call only non-suspend legacy Java code complete synchronously.
-     */
-    fun <T> handleBlocking(player: T, packet: ClientProt) {
-        runBlocking { handle(player, packet) }
     }
 }

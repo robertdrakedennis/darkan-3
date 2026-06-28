@@ -23,8 +23,12 @@ import java.security.SecureRandom
  *  1. Lobby login-success: [issue] writes an authorization for the player's username (TTL'd) and
  *     returns the random [IssuedWorldLogin.sessionId1]/[IssuedWorldLogin.sessionId2] longs, which the
  *     lobby puts into the login-data `sessionToken1`/`sessionToken2` fields the client carries.
- *  2. World reconnect (loginType 2): the world reads the username from the (reliable) XTEA section of
- *     the world login block and calls [validate]. No second password/credential exchange occurs.
+ *  2. World login (any type — reconnect is NOT yet distinguished): the world reads the username from the
+ *     (reliable) XTEA section of the world login block and calls [validate]. No second password/credential
+ *     exchange occurs. (The client's loginType / carried sessionToken live further into the XTEA tail, which
+ *     the world currently SKIPS — see `WorldServer.initWorldLogin` step 6 — so EVERY world login is
+ *     authorized by username + signed token, not by reconnect type or sessionId. Connection-binding is
+ *     pending; see "Why username-keyed" below.)
  *
  * ## Why username-keyed (not connection-bound — yet)
  * The exact byte layout of the RECONNECT RSA block is not yet fully reverse-engineered

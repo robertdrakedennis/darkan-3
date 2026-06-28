@@ -53,7 +53,8 @@ import java.util.concurrent.Executors
  * Handles the NXT world login handshake:
  * 1. Connection type CONNECT_LOGIN (14) already read by the accept loop
  * 2. Sends JS5_SYNC response byte (0)
- * 3. Client sends login opcode (16=RECONNECT or 18=LOGIN)
+ * 3. Client sends login opcode (16=RECONNECT or 18=LOGIN) — both currently handled IDENTICALLY; there
+ *    is no distinct reconnect path (loginType/sessionToken live in the XTEA tail we skip, see step 5).
  * 4. RSA decrypt -> ISAAC keys + LoginToken
  * 5. XTEA decrypt -> username, display mode, screen size, machine info
  * 6. Verifies the LoginToken issued by the lobby
@@ -177,7 +178,10 @@ object WorldServer {
         output.writeFully(serverSeed)
         output.flush()
 
-        // Step 2: Read login opcode
+        // Step 2: Read login opcode. NOTE: RECONNECT (16) and LOGIN (18) are accepted but NOT
+        // differentiated — there is no reconnect-specific path yet (the carried session token is in the
+        // XTEA tail we skip below). Honesty marker per NETWORKING_AUDIT.md Phase 0; resolve when the
+        // login block is unified (Phase 2).
         val opcode = input.readByte().toInt()
         if (opcode != RequestOpcode.LOGIN && opcode != RequestOpcode.RECONNECT) {
             logTrace("Unexpected world login opcode: $opcode from $ip")
