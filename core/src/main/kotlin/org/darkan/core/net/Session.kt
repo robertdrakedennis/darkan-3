@@ -2,7 +2,6 @@ package org.darkan.core.net
 
 import io.ktor.utils.io.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.io.Buffer
@@ -35,7 +34,7 @@ open class Session(
     private val pendingPackets = ConcurrentLinkedQueue<ServerProt>()
 
     /**
-     * Serialises all writers (session loop, world tick via [flushBlocking], gateway
+     * Serialises all writers (session loop, world tick via [flush], gateway
      * coroutines via [send]/[flush]) so every opcode+length+payload sequence — and the
      * isaacOut.nextInt() calls it entails — hits the channel contiguously. Interleaved
      * writes would permanently desync the client's ISAAC stream.
@@ -105,15 +104,6 @@ open class Session(
             logWarn("Client error:", e)
             disconnect()
         }
-    }
-
-    /**
-     * Blocking wrapper for [flush], safe to call from Java / non-suspend contexts
-     * such as the world thread's tick loop.
-     */
-    fun flushBlocking() {
-        if (disconnected) return
-        runBlocking { flush() }
     }
 
     /**

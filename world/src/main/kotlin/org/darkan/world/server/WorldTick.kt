@@ -45,6 +45,16 @@ object WorldTick {
     private const val ANTI_CHEAT_TIMEOUT_MS = 20_000L
 
     private val tickScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    /**
+     * Separate IO-dispatched scope for outbound flushes. Per-player flushes are launched here and NOT
+     * awaited, so a slow / backpressured client's socket write never stalls the tick thread or any
+     * other player's sync (the previous serial `flushBlocking()` did exactly that — one stuck client
+     * blocked the whole tick; see NETWORKING_AUDIT.md §Phase 1.1). Per-session ISAAC byte ordering is
+     * still guaranteed by [org.darkan.core.net.Session.writeMutex] + the FIFO outbound queue, regardless
+     * of how many flush coroutines a session has in flight. Cancelled on [stop].
+     */
+    private val flushScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val antiCheatRandom = SecureRandom()
 
     @Volatile
@@ -89,6 +99,7 @@ object WorldTick {
         if (!running) return
         running = false
         tickScope.coroutineContext.cancelChildren()
+        flushScope.coroutineContext.cancelChildren()
         logInfo("WorldTick stopped")
     }
 
@@ -124,15 +135,24 @@ object WorldTick {
             }
         }
 
-        // Deliver everything queued this tick immediately. Without an explicit flush,
-        // delivery depended on the client's ~1/s keepalive triggering the session loop's
-        // post-receive flush — adding up to a second of latency to every sync packet.
+        // Deliver everything queued this tick. Each player's flush is dispatched CONCURRENTLY off the
+        // tick thread onto [flushScope] (was: serial `flushBlocking()` per player, which made one
+        // slow/backpressured client's socket write stall the ENTIRE tick and every other player's
+        // sync — the headline scaling defect; see NETWORKING_AUDIT.md §Phase 1.1). The packets are
+        // already materialised in the session's outbound queue by the build pass above, so a flush only
+        // drains + writes; per-session ISAAC ordering is preserved by Session.writeMutex (concurrent
+        // flushes of the SAME session serialise on it and drain the queue in FIFO order). A slow client
+        // now only delays ITS OWN flush, never the tick. NOTE: the flushes are fire-and-forget — the
+        // tick does not await them, and the pending-state clear below is safe because it clears build
+        // INPUTS (update masks / zone queue) already consumed into the queued packets, not the queue.
         Players.forEach { player ->
             if (!player.readyForTick) return@forEach
-            try {
-                player.session.flushBlocking()
-            } catch (e: Exception) {
-                logError("Per-player tick flush failed: ${player.account.username}", e)
+            flushScope.launch {
+                try {
+                    player.session.flush()
+                } catch (e: Exception) {
+                    logError("Per-player tick flush failed: ${player.account.username}", e)
+                }
             }
         }
 
