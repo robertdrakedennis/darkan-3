@@ -236,9 +236,11 @@ to document the struct/function (cite the gameval name in the comment).
 
 Namespaces: `jag::ScriptRunner` (execution), `jag::ClientScriptHelpers`, `jag::ClientScriptState`,
 `jag::game::ClientScript`, `jag::opcode::*` (Camera, Core, Entities, InterfaceComponents, …).
-Key data: opcode table at `0x014c1ac0`; `ClientScriptState` ≈ `0xC420` bytes (int stack `+0x100`,
-string stack `+0x10a8`, long stack `+0x8db0`); return constants Success `0x01702e80`,
-Yield `0x01702f80`, Error `0x01701dc0`. (Offsets are build-specific — re-verify per build.)
+Key data: CS2 opcode dispatch table `jag::ScriptRunner::g_opcodeDispatchTable` (948-5: ELF `0x013969a0`,
+Mac `0x100f05ce0`; 2244 16-byte slots `{handler,u16 opcode,u8 flag}`, index==opcode, populated at runtime
+by `jag::opcode::RegisterAllOpcodes`); `ClientScriptState` ≈ `0xC420` (int stack `+0x100`/SP `+0x10a0`,
+string stack `+0x10a8`, long stack `+0x8db0`/SP `+0xacf8`); return sentinels (948-5 Mac) Success
+`0x100f050b0`, Yield `0x100f04fa8`, Abort `0x100f05000`, Error `0x100f05058`. (Offsets are build-specific — re-verify per build.)
 
 ---
 

@@ -11,17 +11,20 @@ import world.gregs.voidps.buffer.*
  *
  * MOVED:
  *  - SetReadyFlag:        65 → 75
- *  - UpdateRunenergy (SET_RUN_ENERGY): 19 → 80
- *  - JcoinsUpdate (SET_DISPLAY_INT):   59 → 74
+ *  - JcoinsUpdate:       59 → 191
  *  - ChangeLobby:         30 → 49
  *  - SetWorldTarget:     187 → 212
  *  - SwitchWorld:        179 → 213
- *  - ResetClientVarcache → RESET_ALL_VARPS: 48 → 5 (semantically equivalent; new handler in 948)
+ *  - ResetClientVarcache: 48 → 5 (current 948-5 handler RESET_CLIENT_VARCACHE_OP5)
+ *
+ * CORRECTED 2026-06-27 (recorder-capture-points.md §10.4): the earlier `UpdateRunenergy: 19 → 80`
+ * mapping was WRONG — rev947 op 19 was NOT relocated to op 80. In rev948, op 80 is SETFILTER_PRIVATE
+ * (private-chat filter, [SetFilterPrivate]) and the run-energy opcode is op 13 ([UpdateRunenergy],
+ * registered below). The bad mapping made run-energy sends silently flip the client's chat filter.
  *
  * REMOVED in 948 (no identified destination — likely registered via a Variables/Audio/Misc
  * subsystem BindHandlers we haven't walked yet):
  *  - NoTimeout (was op 216 in 947-3) — keepalive
- *  - RunClientScript (was op 121, RUNCLIENTSCRIPT) — heavyweight CS2 invoke
  *  - FriendStatus (was op 102, UPDATE_FRIENDLIST) — friends-list update
  *  - WorldListPacket (was op 159, WORLDLIST_FETCH_REPLY) — lobby world list
  *
@@ -54,18 +57,33 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
     // SET_READY_FLAG (op 75, 0B) — was op 65 in 947-3.
     serverProt<SetReadyFlag>(opcode = 75, size = 0)
 
-    // SET_RUN_ENERGY (op 80, 1B) — was op 19 (UPDATE_RUNENERGY) in 947-3.
-    serverProt<UpdateRunenergy>(opcode = 80, size = 1) { out ->
-        out.writeByte(energy)
+    // SETFILTER_PRIVATE (op 80, 1B) — CORRECTED 2026-06-27 (recorder-capture-points.md §10.4).
+    // op 80 is the private-chat filter {0=On,1=Friends,2=Off}, NOT run energy. Run energy is op 13
+    // (UpdateRunenergy, registered below). This was previously bound to UpdateRunenergy@op80, which
+    // made every "set run energy" send silently flip the private-chat filter. Wire is unchanged
+    // (g1, 1 byte).
+    serverProt<SetFilterPrivate>(opcode = 80, size = 1) { out ->
+        out.writeByte(filter)
     }
 
-    // JCOINS_UPDATE (op 191, 4B). OPCODE REBIND (2026-06-25 oracle): JCOINS_UPDATE is op191
-    //   (HANDLER_ID_HIGH, handler ClientState::UNKNOWN_op0xBF_handler), NOT op74. op74 is
-    //   Misc::SET_DISPLAY_INT (UNKNOWN). This encoder previously sent on op74 (wrong opcode).
+    // JCOINS_UPDATE (op 191, 4B). Current 948 binding is op191, not op74. op74 is a distinct
+    // 4-byte ClientState timing-counter update documented in the packet KB.
     serverProt<JcoinsUpdate>(opcode = 191, size = 4) { out ->
         out.writeInt(balance)
     }
 
+    // SceneTimingBase (op 74, 4B). Handler jag::packethandlers::ClientState::
+    // SetSceneTimingBase_OP74 reads BE g4 and stores SceneTargetContext+0x64. It is not JCOINS.
+    serverProt<SceneTimingBase>(opcode = 74, size = 4) { out ->
+        out.writeInt(value)
+    }
+
+    // HASHED_WORLD_TOKEN (op 54, varByte) — current 948-5 handler is NOT NO_TIMEOUT.
+    // Ghidra handler jag::packethandlers::Misc::HASHED_WORLD_TOKEN_OP54 @ 0x10004b380 hangs off
+    // descriptor 0x100f0ff30/callback 0x100f0ff40. The binary reads a flag byte, then a
+    // cipher-subtracted CP1252 string and, when flag == 1, a second string. This local encoder is
+    // still the captured single-string form; implementing the ciphered payload path needs codec
+    // access to the live outbound ISAAC stream, which the current ServerProt encoder API lacks.
     serverProt<HashedWorldToken>(opcode = 54, size = ProtSize.VarByte) { out ->
         out.writeRSString(token)
     }
@@ -98,14 +116,15 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
         out.writeByte(pendingFlag)
     }
 
-    // CHANGE_LOBBY (op 49, varShort) — was op 30 in 947-3.
+    // CHANGE_LOBBY (op 49, varShort) — current 948-5 handler @ 0x10009ff50 loops over records
+    // until payload size, reading a flag byte plus three appearance/name strings and refreshing
+    // lobby/player-list state. Current boot captures send zero-length bodies.
     serverProt<ChangeLobby>(opcode = 49, size = ProtSize.VarShort)
 
     // RUNCLIENTSCRIPT (op 110, varShort) — was op 121 in 947-3.
-    // 948 handler: thunk_FUN_001d2060 @ 0x001d2070 -> RUNCLIENTSCRIPT_impl @ 0x001d2060.
-    // Bound by main ServerProt::BindHandlers (entry 0x013a0fe0). Verified by reading the
-    // handler body: it reads `gStringCP1252ToUTF8(typeDesc) + per-char-reversed args + gT<uint>(scriptId)`,
-    // matching 947-3 RunClientScript wire format byte-for-byte.
+    // Current 948-5 handler jag::packethandlers::ClientScript::RUNCLIENTSCRIPT_OP110 @ 0x100096580.
+    // Reads CP1252 type descriptor, args in reversed descriptor order (`s` string, `l` long,
+    // otherwise int), then BE scriptId.
     serverProt<RunClientScript>(opcode = 110, size = ProtSize.VarShort) { out ->
         // Type descriptor as null-terminated string (no version prefix)
         out.writeRSString(types)
@@ -122,6 +141,8 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
     }
 
     serverProt<ResetEntityLists>(opcode = 7, size = 0)
+    // DESTROY_ZONE_DATA (op 55, 0B) — current handler @ 0x10004a870 clears
+    // *(Client+0x19730)+0x76c0 and releases the old pointer when present.
     serverProt<DestroyZoneData>(opcode = 55, size = 0)
     serverProt<NoopVarA>(opcode = 128, size = 0)
     serverProt<ClearPendingUpdates>(opcode = 190, size = 0)
@@ -130,7 +151,7 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
     // ANTI_CHEAT_CHALLENGE behavior at op 174. The 948-5 symbol is the handler name
     // `HandleAntiCheatChallenge`.
     // Body is two BE u32 values. The client replies with op3 as BE first value, LE second value,
-    // then the client-side `*(*client + 0x534)` value biased by -128.
+    // then the client-side `*(client + 0x54c)` value clamped to 0xff and biased by -128.
     serverProt<AntiCheatChallenge>(opcode = 174, size = 8) { out ->
         out.writeInt(challengeA)
         out.writeInt(challengeB)
@@ -174,12 +195,15 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
         }
     }
 
-    serverProt<SetPlayerOp2>(opcode = 12, size = 2) { out ->
+    // UPDATE_RUNWEIGHT (op 12, 2B, g2s) stores signed run weight next to run energy.
+    serverProt<UpdateRunWeight>(opcode = 12, size = 2) { out ->
         out.writeShort(value)
     }
 
-    serverProt<SetPlayerOp3>(opcode = 13, size = 1) { out ->
-        out.writeByte(value)
+    // UPDATE_RUNENERGY (op 13, 1B, g1, 0..100 RAW) — the real rev948 run-energy opcode (was the
+    // mislabelled SetPlayerOp3; run energy was wrongly attributed to op80). §10.4.
+    serverProt<UpdateRunenergy>(opcode = 13, size = 1) { out ->
+        out.writeByte(energy)
     }
 
     serverProt<PlayerInfoDecode>(opcode = 104, size = 14) { out ->
@@ -229,9 +253,9 @@ internal fun Codec.registerRev948ServerCodecsMisc() {
     }
 
     // WORLDLIST_FETCH_REPLY (op 216, varShort) — was op 159 in 947-3.
-    // 948-5 handler: WorldData::WORLDLIST_FETCH_REPLY @ 0x00190020.
-    // Bound by main ServerProt::BindHandlers (entry 0x0139ffa0). Verified by reading the
-    // handler body: reads frame indicator, then reassembles a buffer whose header is [2, mode].
+    // 948-5 handler: jag::packethandlers::WorldData::WORLDLIST_FETCH_REPLY_OP216 @ 0x1000acfb0.
+    // Descriptor 0x100f127b0, parser 0x1000d6660. Verified by reading the handler body:
+    // reads frame indicator, appends payload bytes, then parses once the final frame arrives.
     serverProt<WorldListPacket>(opcode = 216, size = ProtSize.VarShort) { out ->
         val worlds = worldList.getWorldArray()
         val minWorldId = worlds.minOfOrNull { it.number } ?: 0

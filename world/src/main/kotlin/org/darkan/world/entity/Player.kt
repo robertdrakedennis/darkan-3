@@ -45,4 +45,22 @@ class Player(
     init {
         appearance.ensureCachedBytes()
     }
+
+    companion object {
+        // Body/Wearpos-def equipment slot indices (also the worn-container 94 slot layout).
+        const val EQUIP_SLOT_HAT = 0
+        const val EQUIP_SLOT_CAPE = 1
+        const val EQUIP_SLOT_AMULET = 2
+        const val EQUIP_SLOT_WEAPON = 3
+        const val EQUIP_SLOT_CHEST = 4
+        const val EQUIP_SLOT_SHIELD = 5
+        const val EQUIP_SLOT_LEGS = 7
+        const val EQUIP_SLOT_HANDS = 9
+        const val EQUIP_SLOT_FEET = 10
+        const val EQUIP_SLOT_RING = 12
+        const val EQUIP_SLOT_ARROWS = 13
+        const val EQUIP_SLOT_AURA = 14
+        const val EQUIP_SLOT_POCKET = 17
+        const val EQUIP_SLOT_WINGS = 18
+    }
 }

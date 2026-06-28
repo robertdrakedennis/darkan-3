@@ -143,15 +143,61 @@ class SQLiteCache private constructor(
     private fun parseMultiFileArchive(decompressed: ByteArray, fileCount: Int): Array<ByteArray?>? {
         if (decompressed.isEmpty()) return null
 
-        // The RS3 NXT cache uses the trailing-stripe (chunked) group layout: file data, then a
-        // size-delta table, then a 1-byte chunk count at the very end. A leading 0x01 byte is NOT
-        // a format marker here - it is simply the first byte of file data, so the old
-        // "first byte == 1 => modern 24-bit offset table" heuristic misfired on every such group
-        // (NegativeArraySizeException / BufferUnderflow). We only take the modern path when its
-        // leading offset table is self-consistent, otherwise fall back to trailing-stripe.
+        // Two distinct multi-file group layouts exist in the wild:
+        //
+        //  1. The NXT client's ON-DISK container (what it writes into its own js5-N.jcache after
+        //     unwrapping a ZLB blob): [version 0x01][(N+1) u32 BIG-ENDIAN absolute offsets][data].
+        //     This is `jag::Js5Group::Repack`'s output (see
+        //     re-resources/docs/cache/sqlite-disk-blob-format.md §2). Tried first: its offset table
+        //     has hard, self-validating invariants (off[0] == 4*N+5, off[N] == size).
+        //
+        //  2. The JS5 wire / GZIP-container form used by our own importer: the trailing-stripe
+        //     (chunked) layout - file data, then a size-delta table, then a 1-byte chunk count at
+        //     the very end. A leading 0x01 byte is NOT a format marker here; it is the first byte of
+        //     file data, so the disk-offset-table check below is rejected for these (its invariants
+        //     will not hold) and we fall through to the stripe reader.
+        parseDiskOffsetTable(decompressed, fileCount)?.let { return it }
         parseModernMultiFile(decompressed, fileCount)?.let { return it }
 
         return parseLegacyMultiFile(decompressed, fileCount)
+    }
+
+    /**
+     * The NXT client's on-disk group container (`jag::Js5ResourceProvider::ExtractFile`,
+     * rs2client 948-5 @ 0x100809c30): a leading `0x01` version byte, then `fileCount + 1` 4-byte
+     * big-endian ABSOLUTE offsets, then the concatenated file data. File `i` occupies
+     * `[offset[i], offset[i + 1])`.
+     *
+     * Returns null (rather than throwing) when the table is not self-consistent, so the caller can
+     * fall back to the JS5 trailing-stripe layout. The invariants `offset[0] == 4*fileCount + 5`
+     * (header size) and `offset[fileCount] == size` (data fills the buffer) make a false positive
+     * on stripe-form data effectively impossible. Authoritative format:
+     * `re-resources/docs/cache/sqlite-disk-blob-format.md` §2.
+     */
+    private fun parseDiskOffsetTable(decompressed: ByteArray, fileCount: Int): Array<ByteArray?>? {
+        // 1 version byte + (fileCount + 1) * 4 offset bytes.
+        val headerSize = 1 + (fileCount + 1) * 4
+        if (decompressed.size < headerSize) return null
+        if ((decompressed[0].toInt() and 0xFF) != 1) return null
+
+        val reader = BufferReader(decompressed)
+        reader.readByte() // version byte (0x01)
+        val offsets = IntArray(fileCount + 1) { reader.readInt() } // 4-byte big-endian absolute offsets
+
+        // off[0] is the data-region start (= header size); offsets are non-decreasing; the terminal
+        // entry is exactly the buffer length. Any deviation means this is not the disk container.
+        if (offsets[0] != headerSize) return null
+        for (i in 1..fileCount) {
+            if (offsets[i] < offsets[i - 1]) return null
+        }
+        if (offsets[fileCount] != decompressed.size) return null
+
+        return Array(fileCount) { i ->
+            val size = offsets[i + 1] - offsets[i]
+            val data = ByteArray(size)
+            reader.readBytes(data, 0, size)
+            data
+        }
     }
 
     /**

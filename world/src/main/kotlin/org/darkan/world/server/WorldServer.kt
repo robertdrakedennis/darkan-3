@@ -339,6 +339,10 @@ object WorldServer {
             // 0, which is the protocol "no player" sentinel.
             val player = Player(index = 0, account = account, session = session)
             val playerIndex = Players.allocate(player) { idx -> player.index = idx }
+            // Build the spawn avatar (default identitykits only — a fresh character). The worn
+            // container (94) is still sent for the equipment UI, but equipped items are NOT rendered
+            // on the avatar at spawn (that crashes the client's model loader — see applySpawnEquipment).
+            applySpawnEquipment(player)
             // From this point the slot MUST be released on any exit path — an exception
             // during init (e.g. a failed flush) would otherwise leak one of the 2048 slots
             // permanently. The single try/finally below guarantees it.
@@ -423,7 +427,10 @@ object WorldServer {
 
                 session.send(SceneFlag(0))
                 sendFirstLightTail(session, player)
-                session.send(UpdateRunenergy(1))
+                // op80 = SETFILTER_PRIVATE (private-chat filter = 1/Friends), NOT run energy.
+                // Run energy is delivered via op13 (UpdateRunenergy) in sendFirstLightTail above.
+                // (Was UpdateRunenergy(1) on op80, which actually set the chat filter — §10.4.)
+                session.send(SetFilterPrivate(1))
                 session.send(SetReadyFlag())
                 session.flush()
 
@@ -575,8 +582,21 @@ object WorldServer {
         val gpiPrefix = Op81GpiPrefix.build(spawnTile = spawn, localPlayerIndex = player.index)
         session.send(
             RebuildNormalSimple(
-                zoneX = centreZone.x,                    // +4  centre zone X (absolute, BE u16)
-                zoneZ = centreZone.y,                    // +1/+2 centre zone Z (absolute, LE u16)
+                // CENTRE-ZONE AXIS ORDER — verified BYTE-FOR-BYTE against the production op81 capture
+                // (session-20260627-044937-74364): prod sends wire+4 = spawn X-zone (east-west, 403) and
+                // wire+1 = spawn Z-zone (north-south, 402). The codec maps zoneX→wire+4 and zoneZ→wire+1, so
+                // zoneX = centreZone.x and zoneZ = centreZone.y reproduce prod exactly.
+                //
+                // The earlier "axis-transposition fix" (zoneX=centreZone.y / zoneZ=centreZone.x) was WRONG:
+                // it transposed our centre zone vs prod (we shipped +4=402 / +1=403), centring the render
+                // scene one zone off-diagonal from the avatar. Per the binary trace, that mismatch leaves the
+                // avatar's map-square scene-resource group never-ready, so the per-tick async-load gate in
+                // ProcessPendingAppearance @0x10002ba20 (→ SceneLoadRegistry::IsResourceGroupReady @0x1003de570)
+                // never fires ComposeAppearanceModel and render_model (avatar+0xC58) stays null (INVISIBLE
+                // avatar), while the camera anchors off the avatar (sustained DRIFT). The build-area corners
+                // (packedCoordA/B) already matched prod exactly; ONLY this centre-zone order was off.
+                zoneX = centreZone.x,                    // +4 = centreZoneX (east-west) — matches prod (403)
+                zoneZ = centreZone.y,                    // +1/+2 = centreZoneZ (north-south) — matches prod (402)
                 packedCoordA = buildArea.packedCoordA,   // +10 SW corner {minRegionX, minRegionZ}
                 packedCoordB = buildArea.packedCoordB,   // +14 NE corner {maxRegionX, maxRegionZ}
                 cameraRotation = 7,                      // harmless (§5): op81's camera anchor is a map-config flag, not this byte. Production ships 7. Kept so the wire matches; not the render lever.
@@ -623,6 +643,46 @@ object WorldServer {
         }
     }
 
+    /**
+     * The fresh-spawn worn loadout, keyed by Body/Wearpos-def slot index (WEAPON = 3). Drives the
+     * worn-equipment CONTAINER (94 / 0x005E) shown in the equipment UI. Currently just a bronze dagger
+     * in the weapon slot (matches the prod `op85 UpdateInvFull` container 94 spawn loadout).
+     *
+     * **NOT rendered on the avatar at spawn.** A freshly-created character renders with default
+     * identitykits only (empty equipment) — exactly like RS3 character creation. Forcing an equipped
+     * item onto the avatar model at spawn is what CRASHED the client: per the binary trace
+     * (`DecodeAppearance @0x100031480` + `DecodeAppearanceEquipment @0x100032450`) our appearance BYTE
+     * block decoded PERFECTLY — the client cursor landed exactly at the emitted length, NOT an
+     * over-read — but resolving an equipped weapon's worn/wield model for the avatar pose null-derefs
+     * in the model-attach path (`(**(*def + 0x40))(def, itemId, 0)` + avatar assembly
+     * `FUN_10039dee0`/`FUN_100033260`). Equipped-item avatar rendering is deferred until the
+     * worn-model attach is validated (a feature separate from this spawn-avatar task). The container
+     * UI is unaffected.
+     */
+    private val spawnWornEquipment: Map<Int, Int> = mapOf(
+        Player.EQUIP_SLOT_WEAPON to 1205, // bronze_dagger (UI container only — see above)
+    )
+
+    /** Number of worn-container slots (94 / 0x005E) the spawn UpdateInvFull writes. */
+    private val WORN_CONTAINER_SLOTS = 4
+
+    /**
+     * Build the player's spawn appearance. We DELIBERATELY do NOT push [spawnWornEquipment] onto the
+     * avatar (see the field doc) — a fresh character renders with default kits only, so the avatar
+     * model loader only ever attaches body identitykits, never an equipped item's worn model. The
+     * cached appearance built at Player construction (default kits, empty equipment) is what ships.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    private fun applySpawnEquipment(player: Player) {
+        player.appearance.ensureCachedBytes()
+    }
+
+    /** Build the worn-equipment container (94) entries from [spawnWornEquipment]. */
+    private fun wornContainerEntries(): List<InventoryEntry> =
+        (0 until WORN_CONTAINER_SLOTS).map { slot ->
+            InventoryEntry(itemId = spawnWornEquipment[slot] ?: -1, quantity = if (spawnWornEquipment.containsKey(slot)) 1 else 0)
+        }
+
     private suspend fun sendInitialInventories(session: GameSession) {
         session.send(UpdateInvFull(inventoryId = 0x0313))
         session.send(
@@ -636,19 +696,14 @@ object WorldServer {
             UpdateInvFull(
                 inventoryId = 0x005D,
                 flags = 0x2,
-                entries = listOf(InventoryEntry(itemId = 0x013B, quantity = 1, metadata = 0)),
+                entries = listOf(InventoryEntry(itemId = 0x013B, quantity = 1)),
             )
         )
         session.send(
             UpdateInvFull(
-                inventoryId = 0x005E,
+                inventoryId = 0x005E, // 94 / worn
                 flags = 0x2,
-                entries = listOf(
-                    InventoryEntry(itemId = -1, quantity = 0, metadata = 0),
-                    InventoryEntry(itemId = -1, quantity = 0, metadata = 0),
-                    InventoryEntry(itemId = -1, quantity = 0, metadata = 0),
-                    InventoryEntry(itemId = 0x04B5, quantity = 1, metadata = 0),
-                ),
+                entries = wornContainerEntries(),
             )
         )
         session.send(UpdateInvFull(inventoryId = 0x026F))
@@ -677,8 +732,9 @@ object WorldServer {
         session.send(ClearPendingUpdates())
         session.send(NpcInfoBuilder.buildInit(player))
         sendInitialStats(session)
-        session.send(SetPlayerOp2(0))
-        session.send(SetPlayerOp3(100))
+        session.send(UpdateRunWeight(0))
+        // Run energy via op13 (UPDATE_RUNENERGY), g1 0..100 — full bar. (op80 is the chat filter; §10.4.)
+        session.send(UpdateRunenergy(100))
         session.send(ResetEntityLists())
         session.send(SetMultiwayState(0))
         session.send(ClanChannelFull(main = true))

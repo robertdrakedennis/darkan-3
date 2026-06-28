@@ -138,24 +138,24 @@ internal fun Codec.registerRev948ServerCodecsSocial() {
         out.writeByte(filter)
     }
 
-    // SET_PLAYER_OP (op 17 / 0x11, varByte). Opcode VERIFIED via RegisterAll: entry 0x015c0f00 =
-    // InitEntry(opcode=0x11=17, size=-1=VarByte). Handler Misc::SET_PLAYER_OP @ 0x0013eec0, bound
-    // by PlayerList::BindHandlers @ 0x000ab3ea.
+    // SET_PLAYER_OP (op 17 / 0x11, varByte). Opcode verified via current descriptor 0x100f0f630:
+    // InitEntry(opcode=0x11=17, size=-1=VarByte). Handler
+    // jag::packethandlers::PlayerInfo::SET_PLAYER_OP_OP17 @ 0x1000444a0.
     // NOTE: a SEPARATE handler PlayerGroup::PLAYER_OP @ 0x001869f0 lives at op 0x17=23 (VarShort) —
     // do not confuse the two; this codec targets op 17.
     //
-    // 948 wire (re-derived from 0x0013eec0 disassembly — CORRECTED field order + slot transform):
-    //   [0..1] LE u16 worldId (0xFFFF -> -1 "current world")
+    // 948 wire (re-derived from 0x1000444a0 disassembly — corrected field order + slot transform):
+    //   [0..1] LE u16 cursor (0xFFFF -> -1)
     //   [2]    byte slot: client computes slotIndex = ((-rawByte) & 0xFF) - 1, range 0..7.
     //          Server emits writeByteInverse(slot + 1) so that -(slot+1) decodes back to slotIndex.
     //   [3..]  CP1252 string text  (read AFTER the slot byte — order differs from prior pass)
-    //   [end]  byte cursorVisible: client sets visible = (rawByte == 0).
+    //   [end]  byte priority flag: client sets priority = (rawByte == 0).
     // The prior codec wrote string BEFORE the slot byte and used byteSubtract — both wrong.
     serverProt<SetPlayerOp>(opcode = 17, size = ProtSize.VarByte) { out ->
-        out.writeShortLittle(0xFFFF)             // worldId: -1 = current world
+        out.writeShortLittle(0xFFFF)             // cursor: -1
         out.writeByteInverse(slot + 1)           // client: ((-b)&0xFF)-1 == slot
         out.writeRSString(text ?: "null")
-        out.writeByte(if (priority) 0 else 1)    // client visible = (byte == 0)
+        out.writeByte(if (priority) 0 else 1)    // client priority = (byte == 0)
     }
 
     // HASHED_WORLD_TOKEN is registered in Rev948ServerCodecsMisc at op 54; production login

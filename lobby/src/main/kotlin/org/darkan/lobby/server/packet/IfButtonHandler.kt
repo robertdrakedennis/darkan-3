@@ -13,12 +13,14 @@ import org.darkan.lobby.LobbyState
  * Handles IfButton clicks in the lobby UI (IF_BUTTON1..7/10, the size-8 interface-CLICK family —
  * 948 ops 127/103/92/45/30/68/43/21). Consumes + logs every click at INFO.
  *
- * Only the lobby "Play Now" click (interface 906, component 81, buttonId 1 — see [isPlayNowClick])
- * initiates a lobby->world transfer via op213 SWITCH_WORLD. All other clicks — world-row Select
- * hotspots (e.g. 906/32, 906/3), tabs (friends/ignore), news entries, settings — are client-side
- * navigation and are only logged; they must NOT log the player into a world. This is the
- * verified-rendering handoff model (see claude-re/findings/33-lobby.md,
- * claude-re/findings/02-world-s2c-sequence.md).
+ * The lobby "Play Now" click (interface 906, component 81, buttonId 1 — see [isPlayNowClick]) is, by
+ * default, LOGGED ONLY: the client drives the lobby->world handoff itself from the login-data world
+ * tail (LoginServer.buildLobbyData) and renders the "Joining World / Please Wait" dialog via its own
+ * LOBBY_ENTERGAME flow — matching PROD, which never sends op212/op213. The legacy op213 SWITCH_WORLD
+ * push (which bypasses that dialog by driving WorldSwitcher / MAIN_STATE 0x25 directly) is gated
+ * behind [EnvVars.lobbyPushWorldSwitch] (LOBBY_PUSH_WORLD_SWITCH=true). All other clicks — world-row
+ * Select hotspots (e.g. 906/32, 906/3), tabs (friends/ignore), news entries, settings — are
+ * client-side navigation and are only logged; they must NOT log the player into a world.
  */
 class IfButtonHandler : PacketHandler<GameSession, IfButton> {
     override suspend fun handle(player: GameSession, packet: IfButton) {
@@ -48,6 +50,16 @@ class MacOsLobbyHandoffHandler : PacketHandler<GameSession, MacOsLobbyHandoff> {
 }
 
 private suspend fun GameSession.sendWorldSwitch(source: String) {
+    if (!EnvVars.lobbyPushWorldSwitch) {
+        // PROD-like cold-lobby handoff (default): do NOT push op213 SwitchWorld. The client drives the
+        // world connect itself from the login-data world tail (LoginServer.buildLobbyData #26-31) and
+        // renders the "Joining World N / Please Wait" dialog via its own LOBBY_ENTERGAME flow
+        // (script3062 -> script10210 -> script3093). PROD never sends op212/op213; pushing op213 sets
+        // MAIN_STATE 0x25 and opens the world socket directly through WorldSwitcher, BYPASSING that
+        // dialog loop -> the dialog never renders. Set LOBBY_PUSH_WORLD_SWITCH=true to restore the push.
+        logInfo("$source from $ip; client-driven handoff via login-data tail (op213 push disabled — renders 'Joining World' dialog)")
+        return
+    }
     if (lobbyWorldSwitchSent) {
         logInfo("$source from $ip ignored; world switch already sent")
         return

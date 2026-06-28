@@ -12,7 +12,7 @@ import org.darkan.core.net.prot.update.UpdateMask
  * [Rev948PlayerUpdateMaskKey] / [Rev948NpcUpdateMaskKey].
  *
  * **948 ext-info wire format — the "scrambled" mode is a FIXED client-side `.rodata` table,
- * NOT a wire-transmitted mode byte (CORRECTED — see `docs/protocol/player-appearance-948.md` §1/§6).**
+ * NOT a wire-transmitted mode byte (CORRECTED — see `re-resources/docs/net/serverprot/player-appearance-948.md` §1/§6).**
  * The earlier model below ("server emits `writeByte(0)` mode 0 then the plain value") was WRONG.
  * `ProcessExtendedInfo @0x0015e290` (948-5) drives each scrambled read from a per-block offset into
  * the client's read-only `.rodata` table at `@0x00cb6a80` (block `.rodata` r=true **w=false** — it
@@ -49,7 +49,7 @@ internal fun registerRev948ServerCodecsUpdateMasks() {
 
 /**
  * LEGACY mode-prefix scrambled-scalar helpers — emit a `writeByte(0)` mode selector then the plain
- * BE value. **These are WRONG per `docs/protocol/player-appearance-948.md` §6** (the mode is a fixed
+ * BE value. **These are WRONG per `re-resources/docs/net/serverprot/player-appearance-948.md` §6** (the mode is a fixed
  * `.rodata` table, not on the wire) but are kept for the not-yet-emitted blocks below to keep this
  * change surgical to APPEARANCE. Do NOT use these for any block that actually ships — re-point at the
  * block's `table[base + fieldIndex]` transform first. See the file-level doc.
@@ -67,7 +67,7 @@ private fun world.gregs.voidps.buffer.write.BufferWriter.sMedium(value: Int) {
 }
 
 /**
- * Ext-info APPEARANCE framing transforms (`docs/protocol/player-appearance-948.md` §1.2), exposed
+ * Ext-info APPEARANCE framing transforms (`re-resources/docs/net/serverprot/player-appearance-948.md` §1.2), exposed
  * `internal` so [Rev948ExtInfoTransforms] / unit tests can assert them against the doc table.
  *
  * The client reads the appearance entry as `[length: mode 3][body: mode 2 over the whole run]`,
@@ -96,13 +96,13 @@ internal object Rev948ExtInfoTransforms {
 // ---------------------------------------------------------------------------
 
 private fun registerPlayerMaskEncoders() {
-    // APPEARANCE (bit 3, order 4). Wire (docs/protocol/player-appearance-948.md §1.2):
+    // APPEARANCE (bit 3, order 4). Wire (player-appearance-948.md "Ext-info framing"):
     //   [length byte]  mode 3 scalar = (-0x80 - L) & 0xFF   (NOT a writeByte(0)+len mode prefix)
     //   [L body bytes] mode 2 buffer = each payload byte (b + 0x80) & 0xFF, forward
     // The mode selectors are read from the client's fixed `.rodata` table (base 0xcb6ac0:
     // table[0]=3 length, table[1]=2 body), NOT from the wire. [UpdateMask.Appearance.data] is the
-    // PLAIN appearance payload (built by PlayerAppearanceEncoder per §2/§3); the framing transform
-    // is applied here once over the whole block.
+    // PLAIN appearance payload (built by PlayerAppearanceEncoder per the doc's field table); the
+    // framing transform is applied here once over the whole block.
     PlayerUpdateMaskEncoder.register(Rev948PlayerUpdateMaskKey.APPEARANCE) { mask ->
         Rev948ExtInfoTransforms.write(this, (mask as UpdateMask.Appearance).data)
     }

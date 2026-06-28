@@ -40,6 +40,23 @@ object PlayerInfoBuilder {
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
 
     /**
+     * Runs one GPI pass inside its OWN bit-access window so the pass's bits are byte-aligned. The NXT
+     * client (`S2C_PLAYER_INFO_OP22 @0x100043500`) rounds the player-info bit cursor UP to the next byte
+     * (`ceil(bp/8)×8`) at every one of the 4 pass boundaries (RE-verified instruction-level
+     * @0x10004363f / 0x100043732 / 0x100043854 / 0x100043938), so each pass MUST begin on a byte boundary.
+     * Packing more than one pass into a byte (the old `c7 ff 40`) made the client read the local entry's
+     * bits, round up, DISCARD that byte's trailing bits — where our skip-run began — and resume the next
+     * pass mid-skip-run → bit-cursor desync → the ext-info drain reads the appearance at the wrong byte →
+     * no `PlayerAppearancePending` constructed → no avatar model. With a zeroed BufferWriter the pad bits
+     * are 0 (the client discards them anyway). Live-verified: solo-spawn bit-block `c7 ff 40` → `c0 7f f4`.
+     */
+    private inline fun byteAlignPass(out: BufferWriter, pass: () -> Unit) {
+        out.startBitAccess()
+        pass()
+        out.stopBitAccess()
+    }
+
+    /**
      * First-tick GPI init form — **generated from local state**, Shape A per
      * `docs/protocol/world-bootstrap-948.md` §0/§4.3/§5. This is the ONLY GPI on the first tick
      * (op81 ships no prefix), so it must be a coherent standalone `ProcessPlayerInfo @0x001618a0`
@@ -61,15 +78,13 @@ object PlayerInfoBuilder {
      * written (the doc §1.3/§8 explicitly warns the prefix is NOT a flat 2047×18-bit array — and
      * Shape A's standalone init sidesteps that bit layout entirely while no other players exist).
      *
-     * **APPEARANCE ext-info:** emitted (with its 2-byte length prefix, added by the op22 codec) ONLY
-     * when the local player has a real pre-built appearance blob ([Appearance.cachedBytes]). The
-     * appearance PAYLOAD byte format (what goes inside [UpdateMask.Appearance.data], read by the
-     * client's `QueueExtendedInfoPacket`) is NOT documented and is cache-coupled, so we never
-     * fabricate it — if there is no real blob we set `hasExtendedInfo=0` for the local player and the
-     * avatar renders with a placeholder appearance. Per §0 the appearance is NOT the quit driver
-     * (coordinate coherence + single-GPI is); a placeholder avatar keeps the client alive. When a
-     * real appearance builder lands upstream, populating `cachedBytes` automatically lights up the
-     * block here with no further change.
+     * **APPEARANCE ext-info:** emitted (with its 2-byte length prefix, added by the op22 codec) from
+     * the local player's real pre-built appearance blob ([Appearance.cachedBytes]). The appearance
+     * PAYLOAD byte format is now byte-verified against the binary
+     * (`re-resources/docs/net/serverprot/player-appearance-948.md`) and built by
+     * [org.darkan.world.entity.Appearance] from gender + default identitykits + worn equipment. The
+     * blob is always present (the Player ctor builds it), so the local player always carries a real
+     * avatar at scene load.
      *
      * `viewport.firstTick` is set to `false`.
      */
@@ -78,22 +93,19 @@ object PlayerInfoBuilder {
         viewport.firstTick = false
 
         val bitOut = BufferWriter(TICK_BUFFER_CAPACITY)
-        bitOut.startBitAccess()
-
         // Players flagged hasExtendedInfo this tick, in cohort processing order. The local player
         // is appended first when its appearance block is available.
         val flaggedForExtInfo = ArrayList<Int>(8)
 
-        // Pass 1: HIGH-RES ACTIVE — the local player (slot 0) takes the absolute-tile init path;
-        // any other high-res actives (none on first light) fall back to the per-tick high-res path.
-        encodeHighResInitPass(bitOut, player, viewport.highResIndices, activeFilter = true, flaggedForExtInfo)
+        // BYTE-ALIGN each pass — the client byte-aligns the player-info bit cursor at every pass boundary
+        // (see [byteAlignPass]). Pass 1: HIGH-RES ACTIVE — the local player (slot 0) takes the absolute-tile
+        // init path; any other high-res actives (none on first light) fall back to the per-tick high-res path.
+        byteAlignPass(bitOut) { encodeHighResInitPass(bitOut, player, viewport.highResIndices, activeFilter = true, flaggedForExtInfo) }
         // Pass 2: HIGH-RES INACTIVE.
-        encodeHighResInitPass(bitOut, player, viewport.highResIndices, activeFilter = false, flaggedForExtInfo)
+        byteAlignPass(bitOut) { encodeHighResInitPass(bitOut, player, viewport.highResIndices, activeFilter = false, flaggedForExtInfo) }
         // Pass 3 & 4: LOW-RES (empty on first light — no other players in viewport yet).
-        encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = true, flaggedForExtInfo)
-        encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = false, flaggedForExtInfo)
-
-        bitOut.stopBitAccess()
+        byteAlignPass(bitOut) { encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = true, flaggedForExtInfo) }
+        byteAlignPass(bitOut) { encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = false, flaggedForExtInfo) }
 
         // Record the appearance we sent so the per-tick path won't re-emit it next tick.
         val cached = player.appearance.cachedBytes
@@ -172,12 +184,45 @@ object PlayerInfoBuilder {
         }
     }
 
-    fun buildIfNeeded(player: Player): PlayerInfo? {
-        if (player.viewport.firstTick) return buildInit(player)
-        return if (hasTickUpdate(player)) build(player) else null
+    /**
+     * Per-tick PLAYER_INFO emitter for the world tick loop. Returns the op22 to send THIS tick.
+     *
+     * **Always emits (never null) once past the first tick — the "idle loop" prod sends.** This is
+     * the BUG-1 fix: the NXT client's local-player avatar is a smoothing/interpolating
+     * `PathingEntity` whose per-frame position integrator is advanced+committed by the per-tick
+     * `ProcessPlayerInfo` (the op22 handler `S2C_PLAYER_INFO_OP22 @0x100043500` → its high-res pass
+     * over the local slot). With NO op22 arriving each tick the integrator runs **open-loop** and
+     * the avatar's `graphNode` scene-fine position creeps (capture
+     * `session-20260627-231803-41562-local`: a stationary spawn drifts ~0.12 tiles/tick south,
+     * x held — y 3216→3181 over the session). Production sends an op22 EVERY game tick
+     * (`docs/kb/services/world-stream-service.md`: "rebuild/zone load before PlayerInfo/NpcInfo idle
+     * loop"; 13 op22 in `…-production` vs our 1) — the steady-state form being the **stationary
+     * hold** `[hasUpdate=0][skip-run]` (decoded from prod: `hasUpdate=0, skipMode=1`). That per-tick
+     * decode re-commits the avatar each tick and pins it to its tile.
+     *
+     * So when nothing changed we still emit [build]'s stationary-hold body (local player
+     * `hasUpdate=0, skipMode=0`, then the low-res cohort skip-run) instead of returning null. The
+     * op81 GPI prefix already placed the local 30-bit tile == `player.tile` (verified coherent with
+     * the op81 coord-header centre zone); this idle loop keeps the avatar THERE.
+     *
+     * The first tick is still routed through [buildInit] for the un-suppressed `firstTick` path
+     * (world entry suppresses it via [buildWorldEntrySync], which sets `firstTick=false`).
+     */
+    fun buildIfNeeded(player: Player): PlayerInfo = when {
+        player.viewport.firstTick -> buildInit(player)
+        else -> build(player)
     }
 
     fun buildWorldEntrySync(player: Player): PlayerInfo {
+        // NOTE (2026-06-28): a movementType=3 TELEPORT delivery of the local appearance was tried and
+        // REVERTED. The LOCAL player is architecturally excluded from the op22 ext-info APPEARANCE path
+        // (RE: DecodeGpiPrefix excludes the local slot from the high-res ext-info walk list;
+        // DecodeKnownPlayerUpdate@0x100025640 idle-returns the local slot), so the appearance never decoded
+        // (current_appearance/avatar+0x12A0 stayed 0x0) AND the teleport's longer bit-block + the unconsumed
+        // local ext-info block regressed the render plane (0→3, avatar floated above the ground). The
+        // prod-accurate fix is to deliver the local appearance INLINE in the GPI add (slotObj+0x48 →
+        // DecodeExternalPlayerUpdate@0x1000266e0 → immediate compose) — pending RE of the exact wire format
+        // (op22 idle ext-info is kept here only as the prior baseline). See memory: avatar-render-next-steps.
         player.appearance.ensureCachedBytes()
         player.viewport.firstTick = false
         return build(player)
@@ -198,23 +243,24 @@ object PlayerInfoBuilder {
     fun build(player: Player): PlayerInfo {
         val viewport = player.viewport
         val bitOut = BufferWriter(TICK_BUFFER_CAPACITY)
-        bitOut.startBitAccess()
-
         // Tracks player indices flagged hasExtendedInfo this tick, in cohort processing order.
         // Per A4 §"Extended-info dispatch" the ext-info blocks are emitted in the order the
         // hasExtendedInfo bits fired.
         val flaggedForExtInfo = ArrayList<Int>(8)
 
+        // BYTE-ALIGN each of the 4 passes: the NXT client rounds the player-info bit cursor up to a byte at
+        // EVERY pass boundary (see [byteAlignPass]). Packing >1 pass into a byte (the old `c7 ff 40`) made the
+        // client discard the local entry's trailing byte-bits — where our skip-run began — and resume the
+        // next pass mid-skip-run → bit desync → the ext-info drain read the appearance at the wrong byte → no
+        // PlayerAppearancePending → no avatar model. RE-verified; solo-spawn bit-block is now `c0 7f f4`.
         // Pass 1: HIGH-RES ACTIVE — players where active == true.
-        encodeHighResPass(bitOut, player, viewport.highResIndices, activeFilter = true, flaggedForExtInfo)
+        byteAlignPass(bitOut) { encodeHighResPass(bitOut, player, viewport.highResIndices, activeFilter = true, flaggedForExtInfo) }
         // Pass 2: HIGH-RES INACTIVE — players where active == false.
-        encodeHighResPass(bitOut, player, viewport.highResIndices, activeFilter = false, flaggedForExtInfo)
+        byteAlignPass(bitOut) { encodeHighResPass(bitOut, player, viewport.highResIndices, activeFilter = false, flaggedForExtInfo) }
         // Pass 3: LOW-RES ACTIVE — players where active == true.
-        encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = true, flaggedForExtInfo)
+        byteAlignPass(bitOut) { encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = true, flaggedForExtInfo) }
         // Pass 4: LOW-RES INACTIVE — players where active == false.
-        encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = false, flaggedForExtInfo)
-
-        bitOut.stopBitAccess()
+        byteAlignPass(bitOut) { encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = false, flaggedForExtInfo) }
 
         // Build ext-info blocks per flagged player.
         val extendedInfo = ArrayList<ByteArray>(flaggedForExtInfo.size)
@@ -488,26 +534,6 @@ object PlayerInfoBuilder {
             return true
         }
         return false
-    }
-
-    private fun hasTickUpdate(viewer: Player): Boolean {
-        val viewport = viewer.viewport
-        for (slot in viewport.highResIndices) {
-            val target = Players.get(slot) ?: continue
-            if (hasQueuedUpdateOrUndeliveredAppearance(viewer, target)) return true
-        }
-        for (slot in viewport.lowResIndices) {
-            val target = Players.get(slot) ?: continue
-            if (hasQueuedUpdateOrUndeliveredAppearance(viewer, target)) return true
-        }
-        return false
-    }
-
-    private fun hasQueuedUpdateOrUndeliveredAppearance(viewer: Player, target: Player): Boolean {
-        if (target.pendingUpdates.hasPlayerUpdates()) return true
-        val cached = target.appearance.cachedBytes ?: return false
-        val viewerHashes = viewer.viewport.cachedApprHashes
-        return target.index in viewerHashes.indices && viewerHashes[target.index] == null
     }
 
     /**

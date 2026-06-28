@@ -125,19 +125,51 @@ class DecompressionContext : AutoCloseable {
         }
     }
 
+    /**
+     * Decodes the NXT client's on-disk group blob (`jag::Js5DiskCache::DecodeStoredBlob`,
+     * rs2client 948-5 @ 0x100808e00). The client wraps every group it writes to its own
+     * `js5-N.jcache` SQLite cache in a ZLB header followed by a complete RFC1950 zlib stream:
+     *
+     * ```
+     * offset 0: [3] magic 'Z' 'L' 'B'  (0x5A 0x4C 0x42)
+     * offset 3: [1] version            (0x01)
+     * offset 4: [4] uncompressedSize   (u32 BIG-ENDIAN)
+     * offset 8: [N] zlib stream        (0x78 0x9C … + 4-byte adler32; no extra trailer)
+     * ```
+     *
+     * The previous implementation read the size at offset 3 (consuming the version byte as the
+     * high byte), yielding a ~16 MB bogus size and an all-zero buffer — which then made every
+     * multi-file group split into empty files. The size is BIG-ENDIAN and sits at offset 4, after
+     * the version byte; the deflate stream begins at offset 8.
+     *
+     * Authoritative format: `re-resources/docs/cache/sqlite-disk-blob-format.md` §1.
+     */
     private fun decompressZlib(data: ByteArray): ByteArray? {
-        // ZLB format: 3-byte magic + 4-byte decompressed size + 1-byte unknown + deflate data
+        if (data.size <= ZLB_HEADER) {
+            logWarn("ZLB blob too small: ${data.size} bytes.")
+            return null
+        }
         val buffer = BufferReader(data)
-        buffer.skip(3) // skip ZLB magic
-        val decompressedSize = buffer.readInt()
-        buffer.skip(1) // skip unknown byte
-        val offset = buffer.position()
+        buffer.skip(3) // 'Z' 'L' 'B'
+        buffer.skip(1) // version byte (0x01)
+        val decompressedSize = buffer.readInt() // u32 big-endian
+        val offset = ZLB_HEADER // zlib stream starts at offset 8
         return try {
             val decompressed = ByteArray(decompressedSize)
             val inflater = Inflater()
             inflater.setInput(data, offset, data.size - offset)
-            inflater.inflate(decompressed)
+            var count = 0
+            while (count < decompressedSize && !inflater.finished()) {
+                val inflated = inflater.inflate(decompressed, count, decompressedSize - count)
+                if (inflated == 0) {
+                    break
+                }
+                count += inflated
+            }
             inflater.end()
+            if (count != decompressedSize) {
+                logWarn("ZLB size mismatch: expected $decompressedSize bytes, inflated $count.")
+            }
             decompressed
         } catch (e: Exception) {
             logWarn("Error decompressing ZLIB data.")
@@ -150,6 +182,9 @@ class DecompressionContext : AutoCloseable {
         private const val BZIP2 = 1
         private const val GZIP = 2
         private const val LZMA = 3
+
+        /** ZLB on-disk blob header size: 3 (magic) + 1 (version) + 4 (BE uncompressed size). */
+        private const val ZLB_HEADER = 8
         private val warned = AtomicBoolean()
     }
 }

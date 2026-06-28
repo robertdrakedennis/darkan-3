@@ -115,7 +115,7 @@ data class IfSetModel(val value: Int, val componentHash: Int) : ServerProt
 /** IF_SETANIM_ACTIVE — rev948 op 96, 4B. */
 data class IfSetAnimActive(val componentHash: Int) : ServerProt
 
-/** IF_SETNPCHEAD — rev948 op 115, 10B. */
+/** IF_SET_COMPONENT_PROPERTY_TYPE7 — rev948 op 115, 10B. Legacy class name kept for API stability. */
 data class IfSetNpcHead(val scale: Int, val componentHash: Int, val partA: Int, val partB: Int) : ServerProt
 
 /** IF_SETOBJECT — rev948 op 84, 10B. */
@@ -302,9 +302,7 @@ data class MidiSong(val payload: ByteArray) : ServerProt {
 
 data class SetNpcOp(val text: String? = null, val cursor: Int = -1) : ServerProt
 
-data class SetPlayerOp2(val value: Int) : ServerProt
-
-data class SetPlayerOp3(val value: Int) : ServerProt
+data class UpdateRunWeight(val value: Int) : ServerProt
 
 data class PlayerInfoDecode(val slot: Int, val mode: Int = 0) : ServerProt {
     init {
@@ -448,7 +446,13 @@ data class NpcInfoThunk(
     }
 }
 
-data class InventoryEntry(val itemId: Int, val quantity: Int, val metadata: Int = 0)
+data class InventoryItemParam(val key: Int, val value: Int)
+
+data class InventoryEntry(
+    val itemId: Int,
+    val quantity: Int,
+    val params: List<InventoryItemParam> = emptyList(),
+)
 
 data class UpdateInvFull(
     val inventoryId: Int,
@@ -456,7 +460,39 @@ data class UpdateInvFull(
     val entries: List<InventoryEntry> = emptyList(),
 ) : ServerProt
 
+data class InventoryPartialEntry(
+    val slot: Int,
+    val itemId: Int,
+    val quantity: Int,
+    val params: List<InventoryItemParam> = emptyList(),
+)
+
+data class UpdateInvPartial(
+    val inventoryId: Int,
+    val flags: Int = 0,
+    val entries: List<InventoryPartialEntry> = emptyList(),
+) : ServerProt
+
+/**
+ * UPDATE_RUNENERGY — run energy as a single byte (g1, 0..100 RAW percentage, no scaling). The real
+ * run-energy opcode is **op 13 (0x0d)** in rev948 and **op 19** in rev947; verified in rs2client
+ * 948-5: handler `jag::packethandlers::Misc::UPDATE_RUNENERGY` (@0x1000448a0) writes the run-energy
+ * status field (status +0x18). NOTE: rev948 op 80 is NOT run energy — it is the private-chat filter
+ * [SetFilterPrivate]; binding run energy there silently flipped the chat filter. See
+ * recorder-capture-points.md §10.4.
+ */
 data class UpdateRunenergy(val energy: Int) : ServerProt
+
+/**
+ * SETFILTER_PRIVATE — rev948 op 80 (0x50), fixed 1 byte (g1). Sets the player's private-chat filter
+ * mode: {0=On, 1=Friends, 2=Off}. Verified in rs2client 948-5: handler
+ * `jag::packethandlers::Misc::SETFILTER_PRIVATE` (@0x10009f760) writes `(Client+0x19780)+0x60`.
+ * This opcode was previously mis-bound to [UpdateRunenergy] (run energy) — a real defect: the client
+ * reads run energy on op 13, so an op-80 run-energy send actually flipped the private-chat filter.
+ * (recorder-capture-points.md §10.4.) Distinct from [ChatFilterSettingsPrivateChat] (op 156,
+ * `SET_CHAT_FILTER_B`).
+ */
+data class SetFilterPrivate(val filter: Int) : ServerProt
 
 data class SetPlayerOp(val slot: Int, val text: String?, val priority: Boolean = false) : ServerProt
 
@@ -880,7 +916,13 @@ data class WorldLoginDetails(
 
 // --- World init ---
 
-/** HASHED_WORLD_TOKEN — revision-dependent world session nonce packet. */
+/**
+ * HASHED_WORLD_TOKEN — revision-dependent world session nonce packet.
+ *
+ * Rev948 binary expects op54 body as flag + cipher-subtracted string(s). The current encoder still
+ * carries the captured single-token payload until ServerProt encoders can access outbound ISAAC for
+ * payload-level ciphered bytes.
+ */
 data class HashedWorldToken(val token: String) : ServerProt
 
 /**
@@ -915,8 +957,11 @@ data class SwitchWorld(
     val pendingFlag: Int = 0,
 ) : ServerProt
 
-/** JCOINS_UPDATE — rev948 op 74, 4B. RuneCoins balance display. Value is BE int. */
+/** JCOINS_UPDATE — rev948 op 191, 4B. RuneCoins balance display. Value is BE int. */
 data class JcoinsUpdate(val balance: Int) : ServerProt
+
+/** Scene timing base — rev948 op 74, 4B. Writes SceneTargetContext+0x64 client-side. */
+data class SceneTimingBase(val value: Int) : ServerProt
 
 // === Rebuild packets (per A2) ===
 

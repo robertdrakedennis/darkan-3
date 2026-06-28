@@ -1,26 +1,11 @@
-## `FUN_00121a30` @ 00121a30
-```c
+> Superseded by `re-resources/docs/kb/`. This first-iteration note was replaced during KB rebuild so stale packet, handler, offset, or flow claims are not used as source material. Re-derive facts from live capture, Ghidra, or gamevals per `re-resources/docs/re-methodology/KNOWLEDGE_BASE_REBUILD.md`.
 
-ushort FUN_00121a30(long param_1)
+# Superseded Finding: `17-coord-reader.md`
 
-{
-  long lVar1;
-  ushort uVar2;
-  bool bVar3;
-  
-                    /* jag::Packet::gT<unsigned_short> (g2, big-endian). Reads 2 bytes at +0x10
-                       cursor, byteswaps when host is little-endian (DAT_01050dc0 == 0x3020100).
-                       Confirmed by inlined-pattern semantics. [VERIFIED rs2client.948-5
-                       @0x00121a30] */
-  lVar1 = *(long *)(param_1 + 0x18);
-  bVar3 = DAT_01050dc0 == 0x3020100;
-  *(long *)(param_1 + 0x18) = lVar1 + 2;
-  uVar2 = *(ushort *)(*(long *)(param_1 + 0x10) + lVar1);
-  if (bVar3) {
-    uVar2 = uVar2 << 8 | uVar2 >> 8;
-  }
-  return uVar2;
-}
+- original category: raw coordinate helper dump
+- contained raw decompilation/function dump: yes
+- canonical replacement: `re-resources/docs/kb/glossary/structs.md; services/world-stream-service.md; Ghidra DB`
+- old content fingerprint before replacement: `feda7cc544567b0b`
+- migration status: stale markdown body removed; function knowledge belongs in Ghidra DB, not markdown.
 
-
-```
+Do not reconstruct implementation facts from this archive stub. Use KB glossary, flow, service docs, capture evidence, and Ghidra symbols instead.

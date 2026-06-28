@@ -8,11 +8,13 @@ import world.gregs.voidps.buffer.*
  * Rev948 server encoder for NPC_INFO.
  *
  * Per `docs/net/serverprot/948-delta-from-947-3.md` §"World-Login Critical Opcode Migration":
- *  - 947-3 op 12 → **948 op 52** (varShort), handler @ 0x001d79a0 (`jag::NPCList::ProcessNpcInfo`)
+ *  - 947-3 op 12 → **948 op 52** (varShort), handler @ 0x1000adba0
+ *    (`jag::packethandlers::NpcInfo::S2C_NPC_INFO_OP52`)
  *
- * The packet wire format is byte-equivalent to 947-3 — the codec body is identical except for
- * the opcode number. The internal bit-block + 2-byte length-prefixed ext-info blocks structure
- * is the same.
+ * Current 948-5 Ghidra proof: wrapper calls `DecodeNpcInfo @ 0x100018e00`, which bit-parses
+ * existing/new NPC entries and advances `packet.pos += 2` before each `DecodeNpcExtendedInfo`
+ * call. The outer codec still writes pre-built bit blocks followed by 2-byte length-prefixed
+ * ext-info blocks.
  *
  * **NOTE on ext-info bit positions:** the per-NPC ext-info block bit positions and dispatch
  * order are different in 948 (see [Rev948NpcUpdateMaskKey]). The world-side builder reads from

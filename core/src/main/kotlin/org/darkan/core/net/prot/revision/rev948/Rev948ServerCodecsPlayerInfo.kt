@@ -8,11 +8,12 @@ import world.gregs.voidps.buffer.*
  * Rev948 server encoder for PLAYER_INFO.
  *
  * Per `docs/net/serverprot/948-delta-from-947-3.md` §"World-Login Critical Opcode Migration":
- *  - 947-3 op 27 → **948 op 22** (varShort), handler @ 0x00161720 (`jag::PlayerList::ProcessPlayerInfo`)
+ *  - 947-3 op 27 → **948 op 22** (varShort), handler @ 0x100043500
+ *    (`jag::packethandlers::PlayerInfo::S2C_PLAYER_INFO_OP22`)
  *
- * The packet wire format is byte-equivalent to 947-3 — the codec body is identical except for
- * the opcode number. The internal bit-block + 2-byte length-prefixed ext-info blocks structure
- * is the same.
+ * Current 948-5 Ghidra proof: four bit-packed player-list passes, then the handler advances
+ * `packet.pos += 2` before each `DecodePlayerExtendedInfo` call. The outer codec still writes
+ * pre-built bit blocks followed by 2-byte length-prefixed ext-info blocks.
  *
  * **NOTE on ext-info bit positions:** the bit positions inside each player's ext-info block
  * DID change in 948 — the world-side builder in `world.../PlayerInfoBuilder.kt` reads from

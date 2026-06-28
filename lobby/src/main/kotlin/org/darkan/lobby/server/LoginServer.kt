@@ -353,6 +353,14 @@ class LoginServer {
         vars.setVar(VARP_TREASURY_TIMESTAMP, 8792)     // treasury/notification timestamp
         vars.setVar(VARP_MEMBERSHIP_NOTIF_1, 1)        // membership notification flag
         // varp 6681 = membership comparison value (only needed if 6680 is set)
+        // BLANK-LOBBY FIX: varp 1754 (lobbyscreen_randomly_selected_account) gates the entire lobby
+        // OnLoad. The lobby root script3057 arms IF_SETONTIMER(callback(script6347, varp1754), comp(906,0));
+        // script6347 (clientscript-6347.ts:8) bails unless varp1754 != 0 — so lobbyscreen_load ->
+        // script3060(0) (select the default "Updates" tab) -> news layout (script10941) NEVER runs and
+        // the panel stays blank. Live Jagex sends 1754 = -218 (recorder login plane, op61 VarpSmall);
+        // any non-zero satisfies the gate, value is prod-exact. (-218 < -128 so it serializes as
+        // VarpLarge here, which the client maps to the same PlayerVarDomain::set — value-correct.)
+        vars.setVar(VARP_LOBBY_SCREEN_SELECTED, -218)
         vars.syncAllToClient()
         logTrace("Sent lobby varps to ${session.ip}")
 
@@ -438,7 +446,10 @@ class LoginServer {
         session.send(RunClientScript.of(SCRIPT_LOBBY_NEWS_END))
 
         // 9. Lobby refresh before social/worldlist.
-        session.send(UpdateRunenergy(1))
+        // op80 = SETFILTER_PRIVATE (private-chat filter = 1/Friends), NOT run energy — the captured
+        // op80=0x01 here is the chat-filter init the client expects, not a run-energy update.
+        // (Was UpdateRunenergy(1) on op80; run energy is op13. See recorder-capture-points.md §10.4.)
+        session.send(SetFilterPrivate(1))
         session.send(SetReadyFlag())
         session.send(ChangeLobby())
         session.send(NoopVarA())
@@ -563,6 +574,7 @@ class LoginServer {
         private const val VARP_CHAT_STATE = 3185           // chat state machine (0=default, -4=hidden)
         private const val VARP_TREASURY_TIMESTAMP = 6601   // treasury notification timestamp
         private const val VARP_MEMBERSHIP_NOTIF_1 = 6679   // membership notification flag 1
+        private const val VARP_LOBBY_SCREEN_SELECTED = 1754 // lobbyscreen_randomly_selected_account — MUST be non-zero or the lobby OnLoad (Updates tab + news) never runs; prod sends -218
 
         // --- Lobby-relevant varc IDs (from CS2 script cross-reference) ---
         private const val VARC_INBOX_STATE = 1027          // inbox/notification state (-1=none)

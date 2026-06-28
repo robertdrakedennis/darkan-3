@@ -15,7 +15,6 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -112,8 +111,15 @@ class PlayerInfoBuilderInitTest {
         assertNotNull(sync, "with firstTick cleared, undelivered appearance emits per-tick op22")
         assertEquals(1, sync.extendedInfo.size)
 
-        val afterAppearance = PlayerInfoBuilder.buildIfNeeded(player)
-        assertNull(afterAppearance, "after appearance delivery, no-op tick emits no PlayerInfo")
+        // BUG-1 fix: a no-op tick still emits an op22 — the stationary "idle loop" prod sends every
+        // tick to re-commit the local avatar so a spawned, stationary player STAYS put. The body is
+        // the stationary-hold form (local hasUpdate=0) with NO ext-info (appearance already sent).
+        val idle = PlayerInfoBuilder.buildIfNeeded(player)
+        assertEquals(0, idle.extendedInfo.size, "idle tick carries no ext-info (appearance delivered)")
+        val r = BufferReader(idle.bitBlock)
+        r.startBitAccess()
+        assertEquals(0, r.readBits(1), "idle local player must be stationary (hasUpdate=0)")
+        r.stopBitAccess()
     }
 
     @Test
@@ -122,10 +128,37 @@ class PlayerInfoBuilderInitTest {
 
         val info = PlayerInfoBuilder.buildWorldEntrySync(player)
 
-        assertContentEquals(byteArrayOf(0xC7.toByte(), 0xFF.toByte(), 0x40), info.bitBlock)
+        // Baseline idle world-entry op22 (local hasUpdate=0 stationary hold + the low-res skip-run). The
+        // local appearance is NOT deliverable via this op22 (the client excludes the local slot from the
+        // ext-info path); the prod-accurate inline-GPI delivery is a pending follow-up (see PlayerInfoBuilder).
+        // Byte-aligned bit-block (the client byte-aligns the bit cursor at each pass boundary): Pass-1 local
+        // [active=1][hasExt=1][mvt=0] → 0xC0; Pass-3 low-res skip-run (2045) → 0x7F 0xF4. (Was the broken,
+        // pass-packed `c7 ff 40` that desynced the client's ext-info drain → invisible avatar.)
+        assertContentEquals(byteArrayOf(0xC0.toByte(), 0x7F, 0xF4.toByte()), info.bitBlock)
         assertEquals(1, info.extendedInfo.size)
         assertTrue(!info.firstTick)
         assertTrue(!player.viewport.firstTick)
+    }
+
+    @Test
+    fun `idle per-tick op22 is the stationary-hold form that pins the local avatar`() {
+        // BUG-1: a stationary spawned player drifted because buildIfNeeded returned null after the
+        // first tick (no op22 → the client's local-avatar smoothing integrator ran open-loop and
+        // crept). Now every idle tick emits the stationary-hold op22 prod sends. The exact bit body
+        // for a solo viewport is: local high-res [hasUpdate=0][skipMode=0] (3 bits) + the low-res
+        // active pass's single skip-run over all 2046 absent slots
+        // [lead=0][mode=3][count=2045 as 11 bits] (14 bits) = 17 bits → 3 bytes `0f fe 80`.
+        val player = newPlayer(Tile(3224, 3216, 0))
+        // Drive past world entry so firstTick is cleared and the appearance is already delivered.
+        PlayerInfoBuilder.buildWorldEntrySync(player)
+
+        val idle = PlayerInfoBuilder.buildIfNeeded(player)
+        assertEquals(0, idle.extendedInfo.size, "idle tick carries no ext-info once appearance is delivered")
+        assertContentEquals(
+            byteArrayOf(0x00, 0x7F, 0xF4.toByte()),
+            idle.bitBlock,
+            "idle op22 byte-aligned: Pass-1 local hasUpdate=0 → 0x00, Pass-3 2046-slot skip-run → 0x7F 0xF4",
+        )
     }
 
     @Test

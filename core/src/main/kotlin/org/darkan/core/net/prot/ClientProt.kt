@@ -15,6 +15,9 @@ interface ClientProt
 value class Ping(val dummy: Int = 0) : ClientProt
 
 @JvmInline
+value class AbortPDialog(val dummy: Int = 0) : ClientProt
+
+@JvmInline
 value class MapBuildComplete(val dummy: Int = 0) : ClientProt
 
 data class AntiCheatChallengeResponse(val challengeA: Int, val challengeB: Int, val sequence: Int) : ClientProt
@@ -22,6 +25,57 @@ data class AntiCheatChallengeResponse(val challengeA: Int, val challengeB: Int, 
 data class RequestWorldList(val worldlistVersion: Int) : ClientProt
 
 data class SceneGraphReport(val value: Int) : ClientProt
+
+data class CameraOrientation(val yaw: Int, val pitch: Int) : ClientProt
+
+data class NativeMouseClick(
+    val field294: Int,
+    val field28c: Int,
+    val field290: Int,
+    val clickY: Int,
+    val clickX: Int,
+) : ClientProt
+
+data class DisplayMetrics(val flags: Int, val width: Int, val height: Int, val tail: Int) : ClientProt
+
+data class ClientProfileBlock(val values: List<Int>) : ClientProt
+
+data class SceneRebuildTimingReport(val elapsedTicks: Int) : ClientProt
+
+/**
+ * Batched native input events from the client watcher. [timeDelta20] is the sender's timestamp
+ * delta divided by 20; `8191` is used by the client for an absolute/start event.
+ */
+data class ClientInputEventBatch(val events: List<ClientInputEvent>, val trailingBytes: ByteArray = byteArrayOf()) : ClientProt {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is ClientInputEventBatch) return false
+        return events == other.events && trailingBytes.contentEquals(other.trailingBytes)
+    }
+
+    override fun hashCode(): Int = 31 * events.hashCode() + trailingBytes.contentHashCode()
+}
+
+data class ClientInputEvent(
+    val encoding: ClientInputEventEncoding,
+    val coordinateMode: ClientInputCoordinateMode,
+    val timeDelta20: Int,
+    val x: Int?,
+    val y: Int?,
+)
+
+enum class ClientInputEventEncoding {
+    DELTA_SMALL,
+    DELTA_MEDIUM,
+    ABSOLUTE_SHORT_TIME,
+    ABSOLUTE_LONG_TIME,
+}
+
+enum class ClientInputCoordinateMode {
+    DELTA,
+    ABSOLUTE,
+    SENTINEL,
+}
 
 // --- Social ---
 
@@ -54,11 +108,14 @@ data class SceneGraphReport(val value: Int) : ClientProt
 /** CLANCHANNEL_KICKUSER (opcode 24, varByte) — kick a user from clan/friends channel. */
 @Serializable data class ClanChannelKickUser(val username: String) : ClientProt
 
+/** CHAT_SETFILTER (opcode 94, fixed 3) — public, private, trade chat filter modes. */
+data class ChatSetFilter(val public: Int, val private: Int, val trade: Int) : ClientProt
+
 // --- Interface ---
 
 /**
- * IF_BUTTON1..IF_BUTTON7 + IF_BUTTON10 (948: op 127/103/92/45/30/68/43/21, 8B fixed) — interface
- * component CLICK. [buttonId] is the option index (1..7, 10). interfaceHash packs the interface id
+ * IF_BUTTON1..IF_BUTTON10 (948: op 127/103/92/45/30/68/43/21/13/23, 8B fixed) — interface
+ * component CLICK. [buttonId] is the option index (1..10). interfaceHash packs the interface id
  * (ushr 16) and component id (and 0xFFFF). slotId/itemId identify the clicked sub-element.
  */
 data class IfButton(val buttonId: Int, val interfaceHash: Int, val slotId: Int, val itemId: Int) : ClientProt

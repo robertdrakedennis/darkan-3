@@ -78,7 +78,7 @@ object EnvVars {
     val worldLoginTokenTtlMs: Long = dotenv.get("WORLD_LOGIN_TOKEN_TTL_MS", "1800000").toLong()  // 30 minutes
 
     // World server identity (used by world module to register with lobby)
-    val worldId: Int = dotenv.get("WORLD_ID", "34").toInt()
+    val worldId: Int = dotenv.get("WORLD_ID", "1").toInt()
     val worldName: String = dotenv.get("WORLD_NAME", "Darkan")
     val worldHost: String = dotenv.get("WORLD_HOST", "localhost")
     val worldPublicHost: String = dotenv.get("WORLD_PUBLIC_HOST", worldHost)
@@ -90,6 +90,13 @@ object EnvVars {
     val worldLootShare: Boolean = dotenv.get("WORLD_LOOTSHARE", "false").toBooleanStrict()
     val worldCountry: String = dotenv.get("WORLD_COUNTRY", "USA")
     val worldHighlighted: Boolean = dotenv.get("WORLD_HIGHLIGHTED", "false").toBooleanStrict()
+
+    // Cold-lobby Play handoff. When FALSE (default, PROD-like) the server does NOT push op213
+    // SwitchWorld on the lobby "Play Now" click — the client drives the lobby->world connect itself
+    // from the login-data world tail and renders the "Joining World / Please Wait" dialog via its own
+    // LOBBY_ENTERGAME flow. Set TRUE to restore the legacy server-push (which bypasses that dialog by
+    // driving WorldSwitcher / MAIN_STATE 0x25 directly).
+    val lobbyPushWorldSwitch: Boolean = dotenv.get("LOBBY_PUSH_WORLD_SWITCH", "false").toBooleanStrict()
 
     // ISAAC delta: added to XTEA key ints to derive server->client cipher seed
     // VERIFIED from rs2client rev 947-1 at 0x00dcbd90 — all four values are 50

@@ -52,17 +52,86 @@ class Rev948InventoryCodecTest {
     }
 
     @Test
-    fun `inventory full metadata flag adds one byte per slot`() {
+    fun `inventory full param flag adds count and param block per slot`() {
         assertContentEquals(
             byteArrayOf(
                 0x00, 0x5D, 0x02, 0x00, 0x01,
-                0x01, 0x3C, 0x01, 0x00,
+                0x01, 0x3C, 0x01, 0x01,
+                0x00, 0x2A, 0x11, 0x22, 0x33, 0x44,
             ),
             encodeBody(
                 UpdateInvFull(
                     inventoryId = 0x005D,
                     flags = 0x2,
-                    entries = listOf(InventoryEntry(itemId = 0x013B, quantity = 1)),
+                    entries = listOf(
+                        InventoryEntry(
+                            itemId = 0x013B,
+                            quantity = 1,
+                            params = listOf(InventoryItemParam(key = 0x002A, value = 0x11223344)),
+                        )
+                    ),
+                )
+            ),
+        )
+    }
+
+    @Test
+    fun `inventory partial packet matches captured premium-currency update`() {
+        val entry = codec.serverProts[UpdateInvPartial::class] ?: error("missing UpdateInvPartial")
+
+        assertEquals(121, entry.opcode)
+        assertEquals(ProtSize.VarShort, entry.size)
+        assertContentEquals(
+            byteArrayOf(
+                0x03, 0x1B, 0x00,
+                0x00, 0xCD.toByte(), 0x4C,
+                0xFF.toByte(), 0x00, 0x00, 0x03, 0xE8.toByte(),
+            ),
+            encodeBody(
+                UpdateInvPartial(
+                    inventoryId = 0x031B,
+                    entries = listOf(InventoryPartialEntry(slot = 0, itemId = 0xCD4B, quantity = 1000)),
+                )
+            ),
+        )
+    }
+
+    @Test
+    fun `inventory partial empty slot omits quantity and params`() {
+        assertContentEquals(
+            byteArrayOf(
+                0x00, 0x5E, 0x00,
+                0x83.toByte(), 0xE8.toByte(), 0x00, 0x00,
+            ),
+            encodeBody(
+                UpdateInvPartial(
+                    inventoryId = 0x005E,
+                    entries = listOf(InventoryPartialEntry(slot = 1000, itemId = -1, quantity = 0)),
+                )
+            ),
+        )
+    }
+
+    @Test
+    fun `inventory partial param flag adds count and param block`() {
+        assertContentEquals(
+            byteArrayOf(
+                0x00, 0x5E, 0x02,
+                0x05, 0x04, 0xB6.toByte(), 0x01, 0x01,
+                0x01, 0x23, 0x55, 0x66, 0x77, 0x88.toByte(),
+            ),
+            encodeBody(
+                UpdateInvPartial(
+                    inventoryId = 0x005E,
+                    flags = 0x2,
+                    entries = listOf(
+                        InventoryPartialEntry(
+                            slot = 5,
+                            itemId = 0x04B5,
+                            quantity = 1,
+                            params = listOf(InventoryItemParam(key = 0x0123, value = 0x55667788)),
+                        )
+                    ),
                 )
             ),
         )

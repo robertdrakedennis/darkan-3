@@ -24,10 +24,10 @@ import world.gregs.voidps.buffer.*
  *  - IF_SETHIDE:                 103 → 91
  *  - IF_SETANGLE:                117 → 4
  *  - IF_SET_HTTP_IMAGE:          146 → 152
- *  - IF_SETOBJECT_ACTIVE:         16 → 101
+ *  - IF_SET_COMPONENT_PROPERTY_TYPE5 (legacy IfSetObjectActive class): 16 → 101
  *  - IF_SETMODEL:                 74 → 102
- *  - IF_SETANIM_ACTIVE:           81 → 96
- *  - IF_SETNPCHEAD:               98 → 115
+ *  - IF_SET_COMPONENT_PROPERTY_TYPE3 (legacy IfSetAnimActive class): 81 → 96
+ *  - IF_SET_COMPONENT_PROPERTY_TYPE7: 98 → 115
  *  - IF_SETOBJECT:               100 → 84
  *  - IF_SETANIM:                 106 → 86
  *  - IF_SETCOLOUR:               122 → 32
@@ -76,7 +76,7 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
         out.writeShort(subId)
     }
 
-    // IF_SETTOPLEVELINTERFACE (op 3, 19B). 948 wire (handler 0x00186900, disasm @ 0x0018692f):
+    // IF_SETTOPLEVELINTERFACE (op 3, 19B). 948-5 wire (handler 0x1000a2740):
     //   [0..3] gT_uint DISCARD; [4] skip; [5..8] g4_alt2 DISCARD;
     //   [9..10] packed id: byte9 = LOW byte (client reads (byte9+0x80)&0xFF), byte10 = HIGH byte
     //     (client computes id = byte10*0x100 + ((byte9+0x80)&0xFF)); [11..14] g4_alt1 DISCARD;
@@ -89,7 +89,7 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
         out.skip(8)
     }
 
-    // IF_OPENSUB (op 94, 8B). 948 wire (re-derived from handler 0x00194100 disasm):
+    // IF_OPENSUB (op 94, 8B). 948 wire (re-derived from handler 0x1000a22c0):
     //   subId = LE i16 (no transform); walkable = LE i16 (no transform); parentHash = BE u32.
     // CHANGED from 947-3 (which used g2_alt2/g2_alt2/g4_alt1). See 948-research-B doc.
     // Opcode/size are AUTHORITATIVE from the deterministic prot dump (948-prot-tables-dump.csv):
@@ -103,7 +103,7 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
 
     // IF_SETPOSITION (op 82, 23B). Opcode/size AUTHORITATIVE from the deterministic prot dump
     //   (948-prot-tables-dump.csv): SERVER op82 = IF_SETPOSITION size 23. (Confirmed by the live
-    //   948 lobby capture, which the lobby login depends on.) Wire (handler 0x00189180):
+    //   948 lobby capture, which the lobby login depends on.) Wire (handler 0x1000a2a30):
     //   [0]      byte LAYER. Client computes ((-byte) - 0x80) & 0xFF, so byte = writeByteSubtract(layer).
     //   [1..4]   gT_unsigned_int DISCARD.
     //   [5..8]   g4_alt3 POSITION = packed parent component hash ((parentInterface<<16)|slot).
@@ -152,7 +152,7 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
         out.writeByteAdd(startVal and 0xFF)
     }
 
-    // IF_SETEVENTS2 (op 35, 12B). 948 wire (0x00186040), mapped to
+    // IF_SETEVENTS2 (op 35, 12B). 948 wire (handler 0x1000a5910), mapped to
     //   SetServerActiveProperties(props, componentHash, fromSlot, toSlot, settings, -1, 0):
     //   [0..3] g4_alt2 settings; [4..5] LE i16 fromSlot (0xFFFF=-1); [6..7] LE i16 toSlot
     //   (0xFFFF=-1); [8..11] BE u32 componentHash. CHANGED from 947-3 (field order + transforms).
@@ -164,7 +164,7 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
         out.writeInt(componentHash)
     }
 
-    // IF_SETHIDE (op 91, 5B). 948 wire (handler 0x00193fc0): byte hideFlag (==0x81 → hidden);
+    // IF_SETHIDE (op 91, 5B). 948 wire (handler 0x1000a5fa0): byte hideFlag (==0x81 → hidden);
     //   componentHash = g4_alt2. CHANGED from 947-3 (was g4_alt1).
     serverProt<IfSetHide>(opcode = 91, size = 5) { out ->
         out.writeByte(if (hide) 0x81 else 0x80)
@@ -186,7 +186,8 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
         out.writeIntMiddle(packedAngle2)
     }
 
-    // IF_SET_HTTP_IMAGE (op 152, varByte).
+    // IF_SET_HTTP_IMAGE (op 152, varByte). Current 948-5 handler @0x1000ac5b0 reads a CP1252
+    // null-terminated image/resource path string and dispatches it to the interface/image manager.
     serverProt<IfSetHttpImage>(opcode = 152, size = ProtSize.VarByte) { out ->
         out.writeRSString(imageUrl)
     }
@@ -195,32 +196,37 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
     // Property setters
     // ---------------------------------------------------------------------
 
-    // IF_SETOBJECT_ACTIVE (op 101, 4B). 948 wire (0x00185b20): componentHash = g4_alt2.
-    // CHANGED from 947-3 (was g4_alt3).
+    // IF_SET_COMPONENT_PROPERTY_TYPE5 (op 101, 4B). Current 948-5 handler @0x1000a6820:
+    //   componentHash = g4_alt2, then SetComponentProperty(type=5, argA=active value,
+    //   argB=0). Class name is legacy API naming from earlier opcode maps.
     serverProt<IfSetObjectActive>(opcode = 101, size = 4) { out ->
         out.writeIntMiddle(componentHash)
     }
 
-    // IF_SETMODEL (op 102, 8B). 948 wire (0x001858e0): modelId = g4_alt2; componentHash = BE u32.
-    // CHANGED from 947-3 (was g4_alt3 / g4_alt3).
+    // IF_SETMODEL (op 102, 8B). Current 948-5 handler @0x1000a6be0:
+    //   modelId = g4_alt2; componentHash = BE u32; SetComponentProperty(type=1,
+    //   argA=modelId, argB=-1). CHANGED from 947-3 (was g4_alt3 / g4_alt3).
     serverProt<IfSetModel>(opcode = 102, size = 8) { out ->
         out.writeIntMiddle(value)
         out.writeInt(componentHash)
     }
 
-    // IF_SETANIM_ACTIVE (op 96, 4B).
+    // IF_SET_COMPONENT_PROPERTY_TYPE3 (op 96, 4B). Current 948-5 handler @0x1000a7210:
+    //   componentHash = g4_alt3, then SetComponentProperty(type=3, argA=active value,
+    //   argB=0). Class name is legacy API naming from earlier opcode maps.
     serverProt<IfSetAnimActive>(opcode = 96, size = 4) { out ->
         out.writeIntInverseMiddle(componentHash)
     }
 
-    // IF_SETNPCHEAD (op 115, 10B).
+    // IF_SET_COMPONENT_PROPERTY_TYPE7 (op 115, 10B). Current 948-5 handler reads field0 as BE
+    // u16, field1/field2 as raw little-endian u16s, and componentHash as raw little-endian u32,
+    // then calls SetComponentProperty(type=7, argA=field2<<16|field1, argB=field0).
+    // Class name is legacy API naming from earlier opcode maps.
     serverProt<IfSetNpcHead>(opcode = 115, size = 10) { out ->
-        out.writeByte((scale ushr 8) and 0xFF)
-        out.writeByteAdd(scale and 0xFF)
-        out.writeInt(componentHash)
-        out.writeShort(partA)
-        out.writeByte((partB ushr 8) and 0xFF)
-        out.writeByteAdd(partB and 0xFF)
+        out.writeShort(scale)
+        out.writeShortLittle(partA)
+        out.writeShortLittle(partB)
+        out.writeIntLittle(componentHash)
     }
 
     // IF_SETOBJECT (op 84, 10B). 948 wire (0x00185a00): componentHash = g4_alt1;
@@ -403,7 +409,7 @@ internal fun Codec.registerRev948ServerCodecsInterface() {
     // Text setter (op 122, varShort)
     // ---------------------------------------------------------------------
 
-    // IF_SETTEXT (op 122, VarShort). 948 wire (0x00185ec0): string text FIRST, then
+    // IF_SETTEXT (op 122, VarShort). 948 wire (handler 0x1000a5d70): string text FIRST, then
     //   componentHash = g4_alt3. CHANGED from 947-3 (order reversed + componentHash was BE).
     serverProt<IfSetText>(opcode = 122, size = ProtSize.VarShort) { out ->
         out.writeRSString(text)

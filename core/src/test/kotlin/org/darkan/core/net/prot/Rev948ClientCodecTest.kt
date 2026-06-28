@@ -36,6 +36,140 @@ class Rev948ClientCodecTest {
     }
 
     @Test
+    fun `ABORT_P_DIALOG op14 decodes as concrete zero-payload packet`() {
+        val entry = codec.clientProtsByOpcode[14]
+
+        assertEquals(0, codec.clientProtSize(14))
+        assertEquals(AbortPDialog::class, entry?.protClass)
+        assertEquals(AbortPDialog(), codec.createInstanceForOpcode<AbortPDialog>(14))
+    }
+
+    @Test
+    fun `display metrics op52 decodes captured fixed payload`() {
+        val entry = codec.clientProtsByOpcode[52] ?: error("missing op52")
+        val payload = Buffer().apply {
+            write(byteArrayOf(0x02, 0x09, 0x7C, 0x05, 0xC4.toByte(), 0x01))
+        }
+
+        val decoded = runBlocking { entry.decoder?.invoke(payload, 52) }
+
+        assertEquals(6, codec.clientProtSize(52))
+        assertEquals(DisplayMetrics::class, entry.protClass)
+        assertEquals(DisplayMetrics(flags = 2, width = 2428, height = 1476, tail = 1), decoded)
+    }
+
+    @Test
+    fun `camera orientation op8 decodes captured quantized yaw pitch`() {
+        val entry = codec.clientProtsByOpcode[8] ?: error("missing op8")
+        val payload = Buffer().apply {
+            write(byteArrayOf(0x07, 0x00, 0x77, 0x00))
+        }
+
+        val decoded = runBlocking { entry.decoder?.invoke(payload, 8) }
+
+        assertEquals(4, codec.clientProtSize(8))
+        assertEquals(CameraOrientation::class, entry.protClass)
+        assertEquals(CameraOrientation(yaw = 7, pitch = 247), decoded)
+    }
+
+    @Test
+    fun `native mouse click op9 decodes binary write order`() {
+        val entry = codec.clientProtsByOpcode[9] ?: error("missing op9")
+        val payload = Buffer().apply {
+            write(hexBytes("3412010203047856ab095e0c"))
+        }
+
+        val decoded = runBlocking { entry.decoder?.invoke(payload, 9) }
+
+        assertEquals(12, codec.clientProtSize(9))
+        assertEquals(NativeMouseClick::class, entry.protClass)
+        assertEquals(
+            NativeMouseClick(
+                field294 = 0x1234,
+                field28c = 0x01020304,
+                field290 = 0x5678,
+                clickY = 0x09AB,
+                clickX = 0x0CDE,
+            ),
+            decoded,
+        )
+    }
+
+    @Test
+    fun `scene rebuild timing op76 decodes captured elapsed tick report`() {
+        val entry = codec.clientProtsByOpcode[76] ?: error("missing op76")
+        val payload = Buffer().apply {
+            write(byteArrayOf(0x00, 0x00, 0x05, 0x8E.toByte()))
+        }
+
+        val decoded = runBlocking { entry.decoder?.invoke(payload, 76) }
+
+        assertEquals(4, codec.clientProtSize(76))
+        assertEquals(SceneRebuildTimingReport::class, entry.protClass)
+        assertEquals(SceneRebuildTimingReport(elapsedTicks = 1422), decoded)
+    }
+
+    @Test
+    fun `client input event batch op98 decodes compact and absolute records`() {
+        val entry = codec.clientProtsByOpcode[98] ?: error("missing op98")
+        val payload = Buffer().apply {
+            write(hexBytes("085bffff021e0360"))
+        }
+
+        val decoded = runBlocking { entry.decoder?.invoke(payload, 8) }
+
+        assertEquals(ProtSize.VarByte, codec.clientProtInfo[98]?.size)
+        assertEquals(ClientInputEventBatch::class, entry.protClass)
+        assertEquals(
+            ClientInputEventBatch(
+                events = listOf(
+                    ClientInputEvent(
+                        encoding = ClientInputEventEncoding.DELTA_SMALL,
+                        coordinateMode = ClientInputCoordinateMode.DELTA,
+                        timeDelta20 = 0,
+                        x = 1,
+                        y = -5,
+                    ),
+                    ClientInputEvent(
+                        encoding = ClientInputEventEncoding.ABSOLUTE_LONG_TIME,
+                        coordinateMode = ClientInputCoordinateMode.ABSOLUTE,
+                        timeDelta20 = 8191,
+                        x = 864,
+                        y = 542,
+                    ),
+                ),
+            ),
+            decoded,
+        )
+    }
+
+    @Test
+    fun `client profile block op12 preserves captured byte vector`() {
+        val entry = codec.clientProtsByOpcode[12] ?: error("missing op12")
+        val payload = Buffer().apply {
+            write(hexBytes("2601000203020503010101010201020203000202010100010100010201030100030002030046000f003200640100040000000001007f7f000001"))
+        }
+
+        val decoded = runBlocking { entry.decoder?.invoke(payload, 58) }
+
+        assertEquals(ProtSize.VarByte, codec.clientProtInfo[12]?.size)
+        assertEquals(ClientProfileBlock::class, entry.protClass)
+        assertEquals(
+            ClientProfileBlock(
+                values = listOf(
+                    0x26, 0x01, 0x00, 0x02, 0x03, 0x02, 0x05, 0x03, 0x01, 0x01,
+                    0x01, 0x01, 0x02, 0x01, 0x02, 0x02, 0x03, 0x00, 0x02, 0x02,
+                    0x01, 0x01, 0x00, 0x01, 0x01, 0x00, 0x01, 0x02, 0x01, 0x03,
+                    0x01, 0x00, 0x03, 0x00, 0x02, 0x03, 0x00, 0x46, 0x00, 0x0F,
+                    0x00, 0x32, 0x00, 0x64, 0x01, 0x00, 0x04, 0x00, 0x00, 0x00,
+                    0x00, 0x01, 0x00, 0x7F, 0x7F, 0x00, 0x00, 0x01,
+                ),
+            ),
+            decoded,
+        )
+    }
+
+    @Test
     fun `post-world macOS sync op203 stays framed as unhandled varshort`() {
         assertEquals(-2, codec.clientProtSize(203))
         assertEquals("UNKNOWN_203", codec.clientProtName(203))
@@ -118,6 +252,20 @@ class Rev948ClientCodecTest {
         val decodedClamped = runBlocking { entry.decoder?.invoke(clampedSequencePayload, 3) }
 
         assertEquals(255, (decodedClamped as AntiCheatChallengeResponse).sequence)
+    }
+
+    @Test
+    fun `chat setfilter op94 decodes public private trade bytes`() {
+        val entry = codec.clientProtsByOpcode[94] ?: error("missing op94")
+        val payload = Buffer().apply {
+            write(byteArrayOf(0x00, 0x01, 0x00))
+        }
+
+        val decoded = runBlocking { entry.decoder?.invoke(payload, 94) }
+
+        assertEquals(3, codec.clientProtSize(94))
+        assertEquals(ChatSetFilter::class, entry.protClass)
+        assertEquals(ChatSetFilter(public = 0, private = 1, trade = 0), decoded)
     }
 
     @Test
@@ -250,15 +398,15 @@ class Rev948ClientCodecTest {
             encodeBody(SetNpcOp(text = "Talk-to", cursor = 0x1234)),
         )
 
-        assertEquals(12, codec.serverProts[SetPlayerOp2::class]?.opcode)
+        assertEquals(12, codec.serverProts[UpdateRunWeight::class]?.opcode)
         assertEquals(2, codec.serverProtSize(12))
-        assertEquals("SetPlayerOp2", codec.serverProtName(12))
-        assertContentEquals(byteArrayOf(0x00, 0x00), encodeBody(SetPlayerOp2(0)))
+        assertEquals("UpdateRunWeight", codec.serverProtName(12))
+        assertContentEquals(byteArrayOf(0x00, 0x00), encodeBody(UpdateRunWeight(0)))
 
-        assertEquals(13, codec.serverProts[SetPlayerOp3::class]?.opcode)
+        assertEquals(13, codec.serverProts[UpdateRunenergy::class]?.opcode)
         assertEquals(1, codec.serverProtSize(13))
-        assertEquals("SetPlayerOp3", codec.serverProtName(13))
-        assertContentEquals(byteArrayOf(0x64), encodeBody(SetPlayerOp3(100)))
+        assertEquals("UpdateRunenergy", codec.serverProtName(13))
+        assertContentEquals(byteArrayOf(0x64), encodeBody(UpdateRunenergy(100)))
 
         assertEquals(104, codec.serverProts[PlayerInfoDecode::class]?.opcode)
         assertEquals(14, codec.serverProtSize(104))

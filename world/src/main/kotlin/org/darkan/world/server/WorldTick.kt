@@ -112,8 +112,10 @@ object WorldTick {
                     player.session.queuePacket(packet)
                 }
 
-                val playerInfo = PlayerInfoBuilder.buildIfNeeded(player)
-                if (playerInfo != null) player.session.queuePacket(playerInfo)
+                // Always emits an op22 each tick (stationary-hold when idle) — the prod "idle loop"
+                // that re-commits the local avatar's smoothing each tick so a spawned, stationary
+                // player STAYS at its tile (BUG-1 fix; see PlayerInfoBuilder.buildIfNeeded).
+                player.session.queuePacket(PlayerInfoBuilder.buildIfNeeded(player))
                 if (viewport.visibleNpcs.isNotEmpty()) {
                     player.session.queuePacket(NpcInfoBuilder.build(player))
                 }

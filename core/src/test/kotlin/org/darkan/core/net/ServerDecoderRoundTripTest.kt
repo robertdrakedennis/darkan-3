@@ -59,8 +59,12 @@ class ServerDecoderRoundTripTest {
     @Test fun ifSetAnim() = check(IfSetAnim(animationId = 885, componentHash = (906 shl 16) or 44), "906:44", "(885)")
     @Test fun ifSetText() = check(IfSetText((906 shl 16) or 44, "Hello World"), "906:44", "text=\"Hello World\"")
 
+    // op13 is the real rev948 run-energy opcode (g1, 0..100 RAW); §10.4.
     @Test fun runEnergy() = check(UpdateRunenergy(75), "runEnergy=75")
+    // op80 is the private-chat filter (NOT run energy); §10.4. 1=Friends.
+    @Test fun setFilterPrivate() = check(SetFilterPrivate(1), "filterPrivate=1")
     @Test fun jcoins() = check(JcoinsUpdate(50_000), "jcoins=50000")
+    @Test fun sceneTimingBase() = check(SceneTimingBase(0x12345678), "sceneTimingBase=305419896")
     @Test fun setPlayerOp() = check(SetPlayerOp(slot = 3, text = "Trade with", priority = false), "slot=3", "text=\"Trade with\"")
     @Test fun chatFilter() = check(ChatFilterSettingsPrivateChat(2), "chatFilter=2")
 

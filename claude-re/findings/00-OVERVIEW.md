@@ -1,33 +1,11 @@
-# Production capture — overview (built fresh from the jsonl, no external docs)
+> Superseded by `re-resources/docs/kb/`. This first-iteration note was replaced during KB rebuild so stale packet, handler, offset, or flow claims are not used as source material. Re-derive facts from live capture, Ghidra, or gamevals per `re-resources/docs/re-methodology/KNOWLEDGE_BASE_REBUILD.md`.
 
-Source: `build/undercut-socket-session-production-isaac.jsonl` — 5568 records (5553 packets, 2 connections, 13 login events)
+# Superseded Finding: `00-OVERVIEW.md`
 
-## Connections
+- original category: capture metadata, connections, login events, packet counts
+- contained raw decompilation/function dump: no
+- canonical replacement: `re-resources/docs/kb/flow/00-overview.md`
+- old content fingerprint before replacement: `1abe5ad5ca12e99c`
+- migration status: stale markdown body removed; function knowledge belongs in Ghidra DB, not markdown.
 
-| role | peer | port | C2S bytes | S2C bytes |
-|---|---|---|---|---|
-| lobby | 8.42.17.253:443 | 443 | 797 | 18339 |
-| world | 8.26.16.145:443 | 443 | 2799 | 47350 |
-
-## Login events (in order)
-
-- lobby S2C **first_response** code=0 len=None key=0x003ca49c2a0723bf
-- lobby S2C **login_result** code=2 len=None key=None
-- lobby S2C **login_data_len** code=None len=111 key=None
-- lobby C2S **connection_type** code=None len=None key=None
-- lobby C2S **login_packet** code=None len=None key=None
-- world S2C **first_response** code=0 len=None key=0x007ef65aec58dfe7
-- world S2C **login_result** code=2 len=None key=None
-- world S2C **server_client_var_block_len** code=None len=1321 key=None
-- world S2C **server_client_var_ack** code=None len=None key=None
-- world S2C **players_byte** code=None len=None key=None
-- world S2C **world_login_data_len** code=None len=37 key=None
-- world C2S **connection_type** code=None len=None key=None
-- world C2S **login_packet** code=None len=None key=None
-
-## Packet counts by conn/dir
-
-- lobby S2C: 1670
-- lobby C2S: 13
-- world S2C: 3790
-- world C2S: 80
+Do not reconstruct implementation facts from this archive stub. Use KB glossary, flow, service docs, capture evidence, and Ghidra symbols instead.

@@ -1,0 +1,55 @@
+[package]
+name = "darkan-recorder-mac"
+version = "0.1.0"
+edition = "2021"
+
+# This crate is macOS-only. Building on any other platform produces an empty
+# library (the whole module is `#![cfg(target_os = "macos")]`). It is the
+# sibling of `client/launcher/patcher-mac/`: both are cdylibs inserted into the
+# rs2client Mach-O process via `DYLD_INSERT_LIBRARIES`. The patcher rewrites
+# RSA keys / URLs; THIS recorder taps the client's networking in memory and
+# writes a session-based packet capture to disk.
+#
+# Artifact: `libdarkan_recorder.dylib`. Its `__attribute__((constructor))` (via
+# the `ctor` crate) runs before the host's `main()`, sig-scans the main image
+# for the documented capture points (re-resources/docs/binary/
+# patch-targets-macos-recorder.md), installs inline detours (a small
+# iced-x86-based trampoline engine — the pure-Rust analogue of the engine's
+# C++ funchook), and interposes libc connect()/close(). It NEVER mutates client
+# code beyond the detour trampolines and is a hard no-op unless `DARKAN_RECORD=1`.
+
+[lib]
+name = "darkan_recorder"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+ctor = "0.4"
+libc = "0.2"
+# memchr: fast literal scan for the first anchor byte of each wildcard pattern.
+memchr = "2"
+# iced-x86: pure-Rust x86_64 disassembler + block encoder. We build our OWN
+# inline trampoline detour on top of it (see src/detour.rs) — the off-the-shelf
+# detour crates (retour/detour2/minhook/dobby) all require nightly or do not
+# build for x86_64-apple-darwin. iced-x86 relocates the stolen prologue
+# instructions correctly (fixing RIP-relative + relative branches), which is
+# what makes the hook safe — the load-bearing requirement that we NEVER crash
+# the client. This is the self-contained analogue of the engine's C++ funchook.
+iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "encoder", "block_encoder"] }
+once_cell = "1"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+sha2 = "0.10"
+# chrono: UTC session timestamps for the session dir name + event times.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[profile.release]
+# Unlike the patcher we do NOT `strip` (keeps the ctor symbol + the detour
+# trampolines easy to inspect when debugging a capture) and use opt-level 3 —
+# the hooks sit on the hot networking path, so prefer speed over size. LTO on.
+strip = false
+lto = true
+opt-level = 3
+panic = "abort"

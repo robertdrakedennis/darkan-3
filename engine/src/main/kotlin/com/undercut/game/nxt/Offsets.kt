@@ -459,6 +459,17 @@ object OEntity {
     // Render model data (PathingEntity ONLY - NPC/Player, NOT Location)
     // Location entities use OLocation.RENDER_NODE (0x60) instead, which has the same ORenderModel layout
     const val RENDER_MODEL = 0xC58L         // ptr: render model data for mesh projection/picking (PathingEntity only)
+    // Avatar-lifecycle witnesses (decode -> compose -> bind -> drift) used to pin the stage a local
+    // avatar stalls at. Mac rs2client 948-5 vmaddrs cited; the byte offsets match the Linux layout.
+    const val BODY_TYPE_MODEL = 0x1068L     // ptr: body/skeleton model; nonzero => body composed. Gate read by jag::game::PlayerAvatar::ProcessPendingAppearance @0x10002ba20
+    const val DECODE_WITNESS = 0x10ACL      // u32: title/prefix sprite written by jag::game::PlayerAvatar::DecodeAppearance @0x100031480 (tracks whether decode ran)
+    const val MAP_SQUARE_BIND = 0x0AA8L     // ptr: bound map square; nonzero => bound to a loaded square. Read/gated by jag::graphics::GraphEntity::AdvanceRenderPosition @0x1003a2500
+    const val LERP_END_TICK = 0x0DBCL       // i32: lerp end-tick (-1 => no active waypoint = open-loop drift fallback). Written by jag::graphics::GraphEntity::AdvanceRenderPosition @0x1003a2500
+    // PlayerAppearancePending* built by op22 ext-info (Construct @0x100034d40); consumed per-tick by
+    // ProcessPendingAppearance @0x10002ba20, which composes RENDER_MODEL ONLY once the object's async-load
+    // gate passes. Gate fields on the pending object: +0x88 needsAsyncLoad, +0x8a composed.
+    const val PENDING_APPEARANCE = 0x1298L  // ptr: queued appearance awaiting async resource-group load before model compose
+    const val CURRENT_APPEARANCE = 0x12A0L  // ptr: the composed/active appearance (set after PENDING_APPEARANCE's gate clears)
 }
 
 object ORenderModel {

@@ -1,0 +1,9 @@
+[mcp_servers.ghidra]
+command = "/Users/robert/.local/share/ghidramcp/.venv-darkan/bin/python"
+args = [
+    "/Users/robert/.local/src/GhidraMCP/bridge_mcp_ghidra.py",
+    "--ghidra-server",
+    "http://127.0.0.1:9080/",
+    "--token-file",
+    "/Users/robert/.config/ghidramcp/token",
+]

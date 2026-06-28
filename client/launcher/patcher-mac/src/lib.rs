@@ -18,29 +18,56 @@
 //!    `data/client/macos/rs2client`. Replaced with `DARKAN_RSA_MODULUS`,
 //!    left-padded to 256 chars with `'0'`.
 //!
-//! 2. **rs2client JS5 RSA modulus** — 1024-char lowercase hex ASCII string.
-//!    Pattern identical to other OS builds (prefix `a6400fbc...`, 1 match).
-//!    Replaced with `DARKAN_JS5_RSA_MODULUS`.
+//! 2. **JS5 RSA modulus** — a 1024-char lowercase hex ASCII string (4096-bit
+//!    key), replaced with `DARKAN_JS5_RSA_MODULUS`. There are TWO distinct
+//!    4096-bit keys depending on which Mach-O image this dylib lands in (the
+//!    same dylib is inserted into the RuneScape.app wrapper AND inherited by the
+//!    rs2client it spawns):
 //!
-//! 3. **rs2client HTTP port** — hardcoded port 80 (0x50) inside
-//!    `jag::WorldLobbyData::GetHTTPURL`. On macOS, clang emits
-//!    `MOV EAX, 0x50` + `JMP short` (`b8 50 00 00 00 eb`, same form as the
-//!    Windows MSVC build) — NOT the Linux `MOV R8D, 0x50` + `JZ` form. A raw
-//!    scan finds TWO `b8 50 00 00 00 eb` sites in the Mach-O, so a unique
-//!    pattern + patch offset must be confirmed by the ghidra-reverse-engineer
-//!    agent before this patch can be enabled. Until then it is GATED: the patch
-//!    runs ONLY if the configured pattern resolves to exactly ONE match (see
-//!    `HTTP_PORT_PATTERN` / `HTTP_PORT_RESOLVED`). When the RE doc
-//!    (`docs/binary/patch-targets-macos.md`) lands, update those two consts.
+//!    a. **rs2client game-client JS5 key** — prefix `a6400fbc...` (1 match in
+//!       `rs2client`). Verifies the JS5 master-index signature.
+//!    b. **RuneScape.app launcher key** — prefix `a49962fc...` (1 match in the
+//!       wrapper). This is the SAME key Linux's `rs3linux` launcher embeds
+//!       (`RS3LINUX_MODULUS_PREFIX`); on macOS it is 4096-bit and verifies the
+//!       `jav_config.ws` `download_hash`. `ConfigServer` signs the macOS
+//!       jav_config with the JS5 key (512-byte sig), so if this wrapper key is
+//!       left as Jagex's, the wrapper rejects our config with
+//!       "Error saving file (14)" BEFORE it ever downloads the binary.
+//!
+//!    Both keys are overwritten with `DARKAN_JS5_RSA_MODULUS`. The patcher tries
+//!    every known JS5 prefix and patches each one present (so the wrapper process
+//!    patches `a49962fc...`, the rs2client process patches `a6400fbc...`).
+//!
+//! 3. **rs2client HTTP JS5 content port** — hardcoded port 80 (0x50) inside the
+//!    inlined `jag::WorldLobbyData::GetHTTPURL`. RESOLVED by the RE agent
+//!    (`docs/binary/patch-targets-macos.md` §P3): clang emits port 80 as a
+//!    **16-bit** immediate (`66`-prefixed MOV), in two shapes spread across 3
+//!    inlined copies. The old `b8 50 00 00 00 eb` (32-bit) pattern is a FALSE
+//!    POSITIVE (switch-table arms). We scan both documented patterns
+//!    (`HTTP_PORT_PATTERNS`), expect exactly 3 sites total, and write the new
+//!    port as a 2-byte LE16 at +2 in each. Present only in rs2client (the
+//!    wrapper has no GetHTTPURL → 0 matches there is expected).
 //!
 //! Patches that do NOT apply to the Mach-O rs2client (verified absent in the
 //! binary — they are rs3linux-launcher-only): codebase URL regex, LZMA flag.
 //! Those live in the Linux patcher and are skipped here entirely.
 //!
+//! 4. **World-server connect() port redirect** — the client dials game WORLDS
+//!    on port 443 (TLS-wrapped world protocol). Our local world server listens
+//!    on `DARKAN_WORLD_PORT` (default 43597). A `__DATA,__interpose` tap on
+//!    libc `connect()` rewrites a LOOPBACK `:443` destination to the local
+//!    world port, leaving every external (`<jagex-ip>:443`) HTTPS connection and
+//!    every other loopback port (43596 lobby, 8829 HTTP JS5) untouched. See
+//!    `world_redirect.rs` for the host+port-precise selector and bootstrap
+//!    safety. Active only when `DARKAN_WORLD_PORT` is set AND `DARKAN_RSA_MODULUS`
+//!    is set (i.e. local/custom mode); production unsets both → no-op.
+//!
 //! If `DARKAN_RSA_MODULUS` is not set, the patcher does nothing — so the same
 //! dylib can be harmlessly inserted in live (un-patched) mode.
 
 #![cfg(target_os = "macos")]
+
+mod world_redirect;
 
 use memchr::memmem::Finder;
 use std::env;
@@ -63,32 +90,77 @@ const RS2CLIENT_MODULUS_HEX_LEN: usize = 256;
 /// Byte-verified to appear exactly once in `data/client/macos/rs2client`.
 const RS2CLIENT_JS5_MODULUS_PREFIX: &[u8] = b"a6400fbcbd9dd09f48045caf3f543dd6";
 
-/// Full length of the rs2client JS5 RSA modulus hex string (1024 chars).
+/// First 32 chars of the **RuneScape.app launcher** RSA modulus hex string
+/// (4096-bit key). This is the macOS wrapper's `jav_config` download-hash
+/// verification key — byte-identical to the key Linux's `rs3linux` launcher
+/// embeds (`RS3LINUX_MODULUS_PREFIX` in `patcher/src/lib.rs`). Byte-verified to
+/// appear exactly once in the RuneScape.app executable (1024 hex chars there;
+/// the same prefix is only 256 hex on rs3linux but 1024 on the mac wrapper).
+/// `ConfigServer` signs the macOS jav_config with `DARKAN_JS5_RSA_MODULUS`, so
+/// this key must be overwritten with the same modulus or the wrapper rejects
+/// jav_config with "Error saving file (14)".
+const RUNESCAPE_WRAPPER_JS5_MODULUS_PREFIX: &[u8] = b"a49962fc0737fddcd94c0daf84e5d214";
+
+/// All known 4096-bit JS5/launcher modulus prefixes that must be overwritten
+/// with `DARKAN_JS5_RSA_MODULUS`. The same dylib is inserted into the wrapper
+/// AND inherited by the rs2client it spawns, so we scan for every prefix and
+/// patch whichever is present in the current image.
+const JS5_MODULUS_PREFIXES: &[&[u8]] = &[
+    RS2CLIENT_JS5_MODULUS_PREFIX,
+    RUNESCAPE_WRAPPER_JS5_MODULUS_PREFIX,
+];
+
+/// Full length of every JS5 RSA modulus hex string (4096-bit = 1024 hex chars).
 const RS2CLIENT_JS5_MODULUS_HEX_LEN: usize = 1024;
 
-/// Whether the HTTP-port patch site has been UNIQUELY confirmed by the
-/// ghidra-reverse-engineer agent for the Mach-O build. While `false`, the
-/// HTTP-port patch is applied only if `HTTP_PORT_PATTERN` happens to resolve to
-/// exactly one match (the safe condition); a multi-match pattern is refused so
-/// we never patch the wrong (graphics/matrix) `MOV EAX, 0x50` site.
+/// macOS HTTP JS5 content-port patch sites — RESOLVED by the ghidra-reverse-engineer
+/// agent (see `docs/binary/patch-targets-macos.md` §P3, rev 948-5).
 ///
-/// Flip to `true` and tighten `HTTP_PORT_PATTERN` once
-/// `docs/binary/patch-targets-macos.md` documents the unique signature.
-const HTTP_PORT_RESOLVED: bool = false;
-
-/// Candidate byte pattern for the hardcoded HTTP port 80 (0x50) in the macOS
-/// `jag::WorldLobbyData::GetHTTPURL` (clang `MOV EAX, 0x50` + `JMP short`).
+/// clang emits port 80 as a **16-bit** immediate (operand-size prefix `0x66`),
+/// NOT the 32-bit `MOV EAX, 0x50` form used on Linux/Windows. The URL-builder
+/// (`jag::WorldLobbyData::GetHTTPURL`, inlined into 3 callers) appears in two
+/// instruction shapes. Each pattern's port immediate is a 2-byte LE16 at +2.
 ///
-/// NOTE: this 6-byte pattern matches TWO sites in the 948-5 Mach-O (file
-/// offsets 0x8e9168 and 0x8f3605); it is NOT yet unique. The patch driver
-/// refuses to apply it while it matches more than one site (see
-/// `HTTP_PORT_RESOLVED`). Extend this pattern with surrounding context bytes
-/// from the RE doc to make it unique, then set `HTTP_PORT_RESOLVED = true`.
-const HTTP_PORT_PATTERN: &[u8] = &[0xb8, 0x50, 0x00, 0x00, 0x00, 0xeb];
+/// CRITICAL: do NOT use the old `b8 50 00 00 00 eb` pattern — its two matches are
+/// llvm switch-table arms (struct-offset/enum returns), NOT port constants; the
+/// genuine sites all carry the `0x1b58` (worldId+7000) alternate-port marker.
+///
+/// Total expected matches across both patterns: 2 + 1 = 3 (all must be patched).
+struct HttpPortPattern {
+    /// Distinctive byte signature (includes the `0x1b58` alternate-port marker
+    /// and the trailing `44 0f b7 c?` to be globally unique).
+    pattern: &'static [u8],
+    /// Offset of the 2-byte LE16 port immediate within `pattern`.
+    port_offset: usize,
+    /// How many matches this pattern is expected to find (for the abort check).
+    expected: usize,
+}
 
-/// Offset within `HTTP_PORT_PATTERN` of the 4-byte LE port immediate.
-/// macOS/clang: +1 (no REX prefix), same as the Windows MSVC build.
-const HTTP_PORT_PATCH_OFFSET: usize = 1;
+/// Type-1: `MOV SI, 0x50` / `JMP +6` / `ADD ESI, 0x1b58`. Two sites.
+/// Type-2: `MOV AX, 0x50` / `JMP +5` / `ADD EAX, 0x1b58`. One site.
+const HTTP_PORT_PATTERNS: &[HttpPortPattern] = &[
+    HttpPortPattern {
+        // 66 be 50 00  eb 06  81 c6 58 1b 00 00  44 0f b7 c6
+        pattern: &[
+            0x66, 0xbe, 0x50, 0x00, 0xeb, 0x06, 0x81, 0xc6, 0x58, 0x1b, 0x00, 0x00, 0x44, 0x0f,
+            0xb7, 0xc6,
+        ],
+        port_offset: 2,
+        expected: 2,
+    },
+    HttpPortPattern {
+        // 66 b8 50 00  eb 05  05 58 1b 00 00  44 0f b7 c0
+        pattern: &[
+            0x66, 0xb8, 0x50, 0x00, 0xeb, 0x05, 0x05, 0x58, 0x1b, 0x00, 0x00, 0x44, 0x0f, 0xb7,
+            0xc0,
+        ],
+        port_offset: 2,
+        expected: 1,
+    },
+];
+
+/// Total expected HTTP-port patch sites across all patterns (2 + 1).
+const HTTP_PORT_EXPECTED_TOTAL: usize = 3;
 
 const PAGE_SIZE: usize = 4096;
 
@@ -103,10 +175,40 @@ extern "C" {
     fn _dyld_get_image_header(image_index: u32) -> *const MachHeader64;
     fn _dyld_get_image_name(image_index: u32) -> *const c_char;
     fn _dyld_get_image_vmaddr_slide(image_index: u32) -> isize;
+
+    /// Mach VM protect — required to make code-signed `__TEXT` pages writable.
+    /// On a hardened/code-signed image (the RuneScape.app wrapper), plain
+    /// `mprotect(PROT_WRITE)` on an executable page returns EACCES; the kernel
+    /// refuses to grant WRITE to a code-signed mapping. The supported way to
+    /// edit such a page is a copy-on-write break via `VM_PROT_COPY`, which
+    /// `mach_vm_protect` performs (the page is privately copied, decoupling it
+    /// from the code-signature, then made writable).
+    fn mach_vm_protect(
+        target_task: u32,
+        address: u64,
+        size: u64,
+        set_maximum: i32,
+        new_protection: i32,
+    ) -> i32;
+    /// `mach_task_self()` is exposed as a macro in C; the underlying symbol is
+    /// the global `mach_task_self_`. Declare it directly.
+    static mach_task_self_: u32;
 }
 
 const MH_MAGIC_64: u32 = 0xfeed_facf;
 const LC_SEGMENT_64: u32 = 0x19;
+
+// Mach VM protection bits (sys/vm_prot.h).
+const VM_PROT_READ: i32 = 0x1;
+const VM_PROT_WRITE: i32 = 0x2;
+const VM_PROT_EXECUTE: i32 = 0x4;
+/// `VM_PROT_COPY` — when OR'd into a protect request, forces a copy-on-write
+/// break so a shared/code-signed page can be made writable. This is the macOS
+/// equivalent of how the Linux patcher writes to `.rodata`/`__TEXT`.
+const VM_PROT_COPY: i32 = 0x10;
+
+/// KERN_SUCCESS.
+const KERN_SUCCESS: i32 = 0;
 
 #[repr(C)]
 struct MachHeader64 {
@@ -230,25 +332,58 @@ fn patch_rsa() {
 
     // --- Patch 2: JS5 RSA modulus (1024-char hex ASCII) ---
     // Skipped in proxy mode: JS5 goes directly to Jagex, so their key must remain.
+    //
+    // Two distinct 4096-bit keys share this patch (see JS5_MODULUS_PREFIXES):
+    //   - rs2client game-client JS5 key (a6400fbc...) — present in rs2client.
+    //   - RuneScape.app launcher key   (a49962fc...) — present in the wrapper,
+    //     verifies the jav_config download_hash (ConfigServer signs macOS
+    //     jav_config with the JS5 key).
+    // The SAME dylib is inserted into the wrapper and inherited by the rs2client
+    // it spawns, so we scan for every prefix and patch each one present. At least
+    // one prefix must match per image, or the JS5/jav_config verification fails.
     if proxy_mode {
         eprintln!("[darkan-patcher-mac] Proxy mode: skipping JS5 RSA modulus patch");
     } else if let Some(ref js5_hex) = js5_modulus_hex {
         match pad_modulus_hex(js5_hex, RS2CLIENT_JS5_MODULUS_HEX_LEN) {
             Some(replacement) if hex_to_bytes(&replacement).is_some() => {
-                let finder = Finder::new(RS2CLIENT_JS5_MODULUS_PREFIX);
-                match find_first(&regions, &finder) {
-                    Some(addr) => {
+                let mut total_patched = 0usize;
+                for prefix in JS5_MODULUS_PREFIXES {
+                    let finder = Finder::new(*prefix);
+                    let matches = find_all(&regions, &finder);
+                    // SAFETY: prefixes are ASCII, so lossy is exact here (used only for logging).
+                    let prefix_str = String::from_utf8_lossy(prefix);
+                    if matches.is_empty() {
+                        continue;
+                    }
+                    for addr in matches {
                         eprintln!(
-                            "[darkan-patcher-mac] Found JS5 RSA modulus hex string at 0x{:x}",
+                            "[darkan-patcher-mac] Found JS5 RSA modulus ({}…) at 0x{:x}",
+                            &prefix_str[..prefix_str.len().min(8)],
                             addr
                         );
                         if patch_memory(addr, replacement.as_bytes()) {
-                            eprintln!("[darkan-patcher-mac] Successfully patched JS5 RSA modulus ({} hex chars)", RS2CLIENT_JS5_MODULUS_HEX_LEN);
+                            total_patched += 1;
+                            eprintln!(
+                                "[darkan-patcher-mac] Successfully patched JS5 RSA modulus ({}… , {} hex chars) at 0x{:x}",
+                                &prefix_str[..prefix_str.len().min(8)],
+                                RS2CLIENT_JS5_MODULUS_HEX_LEN,
+                                addr
+                            );
                         } else {
-                            eprintln!("[darkan-patcher-mac] ERROR: failed to patch JS5 RSA modulus at 0x{:x}", addr);
+                            eprintln!(
+                                "[darkan-patcher-mac] ERROR: failed to patch JS5 RSA modulus ({}…) at 0x{:x}",
+                                &prefix_str[..prefix_str.len().min(8)],
+                                addr
+                            );
                         }
                     }
-                    None => eprintln!("[darkan-patcher-mac] JS5 RSA modulus pattern not found"),
+                }
+                if total_patched == 0 {
+                    eprintln!(
+                        "[darkan-patcher-mac] JS5 RSA modulus pattern not found (tried {} known prefixes) \
+                         — JS5/jav_config verification will FAIL in this image",
+                        JS5_MODULUS_PREFIXES.len()
+                    );
                 }
             }
             _ => eprintln!("[darkan-patcher-mac] WARNING: DARKAN_JS5_RSA_MODULUS is invalid or too long"),
@@ -257,50 +392,145 @@ fn patch_rsa() {
         eprintln!("[darkan-patcher-mac] DARKAN_JS5_RSA_MODULUS not set — skipping JS5 patch");
     }
 
-    // --- Patch 3: HTTP port (GATED on a unique match — see HTTP_PORT_RESOLVED) ---
+    // --- Patch 3: HTTP JS5 content port (RESOLVED — docs/binary/patch-targets-macos.md §P3) ---
     // Skipped in proxy mode: HTTP JS5 goes directly to Jagex on port 80.
+    //
+    // The port-80 immediate is 16-bit on macOS (clang `66`-prefixed MOV), so we
+    // write a 2-byte LE16 at +2 within each pattern. Two pattern variants cover
+    // the 3 inlined GetHTTPURL copies. Only present in rs2client (the wrapper has
+    // no GetHTTPURL — 0 matches there is expected).
     if proxy_mode {
         eprintln!("[darkan-patcher-mac] Proxy mode: skipping HTTP port patch");
     } else if let Ok(port_str) = env::var("DARKAN_HTTP_PORT") {
         if let Ok(port) = port_str.parse::<u16>() {
-            let port_le = port.to_le_bytes();
-            let replacement = [port_le[0], port_le[1], 0x00, 0x00];
+            let port_le = port.to_le_bytes(); // 2-byte LE16
 
-            let finder = Finder::new(HTTP_PORT_PATTERN);
-            let matches = find_all(&regions, &finder);
-            match matches.len() {
-                0 => eprintln!(
-                    "[darkan-patcher-mac] WARNING: HTTP port pattern matched 0 sites — \
-                     client HTTP JS5 requests will still hit port 80!"
-                ),
-                1 => {
-                    let addr = matches[0] + HTTP_PORT_PATCH_OFFSET;
-                    if patch_memory(addr, &replacement) {
+            // Collect matches for every pattern first so we can validate the
+            // total before writing anything (abort-on-drift, per the RE doc).
+            let mut per_pattern: Vec<(usize, Vec<usize>)> = Vec::new();
+            let mut total = 0usize;
+            for (i, p) in HTTP_PORT_PATTERNS.iter().enumerate() {
+                let finder = Finder::new(p.pattern);
+                let matches = find_all(&regions, &finder);
+                total += matches.len();
+                per_pattern.push((i, matches));
+            }
+
+            if total == 0 {
+                // Expected in the wrapper image (no GetHTTPURL); a real warning
+                // only in rs2client. We can't cheaply tell which image we're in,
+                // so log at WARNING and move on.
+                eprintln!(
+                    "[darkan-patcher-mac] HTTP port: 0 sites in this image (expected for the \
+                     RuneScape.app wrapper; in rs2client this means requests still hit port 80)"
+                );
+            } else if total != HTTP_PORT_EXPECTED_TOTAL {
+                // Drift guard: the RE doc pins exactly 3 sites. Any other non-zero
+                // count means the binary changed — refuse rather than mis-patch.
+                eprintln!(
+                    "[darkan-patcher-mac] WARNING: HTTP port matched {} sites, expected {} \
+                     (binary drift?) — refusing to patch. Re-run the RE agent on the Mach-O.",
+                    total, HTTP_PORT_EXPECTED_TOTAL
+                );
+            } else {
+                let mut patched = 0usize;
+                for (i, matches) in &per_pattern {
+                    let p = &HTTP_PORT_PATTERNS[*i];
+                    if matches.len() != p.expected {
                         eprintln!(
-                            "[darkan-patcher-mac] Patched HTTP content port at 0x{:x} (80 -> {})",
-                            matches[0], port
+                            "[darkan-patcher-mac] NOTE: HTTP port pattern[{}] matched {} sites (expected {})",
+                            i,
+                            matches.len(),
+                            p.expected
                         );
-                    } else {
-                        eprintln!("[darkan-patcher-mac] ERROR: failed to patch HTTP port at 0x{:x}", matches[0]);
+                    }
+                    for site in matches {
+                        let addr = site + p.port_offset;
+                        if patch_memory(addr, &port_le) {
+                            patched += 1;
+                            eprintln!(
+                                "[darkan-patcher-mac] Patched HTTP content port at 0x{:x} (80 -> {})",
+                                site, port
+                            );
+                        } else {
+                            eprintln!(
+                                "[darkan-patcher-mac] ERROR: failed to patch HTTP port at 0x{:x}",
+                                site
+                            );
+                        }
                     }
                 }
-                n if HTTP_PORT_RESOLVED => {
-                    // A confirmed-unique pattern that still multi-matches means
-                    // the binary drifted; refuse rather than guess.
-                    eprintln!(
-                        "[darkan-patcher-mac] WARNING: HTTP port pattern marked resolved but matched {} sites — refusing to patch (binary drift?).",
-                        n
-                    );
-                }
-                n => eprintln!(
-                    "[darkan-patcher-mac] HTTP port pattern matched {} sites and is NOT yet \
-                     disambiguated by RE (see docs/binary/patch-targets-macos.md) — \
-                     refusing to patch to avoid hitting the wrong MOV EAX,0x50 site.",
-                    n
-                ),
+                eprintln!(
+                    "[darkan-patcher-mac] HTTP port: patched {}/{} sites (80 -> {})",
+                    patched, HTTP_PORT_EXPECTED_TOTAL, port
+                );
             }
         } else {
             eprintln!("[darkan-patcher-mac] WARNING: DARKAN_HTTP_PORT is not a valid u16 — skipping HTTP port patch");
+        }
+    }
+
+    // --- Patch 4: world-server connect() port redirect (loopback:443 -> world) ---
+    // The interpose table is linked unconditionally (dyld activates it the moment
+    // the dylib maps), but its replacement is a PURE passthrough until we arm it
+    // here. We arm ONLY in local/custom mode: this whole ctor has already
+    // returned early if DARKAN_RSA_MODULUS is unset (production unsets it), so
+    // reaching this point means custom mode. Arming additionally requires
+    // DARKAN_WORLD_PORT to be a valid u16 (run-client-mac.sh sets it in local
+    // mode and unsets it in production).
+    //
+    // Skipped in proxy mode: with an external MITM proxy the world host is not
+    // our loopback, so there is nothing to redirect (and we must not touch the
+    // proxy's own :443 path).
+    if proxy_mode {
+        eprintln!("[darkan-patcher-mac] Proxy mode: skipping world-port redirect");
+    } else {
+        // The port the client dials worlds on by default (443). Overridable via
+        // DARKAN_WORLD_FROM_PORT for forward-compat if Jagex ever changes it.
+        let from_port = env::var("DARKAN_WORLD_FROM_PORT")
+            .ok()
+            .and_then(|s| s.trim().parse::<u16>().ok())
+            .unwrap_or(world_redirect::DEFAULT_WORLD_FROM_PORT);
+
+        match env::var("DARKAN_WORLD_PORT") {
+            Ok(port_str) => match port_str.trim().parse::<u16>() {
+                Ok(to_port) if to_port != 0 && to_port != from_port => {
+                    world_redirect::arm(from_port, to_port);
+                    eprintln!(
+                        "[darkan-patcher-mac] World-port redirect ARMED: loopback:{} -> :{} \
+                         (external :{} HTTPS left untouched)",
+                        from_port, to_port, from_port
+                    );
+                }
+                Ok(to_port) if to_port == from_port => {
+                    eprintln!(
+                        "[darkan-patcher-mac] World-port redirect: DARKAN_WORLD_PORT == {} (the \
+                         world dial port) — nothing to rewrite, redirect inactive",
+                        from_port
+                    );
+                }
+                Ok(_) => {
+                    eprintln!(
+                        "[darkan-patcher-mac] World-port redirect: DARKAN_WORLD_PORT is 0 — \
+                         redirect inactive"
+                    );
+                }
+                Err(_) => {
+                    eprintln!(
+                        "[darkan-patcher-mac] WARNING: DARKAN_WORLD_PORT ('{}') is not a valid u16 \
+                         — world-port redirect inactive (client will dial :{} and fail to reach \
+                         the local world)",
+                        port_str, from_port
+                    );
+                }
+            },
+            Err(_) => {
+                eprintln!(
+                    "[darkan-patcher-mac] DARKAN_WORLD_PORT not set — world-port redirect inactive \
+                     (client will dial :{}; set DARKAN_WORLD_PORT to reach the local world)",
+                    from_port
+                );
+            }
         }
     }
 
@@ -412,12 +642,20 @@ fn find_all(regions: &[Region], finder: &Finder) -> Vec<usize> {
 // -- Patch primitive ----------------------------------------------------------
 
 /// Patch memory at `addr` with `new_bytes`, making the containing pages writable
-/// via `mprotect` (present on macOS) and restoring R+X afterward.
+/// and restoring R+X afterward.
 ///
-/// macOS hardened pages: `__TEXT` is mapped r-x. We add WRITE for the write,
-/// then restore READ|EXEC. (`__const` is r--; restoring READ|EXEC there is
-/// harmless — it stays readable. We don't have the original prot from dyld
-/// cheaply, so we restore the common safe case.)
+/// macOS maps `__TEXT` (and the `__TEXT,__const` strings we patch) r-x. On a
+/// code-signed image — the RuneScape.app wrapper is adhoc-signed — plain
+/// `mprotect(PROT_WRITE)` on those pages returns EACCES (errno 13): the kernel
+/// refuses to grant WRITE to a code-signed executable mapping. The supported
+/// route is a copy-on-write break via `mach_vm_protect` with `VM_PROT_COPY`,
+/// which privately copies the page (decoupling it from the signature) and makes
+/// it writable. This mirrors how the Linux patcher writes to `.rodata`/`__TEXT`.
+///
+/// We try `mach_vm_protect(VM_PROT_COPY | READ | WRITE)` first (works on both
+/// the signed wrapper and the unsigned rs2client), and fall back to plain
+/// `mprotect` only if the mach call is unavailable. After writing we restore the
+/// pages to READ|EXEC.
 fn patch_memory(addr: usize, new_bytes: &[u8]) -> bool {
     let page_start = addr & !(PAGE_SIZE - 1);
     let page_end_addr = addr + new_bytes.len();
@@ -425,34 +663,63 @@ fn patch_memory(addr: usize, new_bytes: &[u8]) -> bool {
     let total_len = page_end - page_start;
 
     unsafe {
-        let ret = libc::mprotect(
-            page_start as *mut c_void,
-            total_len,
-            libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC,
+        let task = mach_task_self_;
+
+        // COW-break + grant WRITE. VM_PROT_COPY makes a private copy of any
+        // shared/code-signed page so it can be written without violating the
+        // signature.
+        let kr = mach_vm_protect(
+            task,
+            page_start as u64,
+            total_len as u64,
+            0, // set_maximum = false
+            VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY,
         );
-        if ret != 0 {
-            eprintln!(
-                "[darkan-patcher-mac] mprotect(+WRITE) failed for 0x{:x}..0x{:x}: errno={}",
-                page_start,
-                page_start + total_len,
-                *libc::__error()
+        if kr != KERN_SUCCESS {
+            // Fall back to mprotect (covers any environment where the mach call
+            // is refused but the page was never code-signed to begin with).
+            let ret = libc::mprotect(
+                page_start as *mut c_void,
+                total_len,
+                libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC,
             );
-            return false;
+            if ret != 0 {
+                eprintln!(
+                    "[darkan-patcher-mac] mach_vm_protect(+WRITE|COPY) failed (kr={}) and mprotect(+WRITE) failed for 0x{:x}..0x{:x}: errno={}",
+                    kr,
+                    page_start,
+                    page_start + total_len,
+                    *libc::__error()
+                );
+                return false;
+            }
         }
 
         ptr::copy_nonoverlapping(new_bytes.as_ptr(), addr as *mut u8, new_bytes.len());
 
-        let ret = libc::mprotect(
-            page_start as *mut c_void,
-            total_len,
-            libc::PROT_READ | libc::PROT_EXEC,
+        // Restore READ|EXEC (drop WRITE). The page is now a private copy; this
+        // keeps it executable for the code that reads the patched string/literal.
+        let kr = mach_vm_protect(
+            task,
+            page_start as u64,
+            total_len as u64,
+            0,
+            VM_PROT_READ | VM_PROT_EXECUTE,
         );
-        if ret != 0 {
-            eprintln!(
-                "[darkan-patcher-mac] WARNING: mprotect(restore) failed for 0x{:x}: errno={}",
-                page_start,
-                *libc::__error()
+        if kr != KERN_SUCCESS {
+            let ret = libc::mprotect(
+                page_start as *mut c_void,
+                total_len,
+                libc::PROT_READ | libc::PROT_EXEC,
             );
+            if ret != 0 {
+                eprintln!(
+                    "[darkan-patcher-mac] WARNING: protect(restore R+X) failed for 0x{:x} (mach kr={}, errno={})",
+                    page_start,
+                    kr,
+                    *libc::__error()
+                );
+            }
         }
     }
 
@@ -517,9 +784,35 @@ mod tests {
         assert_eq!(RS2CLIENT_MODULUS_HEX_LEN, 256);
         assert_eq!(RS2CLIENT_JS5_MODULUS_PREFIX.len(), 32);
         assert_eq!(RS2CLIENT_JS5_MODULUS_HEX_LEN, 1024);
-        // HTTP port pattern (clang MOV EAX,0x50 + JMP short) and its immediate offset.
-        assert_eq!(HTTP_PORT_PATTERN, &[0xb8, 0x50, 0x00, 0x00, 0x00, 0xeb]);
-        assert_eq!(HTTP_PORT_PATCH_OFFSET, 1);
+        // The RuneScape.app wrapper's 4096-bit launcher key (== rs3linux's key).
+        // Must be byte-identical to the Linux patcher's RS3LINUX_MODULUS_PREFIX.
+        assert_eq!(RUNESCAPE_WRAPPER_JS5_MODULUS_PREFIX.len(), 32);
+        assert_eq!(RUNESCAPE_WRAPPER_JS5_MODULUS_PREFIX, b"a49962fc0737fddcd94c0daf84e5d214");
+        // Both JS5 prefixes are tried; each is a 32-char hex prefix.
+        assert_eq!(JS5_MODULUS_PREFIXES.len(), 2);
+        assert!(JS5_MODULUS_PREFIXES.contains(&RS2CLIENT_JS5_MODULUS_PREFIX));
+        assert!(JS5_MODULUS_PREFIXES.contains(&RUNESCAPE_WRAPPER_JS5_MODULUS_PREFIX));
+        for p in JS5_MODULUS_PREFIXES {
+            assert_eq!(p.len(), 32);
+        }
+        // HTTP port patterns (clang 16-bit `66`-prefixed MOV) — RE-resolved, 3 sites total.
+        assert_eq!(HTTP_PORT_PATTERNS.len(), 2);
+        assert_eq!(
+            HTTP_PORT_EXPECTED_TOTAL,
+            HTTP_PORT_PATTERNS.iter().map(|p| p.expected).sum::<usize>()
+        );
+        for p in HTTP_PORT_PATTERNS {
+            // Each pattern carries the operand-size prefix and the port at +2.
+            assert_eq!(p.pattern[0], 0x66);
+            assert_eq!(p.port_offset, 2);
+            // The 2 bytes at +2 encode port 80 (0x0050) little-endian.
+            assert_eq!(&p.pattern[p.port_offset..p.port_offset + 2], &[0x50, 0x00]);
+            // The 0x1b58 (worldId+7000) alternate-port marker must be present.
+            assert!(
+                p.pattern.windows(2).any(|w| w == [0x58, 0x1b]),
+                "pattern must contain the 0x1b58 alternate-port marker"
+            );
+        }
     }
 
     #[test]

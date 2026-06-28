@@ -12,18 +12,18 @@ import world.gregs.voidps.buffer.*
  * and §4, all frame and sub-packet opcodes MOVED in 948:
  *
  * Frame opcodes:
- *  - UPDATE_ZONE_FULL_FOLLOWS:       947-3 op 18 → **948 op 78** (3B, handler @ 0x000f9510)
- *  - UPDATE_ZONE_PARTIAL_FOLLOWS:    947-3 op 57 → **948 op 41** (3B, handler @ 0x000ef150)
- *  - UPDATE_ZONE_PARTIAL_ENCLOSED:   947-3 op 126 → **948 op 76** (varShort, handler @ 0x000eefc0)
+ *  - UPDATE_ZONE_FULL_FOLLOWS:       947-3 op 18 → **948 op 78** (3B, handler @ 0x10004c6d0)
+ *  - UPDATE_ZONE_PARTIAL_FOLLOWS:    947-3 op 57 → **948 op 41** (3B, handler @ 0x10004c4e0)
+ *  - UPDATE_ZONE_PARTIAL_ENCLOSED:   947-3 op 126 → **948 op 76** (varShort, handler @ 0x10004dad0)
  *
  * Standalone sub-packet opcodes (all M-confidence per Phase 1):
  *  - LOC_ADD:                        947-3 op 79 → **948 op 90** (varByte, @ 0x00139080)
- *  - LOC_DEL:                        947-3 op 37 → **948 op 16** (2B, @ 0x001382d0)
+ *  - LOC_DEL:                        947-3 op 37 → **948 op 16** (2B, @ 0x100051e40)
  *  - LOC_CUSTOMISE:                  947-3 op 41 → **948 op 50** (varByte, @ 0x0013f5f0)
  *  - LOC_PREFETCH:                   947-3 op 51 → **948 op 6** (7B, @ 0x00138110)
  *  - LOC_ANIM_SPECIFIC:              947-3 op 56 → **948 op 21** (10B, @ 0x00118ef0)
  *  - LOC_MERGE:                      947-3 op 197 → **948 op 170** (5B, @ 0x000eeba0)
- *  - OBJ_ADD:                        947-3 op 38 → **948 op 46** (5B, @ 0x00119240)
+ *  - OBJ_ADD:                        947-3 op 38 → **948 op 46** (5B, @ 0x100053f20)
  *  - OBJ_DEL:                        947-3 op 42 → **948 op 107** (3B, @ 0x00152b00)
  *  - OBJ_COUNT:                      947-3 op 60 → **948 op 125** (7B, @ 0x001190d0)
  *  - OBJ_REVEAL:                     947-3 op 20 → **948 op 71** (7B, @ 0x000f37b0)
@@ -35,15 +35,9 @@ import world.gregs.voidps.buffer.*
  *  - PROJANIM_SPECIFIC_HALT:         947-3 op 192 → **948 op 177** (29B, @ 0x000f1840)
  *  - SOUND_AREA:                     947-3 op 167 → **948 op 168** (varByte, @ 0x00151c10)
  *
- * **IMPORTANT byte-format flag from delta doc:** UPDATE_ZONE_PARTIAL_FOLLOWS (948 op 41)'s
- * 3-byte zone header is "slightly reordered" vs 947-3 per the delta doc's §2 note. The exact
- * reorder was NOT extracted in Phase 1 — a focused decompile of `@ 0x000ef150` is needed
- * before relying on this encoder for production traffic. The encoder below uses the 947-3
- * order as a starting point; flag this as TODO for follow-up RE.
- *
- * For all other zone packets the byte layouts are presumed byte-equivalent to their 947-3
- * counterparts (the Phase 1 walk did not flag transform changes for them). Cross-verify
- * against captures before production use.
+ * Current 948-5 Ghidra verification resolves the op 41 reorder: the header order is zoneX+128,
+ * level byteAdd, zoneY. op 76/op78 frame headers are likewise current-binary verified. Standalone
+ * sub-packet bodies remain documented individually below.
  */
 internal fun Codec.registerRev948ServerCodecsZone() {
 
@@ -51,7 +45,7 @@ internal fun Codec.registerRev948ServerCodecsZone() {
     // Frame packets
     // -----------------------------------------------------------------------
 
-    // UPDATE_ZONE_FULL_FOLLOWS (op 78, 3B) — handler @ 0x000f9510 (asm-verified).
+    // UPDATE_ZONE_FULL_FOLLOWS (op 78, 3B) — handler @ 0x10004c6d0 (Ghidra 948-5).
     //   Wire: [+0]=level(byteAdd), [+1]=zoneY(byteSubtract), [+2]=zoneX(raw signed byte).
     //   Handler: DAT_a8=(byte+0x80)=level ; DAT_b0=base60c+(char)(-0x80-byte)*8=zoneY ;
     //            DAT_ac=base608+byte*8=zoneX.
@@ -63,7 +57,7 @@ internal fun Codec.registerRev948ServerCodecsZone() {
     }
 
     // UPDATE_ZONE_PARTIAL_FOLLOWS (op 41, 3B) — handler jag::packethandlers::ZoneUpdates::
-    //   UPDATE_ZONE_PARTIAL_FOLLOWS @ 0x000ef150 (asm-verified — resolves the prior TODO).
+    //   UPDATE_ZONE_PARTIAL_FOLLOWS_OP41 @ 0x10004c4e0 (Ghidra 948-5).
     //   Wire: [+0]=zoneX+128(raw unsigned byte), [+1]=level(byteAdd), [+2]=zoneY(raw signed byte).
     //   Handler: DAT_ac=base608-0x400+byte*8=zoneX ; DAT_a8=(byte+0x80)=level ;
     //            DAT_b0=base60c+(char)byte*8=zoneY.
@@ -74,11 +68,11 @@ internal fun Codec.registerRev948ServerCodecsZone() {
         out.writeByte(zoneY)
     }
 
-    // UPDATE_ZONE_PARTIAL_ENCLOSED (op 76, varShort) — handler @ 0x000eefc0 (asm-verified).
+    // UPDATE_ZONE_PARTIAL_ENCLOSED (op 76, varShort) — handler @ 0x10004dad0 (Ghidra 948-5).
     //   Header wire: [+0]=level(byteInverse), [+1]=zoneY(raw signed byte), [+2]=zoneX(byteSubtract).
     //   Handler: DAT_a8=(-byte)&0xff=level ; DAT_b0=base60c+(char)byte*8=zoneY ;
     //            DAT_ac=base608+(char)(-0x80-byte)*8=zoneX.
-    //   Then loops sub-opcodes via g_zoneSubProtVector @ DAT_015d4580 (sub-op>0x11 => error).
+    //   Then loops sub-opcodes via g_zoneSubProtVector @ DAT_100f12830 (sub-op>0x11 => error).
     //   FIXED from prior placeholder (byte1/byte2 transforms were wrong).
     serverProt<UpdateZonePartialEnclosed>(opcode = 76, size = ProtSize.VarShort) { out ->
         out.writeByteInverse(level)
@@ -106,7 +100,8 @@ internal fun Codec.registerRev948ServerCodecsZone() {
         extra?.let { out.writeByte(it) }
     }
 
-    // LOC_DEL (op 16, 2B). Wire: g1(-128-shapeFlags); g1_neg packedCoord.
+    // LOC_DEL (op 16, 2B) — Ghidra handler jag::packethandlers::ZoneUpdates::LOC_DEL_OP16
+    // @ 0x100051e40. Wire: g1(-128-shapeFlags); g1_neg packedCoord.
     serverProt<LocDel>(opcode = 16, size = 2) { out ->
         out.writeByte(-128 - shapeFlags)
         out.writeByteInverse(packedCoord)

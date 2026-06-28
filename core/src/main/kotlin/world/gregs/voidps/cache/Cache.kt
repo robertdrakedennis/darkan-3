@@ -245,6 +245,7 @@ interface Cache {
         private val inventoryDefinitions by lazy { Definitions(InventoryDecoder(), get()) }
         private val questDefinitions by lazy { Definitions(QuestDecoder(), get()) }
         private val spriteDefinitions by lazy { Definitions(SpriteDecoder(), get()) }
+        private val bodyDefinitions by lazy { Definitions(BodyDecoder(), get()) }
 
         @JvmStatic fun param(id: Int): ParamDefinition? = paramDefinitions.getOrNull(id)
         @JvmStatic fun cursor(id: Int): CursorDefinition? = cursorDefinitions.getOrNull(id)
@@ -255,6 +256,14 @@ interface Cache {
         @JvmStatic fun quest(id: Int): QuestDefinition? = questDefinitions.getOrNull(id)
         @JvmStatic fun sprite(id: Int): SpriteDefinition? = spriteDefinitions.getOrNull(id)
         @JvmStatic fun seq(id: Int): AnimationDefinition? = animation(id)
+
+        /**
+         * Body / wear-pos ("WearposDefaults") def (DEFAULTS/archive-6/file-0 per id). The appearance
+         * encoder resolves this for the avatar's body type to drive the emitted slot order from
+         * [BodyDefinition.disabledSlots]. The appearance kit-colour/kit-style count is NOT taken from
+         * here — it is a hard-coded 10 in the client (see [BodyDefinition]).
+         */
+        @JvmStatic fun body(id: Int): BodyDefinition? = bodyDefinitions.getOrNull(id)
 
         // --- Region (MAPSV2) accessor ---
         //

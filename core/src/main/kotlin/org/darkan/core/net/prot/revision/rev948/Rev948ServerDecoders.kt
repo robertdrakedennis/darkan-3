@@ -159,6 +159,22 @@ internal fun Codec.registerRev948ServerDecoders() {
         val componentHash = readUIntLittle()
         "componentHash=${compRef(componentHash)}"
     }
+    // IF_SET_COMPONENT_PROPERTY_TYPE3 (op 96, 4B): componentHash (g4_alt3).
+    serverDecode(96) {
+        val componentHash = readUIntInverseMiddle()
+        "componentHash=${compRef(componentHash)} propertyType=3"
+    }
+    // IF_SET_COMPONENT_PROPERTY_TYPE5 (op 101, 4B): componentHash (g4_alt2).
+    serverDecode(101) {
+        val componentHash = readUIntMiddle()
+        "componentHash=${compRef(componentHash)} propertyType=5"
+    }
+    // IF_SETMODEL (op 102, 8B): model id/value (g4_alt2), componentHash (BE).
+    serverDecode(102) {
+        val modelId = readUIntMiddle()
+        val componentHash = readInt()
+        "componentHash=${compRef(componentHash)} model=$modelId"
+    }
     // IF_SETGRAPHIC (op 30, 8B): componentHash (g4_alt3), graphicId (g4_alt3).
     serverDecode(30) {
         val componentHash = readUIntInverseMiddle()
@@ -177,15 +193,38 @@ internal fun Codec.registerRev948ServerDecoders() {
         val componentHash = readUIntInverseMiddle()
         "componentHash=${compRef(componentHash)} text=\"$text\""
     }
+    // IF_SET_COMPONENT_PROPERTY_TYPE7 (op 115, 10B): field0 BE, field1/field2 LE, componentHash LE.
+    serverDecode(115) {
+        val field0 = readUShort()
+        val field1 = readUShortLittle()
+        val field2 = readUShortLittle()
+        val componentHash = readUIntLittle()
+        "componentHash=${compRef(componentHash)} field0=$field0 field1=$field1 field2=$field2"
+    }
+    // IF_SET_HTTP_IMAGE (op 152, varByte): CP1252 null-terminated image/resource path.
+    serverDecode(152) {
+        val imageUrl = readRSString()
+        "imageUrl=\"$imageUrl\""
+    }
 
     // ------------------------------------------------------------------ MISC
-    // UPDATE_RUNENERGY / SET_RUN_ENERGY (op 80, 1B).
-    serverDecode(80) {
+    // UPDATE_RUNENERGY (op 13, 1B, g1): run energy 0..100 RAW. The real run-energy opcode
+    // (recorder-capture-points.md §10.4); handler jag::packethandlers::Misc::UPDATE_RUNENERGY.
+    serverDecode(13) {
         "runEnergy=${readUByte()}"
+    }
+    // SETFILTER_PRIVATE (op 80, 1B, g1): private-chat filter {0=On,1=Friends,2=Off}. NOT run energy
+    // (corrected 2026-06-27, §10.4); handler jag::packethandlers::Misc::SETFILTER_PRIVATE.
+    serverDecode(80) {
+        "filterPrivate=${readUByte()}"
     }
     // JCOINS_UPDATE (op 191, 4B): BE int balance.
     serverDecode(191) {
         "jcoins=${readInt()}"
+    }
+    // SCENE_TIMING_BASE (op 74, 4B): BE int stored into Client+0x19db8+0x64.
+    serverDecode(74) {
+        "sceneTimingBase=${readInt()}"
     }
     // SET_PLAYER_OP (op 17, varByte): worldId (LE), slot (byteInverse - 1), text, cursorVisible.
     serverDecode(17) {

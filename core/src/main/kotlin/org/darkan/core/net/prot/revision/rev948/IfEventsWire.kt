@@ -6,7 +6,7 @@ import org.darkan.core.model.IFEvents
  * Rev948 wire decoder for the 12-byte IF_SETEVENTS2 payload (op 35).
  *
  * Wire layout per `docs/net/serverprot/948-research-B-interface-social.md`
- * (handler @ 0x00186040, "IF_SETEVENTS2 (op 35, 12B)"):
+ * (handler @ 0x1000a5910, "IF_SETEVENTS2 (op 35, 12B)"):
  * `[0..3] g4_alt2 settings` `[4..5] LE i16 fromSlot (0xFFFF -> -1)`
  * `[6..7] LE i16 toSlot (0xFFFF -> -1)` `[8..11] BE u32 componentHash`
  *

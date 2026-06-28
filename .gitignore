@@ -82,3 +82,9 @@ target/
 /engine/native-bootstrap/build/
 # Local Claude Code settings
 .claude/settings.local.json
+
+# macOS Finder metadata
+.DS_Store
+
+# machine-specific symlink to the local 948 SQLite cache (cache content already ignored)
+/data/cache
