@@ -6,10 +6,10 @@ import org.darkan.core.Logger
 import org.darkan.core.mongo.Accounts
 import org.darkan.core.mongo.MongoManager
 import org.darkan.core.net.login.WorldLoginTokens
-import org.darkan.core.net.prot.handler.PacketHandlers
 import org.darkan.core.net.prot.revision.rev948.register948
 import org.darkan.world.entity.Rev948FirstLightVarpDefaults
 import org.darkan.world.server.WorldServer
+import org.darkan.world.server.packet.registerWorldPacketHandlers
 
 fun main() {
     Logger.setLogLevel(when (EnvVars.logLevel.uppercase()) {
@@ -32,8 +32,8 @@ fun main() {
     register948()
     Logger.log("Main", "Registered rev948 codec")
 
-    // Load packet handlers from the world server packet package
-    PacketHandlers.loadHandlersFromPackage("org.darkan.world.server.packet")
+    // Register the world server packet handlers (explicit, compile-checked)
+    registerWorldPacketHandlers()
 
     Logger.log("Main", "Loaded ${Rev948FirstLightVarpDefaults.size()} first-light varps")
 

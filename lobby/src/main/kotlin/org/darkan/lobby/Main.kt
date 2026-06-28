@@ -6,8 +6,8 @@ import org.darkan.core.Logger
 import org.darkan.core.mongo.Accounts
 import org.darkan.core.mongo.MongoManager
 import org.darkan.core.net.login.WorldLoginTokens
-import org.darkan.core.net.prot.handler.PacketHandlers
 import org.darkan.core.net.prot.revision.rev948.register948
+import org.darkan.lobby.server.packet.registerLobbyPacketHandlers
 import world.gregs.voidps.cache.Cache
 import world.gregs.voidps.cache.file.FileProvider
 import world.gregs.voidps.cache.file.prefetchKeys
@@ -38,7 +38,7 @@ fun main() {
     // Register protocol codec and packet handlers
     register948()
     Logger.log("Main", "Registered rev948 codec")
-    PacketHandlers.loadHandlersFromPackage("org.darkan.lobby.server.packet")
+    registerLobbyPacketHandlers()
 
     Logger.log("Main", "Loading cache...")
     val cache = Cache.get()

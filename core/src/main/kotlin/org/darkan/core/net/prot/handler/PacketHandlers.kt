@@ -1,12 +1,10 @@
 package org.darkan.core.net.prot.handler
 
-import org.darkan.core.Logger.logError
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logWarn
-import org.darkan.core.getClasses
 import org.darkan.core.net.prot.ClientProt
 import org.darkan.core.net.prot.UnhandledClientProt
-import java.lang.reflect.ParameterizedType
+import kotlin.reflect.KClass
 
 interface PacketHandler<T, K : ClientProt> {
     suspend fun handle(player: T, packet: K)
@@ -15,32 +13,26 @@ interface PacketHandler<T, K : ClientProt> {
 object PacketHandlers {
     private val PACKET_HANDLERS = mutableMapOf<Class<out ClientProt>, PacketHandler<*, out ClientProt>>()
 
-    fun loadHandlersFromPackage(pack: String) {
-        try {
-            logInfo("Initializing packet handlers ($pack)...")
-            val classes = getClasses(pack)
-
-            classes
-                .filter { PacketHandler::class.java.isAssignableFrom(it) }
-                .forEach { clazz ->
-                    @Suppress("UNCHECKED_CAST")
-                    mapHandler(clazz.getConstructor().newInstance() as PacketHandler<*, out ClientProt>)
-                }
-            logInfo("Packet handlers loaded for ${PACKET_HANDLERS.size} packets...")
-        } catch (e: Exception) {
-            // A classpath/scanning failure here would otherwise yield a silently
-            // handler-less server — surface it and fail fast.
-            logError("Failed to load packet handlers from package $pack", e)
-            throw e
+    /**
+     * Bind [handler] to the [packetClass] it decodes, compile-checked end-to-end.
+     *
+     * Because the handler's packet-type parameter `K` is constrained to equal [packetClass]'s type,
+     * a miswired pair (e.g. `register(IfButton::class, PingHandler())`) is a COMPILE error — the
+     * compiler enforces the handler↔packet edge that the old `genericInterfaces[0]` reflection only
+     * discovered (and silently mis-bound) at runtime.
+     *
+     * Registering the same [packetClass] twice fails fast with an [error]: the previous classpath
+     * scan silently let a later handler overwrite an earlier one (last-wins), so a duplicate is now
+     * a loud boot failure instead of a quietly-dropped handler.
+     */
+    fun <K : ClientProt> register(packetClass: KClass<K>, handler: PacketHandler<*, K>) {
+        val existing = PACKET_HANDLERS.put(packetClass.java, handler)
+        if (existing != null) {
+            error(
+                "Duplicate packet handler registration for ${packetClass.java.name}: " +
+                    "${existing.javaClass.simpleName} already registered, refused ${handler.javaClass.simpleName}"
+            )
         }
-    }
-
-    fun mapHandler(handler: PacketHandler<*, out ClientProt>) {
-        val type = handler.javaClass.genericInterfaces[0] as ParameterizedType
-        @Suppress("UNCHECKED_CAST")
-        val clazz = type.actualTypeArguments[1] as Class<ClientProt>
-        logInfo("  Mapped handler: ${handler.javaClass.simpleName} -> ${clazz.simpleName} (${clazz.name})")
-        PACKET_HANDLERS[clazz] = handler
     }
 
     /**
