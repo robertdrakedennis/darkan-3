@@ -5,6 +5,21 @@ import org.darkan.core.net.prot.LocDel
 import org.darkan.core.net.prot.ObjAdd
 import org.darkan.core.net.prot.ServerProt
 
+/**
+ * FROZEN DEV-SCAFFOLDING — ~40 captured Lumbridge zone spawns (ObjAdd/LocAdd/LocDel), replayed
+ * per-zone during the world-entry op78 scene stream. These records were lifted verbatim from ONE
+ * single-player Lumbridge recording; NONE of it is derived from real world state (no ground-item,
+ * loc-spawn, or loc-removal registry backs it).
+ *
+ * Conceptually part of the same "first light" single-player demo family as
+ * `WorldEntry.sendInitialStats` / `sendInitialInventories` (see [org.darkan.core.EnvVars.firstLightScaffolding]).
+ * It is NOT runtime-gated by that flag yet: it is replayed inside `ZoneStreamer.streamScene`, so the
+ * gate lands when the zone stream is reworked to read from a real per-zone `ObjSpawn`/`LocSpawn`
+ * registry (NETWORKING_AUDIT.md §4.3).
+ *
+ * TODO(Phase 1.3+): replace with a real per-zone spawn registry the zone streamer reads from, and
+ * gate behind [org.darkan.core.EnvVars.firstLightScaffolding].
+ */
 object FirstLightSceneBootstrap {
     private data class ZoneKey(val level: Int, val zoneX: Int, val zoneY: Int)
 

@@ -91,6 +91,19 @@ object EnvVars {
     val worldCountry: String = dotenv.get("WORLD_COUNTRY", "USA")
     val worldHighlighted: Boolean = dotenv.get("WORLD_HIGHLIGHTED", "false").toBooleanStrict()
 
+    /**
+     * Emit the FROZEN single-player "first light" dev-scaffolding at world entry — the captured stat
+     * block ([WorldEntry]'s `sendInitialStats`: 28 skills replayed from one recording), the captured
+     * inventory/container block (`sendInitialInventories`: hardcoded item ids + the bronze-dagger worn
+     * loadout), and the captured Lumbridge zone spawns (`FirstLightSceneBootstrap`'s ~40 ObjAdd/LocAdd
+     * records). NONE of it is derived from real world state.
+     *
+     * DEFAULTS TO TRUE so current behaviour is preserved. Set FALSE once real inventory / stat /
+     * zone-spawn services exist (a later phase) to stop replaying the capture. This is the one flag
+     * that fences off all of the world-entry single-player demo data.
+     */
+    val firstLightScaffolding: Boolean = dotenv.get("FIRST_LIGHT_SCAFFOLDING", "true").toBooleanStrict()
+
     // Cold-lobby Play handoff. When FALSE (default, PROD-like) the server does NOT push op213
     // SwitchWorld on the lobby "Play Now" click — the client drives the lobby->world connect itself
     // from the login-data world tail and renders the "Joining World / Please Wait" dialog via its own
