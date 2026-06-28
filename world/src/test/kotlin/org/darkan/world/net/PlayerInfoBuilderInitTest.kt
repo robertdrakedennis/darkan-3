@@ -18,7 +18,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * Unit regression for [PlayerInfoBuilder.buildInit] (docs/protocol/world-bootstrap-948.md §4.3).
+ * Unit regression for [PlayerInfoEncoder.buildInit] (docs/protocol/world-bootstrap-948.md §4.3).
  *
  * Proves `buildInit` generates a per-tick-shaped GPI init from local state with the local player's
  * 30-bit tile == its spawn tile, routed through the teleport/absolute high-res path
@@ -69,7 +69,7 @@ class PlayerInfoBuilderInitTest {
         val spawn = Tile(3200, 3200, 0)            // Lumbridge → zone (400, 400)
         val player = newPlayer(spawn)
 
-        val info = PlayerInfoBuilder.buildInit(player)
+        val info = PlayerInfoEncoder.buildInit(player)
 
         // Decode the local-player high-res init bits: [1 hasUpdate][1 hasExtInfo][2 movementType][30 tile].
         val r = BufferReader(info.bitBlock)
@@ -102,19 +102,19 @@ class PlayerInfoBuilderInitTest {
 
         // Sanity: with firstTick still set (the un-suppressed default), tick 1 WOULD emit an init op22.
         assertTrue(player.viewport.firstTick, "fresh viewport starts with firstTick == true")
-        val withInit = PlayerInfoBuilder.buildIfNeeded(player)
+        val withInit = PlayerInfoEncoder.buildIfNeeded(player)
         assertNotNull(withInit, "with firstTick set, buildIfNeeded returns the GPI init (would be op22)")
 
         player.viewport.cachedApprHashes[player.index] = null
         player.viewport.firstTick = false
-        val sync = PlayerInfoBuilder.buildIfNeeded(player)
+        val sync = PlayerInfoEncoder.buildIfNeeded(player)
         assertNotNull(sync, "with firstTick cleared, undelivered appearance emits per-tick op22")
         assertEquals(1, sync.extendedInfo.size)
 
         // BUG-1 fix: a no-op tick still emits an op22 — the stationary "idle loop" prod sends every
         // tick to re-commit the local avatar so a spawned, stationary player STAYS put. The body is
         // the stationary-hold form (local hasUpdate=0) with NO ext-info (appearance already sent).
-        val idle = PlayerInfoBuilder.buildIfNeeded(player)
+        val idle = PlayerInfoEncoder.buildIfNeeded(player)
         assertEquals(0, idle.extendedInfo.size, "idle tick carries no ext-info (appearance delivered)")
         val r = BufferReader(idle.bitBlock)
         r.startBitAccess()
@@ -126,11 +126,11 @@ class PlayerInfoBuilderInitTest {
     fun `world-entry sync starts with production local appearance shape`() {
         val player = newPlayer(Tile(3200, 3200, 0))
 
-        val info = PlayerInfoBuilder.buildWorldEntrySync(player)
+        val info = PlayerInfoEncoder.buildWorldEntrySync(player)
 
         // Baseline idle world-entry op22 (local hasUpdate=0 stationary hold + the low-res skip-run). The
         // local appearance is NOT deliverable via this op22 (the client excludes the local slot from the
-        // ext-info path); the prod-accurate inline-GPI delivery is a pending follow-up (see PlayerInfoBuilder).
+        // ext-info path); the prod-accurate inline-GPI delivery is a pending follow-up (see PlayerInfoEncoder).
         // Byte-aligned bit-block (the client byte-aligns the bit cursor at each pass boundary): Pass-1 local
         // [active=1][hasExt=1][mvt=0] → 0xC0; Pass-3 low-res skip-run (2045) → 0x7F 0xF4. (Was the broken,
         // pass-packed `c7 ff 40` that desynced the client's ext-info drain → invisible avatar.)
@@ -150,9 +150,9 @@ class PlayerInfoBuilderInitTest {
         // [lead=0][mode=3][count=2045 as 11 bits] (14 bits) = 17 bits → 3 bytes `0f fe 80`.
         val player = newPlayer(Tile(3224, 3216, 0))
         // Drive past world entry so firstTick is cleared and the appearance is already delivered.
-        PlayerInfoBuilder.buildWorldEntrySync(player)
+        PlayerInfoEncoder.buildWorldEntrySync(player)
 
-        val idle = PlayerInfoBuilder.buildIfNeeded(player)
+        val idle = PlayerInfoEncoder.buildIfNeeded(player)
         assertEquals(0, idle.extendedInfo.size, "idle tick carries no ext-info once appearance is delivered")
         assertContentEquals(
             byteArrayOf(0x00, 0x7F, 0xF4.toByte()),
@@ -167,7 +167,7 @@ class PlayerInfoBuilderInitTest {
         val spawn = Tile(2440, 3090, 0)            // Falador-ish → zone (305, 386)
         val player = newPlayer(spawn)
 
-        val info = PlayerInfoBuilder.buildInit(player)
+        val info = PlayerInfoEncoder.buildInit(player)
 
         val r = BufferReader(info.bitBlock)
         r.startBitAccess()

@@ -11,8 +11,8 @@ import org.darkan.core.Logger.logError
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logWarn
 import org.darkan.core.net.prot.AntiCheatChallenge
-import org.darkan.world.net.NpcInfoBuilder
-import org.darkan.world.net.PlayerInfoBuilder
+import org.darkan.world.net.NpcInfoEncoder
+import org.darkan.world.net.PlayerInfoEncoder
 import org.darkan.world.net.ZoneBundleBuilder
 import org.darkan.world.entity.Player
 import org.darkan.world.world.Npcs
@@ -125,10 +125,10 @@ object WorldTick {
 
                 // Always emits an op22 each tick (stationary-hold when idle) — the prod "idle loop"
                 // that re-commits the local avatar's smoothing each tick so a spawned, stationary
-                // player STAYS at its tile (BUG-1 fix; see PlayerInfoBuilder.buildIfNeeded).
-                player.session.queuePacket(PlayerInfoBuilder.buildIfNeeded(player))
+                // player STAYS at its tile (BUG-1 fix; see PlayerInfoEncoder.buildIfNeeded).
+                player.session.queuePacket(PlayerInfoEncoder.buildIfNeeded(player))
                 if (viewport.visibleNpcs.isNotEmpty()) {
-                    player.session.queuePacket(NpcInfoBuilder.build(player))
+                    player.session.queuePacket(NpcInfoEncoder.build(player))
                 }
             } catch (e: Exception) {
                 logError("Per-player tick failed: ${player.account.username}", e)

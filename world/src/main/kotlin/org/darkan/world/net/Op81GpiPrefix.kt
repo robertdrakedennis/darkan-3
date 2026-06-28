@@ -9,7 +9,7 @@ import world.gregs.voidps.type.Tile
  * `REBUILD_NORMAL_SIMPLE` (op81) body. This is the keystone of **Shape B**
  * (`docs/protocol/world-bootstrap-948.md` §"⚠️ CORRECTION (2026-06-23)").
  *
- * ## Why this is a SEPARATE encoder (not [PlayerInfoBuilder.buildInit])
+ * ## Why this is a SEPARATE encoder (not [PlayerInfoEncoder.buildInit])
  *
  * On world entry the client sets `worldState+0x49 = 1` (GPI-present) at the state→30 (LOGGED_IN)
  * transition. With that flag set, op81's handler (`@0x001daa70`) calls the GPI-prefix parser
@@ -17,7 +17,7 @@ import world.gregs.voidps.type.Tile
  * full prefix. That parser is `gBit`-based with **NO bounds check** and reads, MSB-first:
  *   - **Local player FIRST:** `gBit(30)` = the packed absolute tile, read DIRECTLY — there is no
  *     `[hasUpdate][hasExt][movementType]` header. This is the critical structural difference from
- *     [PlayerInfoBuilder.buildInit]/`encodeLocalPlayerInit`, which emits the per-tick op22 shape
+ *     [PlayerInfoEncoder.buildInit]/[PlayerMovementEncoder.encodeAbsoluteTile], which emits the per-tick op22 shape
  *     `[gBit(1) hasUpdate][gBit(1) hasExt][gBit(2) moveType=3][gBit(30) tile]`. Feeding the op81
  *     parser that 4-bit-prefixed form would mis-decode the local tile (the 4 header bits would be
  *     swallowed into the high bits of the "tile") — INCOMPATIBLE. Hence a distinct encoder.

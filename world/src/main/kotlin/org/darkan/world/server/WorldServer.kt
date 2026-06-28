@@ -26,9 +26,9 @@ import org.darkan.core.model.Account
 import org.darkan.core.mongo.Accounts
 import org.darkan.core.social.gateway.*
 import org.darkan.world.net.GameHud
-import org.darkan.world.net.NpcInfoBuilder
+import org.darkan.world.net.NpcInfoEncoder
 import org.darkan.world.net.Op81GpiPrefix
-import org.darkan.world.net.PlayerInfoBuilder
+import org.darkan.world.net.PlayerInfoEncoder
 import org.darkan.world.net.SceneMapCacheDiagnostics
 import org.darkan.world.net.SceneMapRegionPlanner
 import org.darkan.world.net.ZoneStreamer
@@ -400,14 +400,14 @@ object WorldServer {
 
                 // Step 14: Send the world-init burst (op81 scene build + UI ops + op5 + varp
                 // baseline). The spawn tile is the SINGLE source of truth: it drives the op81 coord-header centre
-                // zone here AND the op22 GPI local 30-bit tile below (PlayerInfoBuilder reads
+                // zone here AND the op22 GPI local 30-bit tile below (PlayerInfoEncoder reads
                 // player.tile). They are now coherent — the 400-vs-404 split + captured 404/404
                 // prefix that quit the client (docs/protocol/world-bootstrap-948.md §4) is gone.
                 sendWorldInitPackets(session, player)
 
                 session.send(DestroyZoneData())
                 session.send(SetNpcOp())
-                session.send(PlayerInfoBuilder.buildWorldEntrySync(player))
+                session.send(PlayerInfoEncoder.buildWorldEntrySync(player))
                 session.send(CamUpdate.firstLight())
                 session.send(UpdateIgnoreListRaw())
 
@@ -734,7 +734,7 @@ object WorldServer {
         session.send(NpcInfoThunk())
         session.send(TriggerOnDialogAbort())
         session.send(ClearPendingUpdates())
-        session.send(NpcInfoBuilder.buildInit(player))
+        session.send(NpcInfoEncoder.buildInit(player))
         sendInitialStats(session)
         session.send(UpdateRunWeight(0))
         // Run energy via op13 (UPDATE_RUNENERGY), g1 0..100 — full bar. (op80 is the chat filter; §10.4.)
