@@ -1,0 +1,29 @@
+world/src/main/kotlin/org/darkan/world/net/FirstLightSceneBootstrap.kt
+  s_9907f8fcaf3549::t_66e8638615ad47 8-22
+core/src/main/kotlin/org/darkan/core/EnvVars.kt
+  s_9907f8fcaf3549::t_0dae5bdaa72ff8 94-106
+world/src/main/kotlin/org/darkan/world/server/WorldServer.kt
+  s_9907f8fcaf3549::t_af094d6d974d54 510-514,516-518
+  s_9907f8fcaf3549::t_ad1d2c1b8f554d 391-396
+world/src/main/kotlin/org/darkan/world/server/WorldEntry.kt
+  s_9907f8fcaf3549::t_4c1fa99fffedbb 1-5,7-74,77-287,290-330
+  s_9907f8fcaf3549::t_60d4d85780ac6b 75-76
+  s_9907f8fcaf3549::t_dd2195c9d7eaa9 288-289
+  s_9907f8fcaf3549::t_305a3ba0d1c82a 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "961c34b77ea6d702e81f49efc12d0c2f104b20fc",
+  "prompts": {},
+  "sessions": {
+    "s_9907f8fcaf3549": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0299578f-9d32-4d57-ae22-c664814afe72",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
