@@ -1,0 +1,19 @@
+re-resources
+  s_1823696b35ea73::t_b376ce6372bb1c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "ea2e0217de6f47e5fec89656504741d904935fbd",
+  "prompts": {},
+  "sessions": {
+    "s_1823696b35ea73": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5308ab37-6005-4048-a97c-21d44a37fd4b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
