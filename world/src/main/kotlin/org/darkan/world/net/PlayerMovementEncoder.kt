@@ -1,5 +1,7 @@
 package org.darkan.world.net
 
+import org.darkan.world.entity.Direction8
+import org.darkan.world.entity.MovementQueue
 import org.darkan.world.entity.Player
 import world.gregs.voidps.buffer.write.BufferWriter
 
@@ -31,6 +33,9 @@ object PlayerMovementEncoder {
 
     /** No-movement form: the local-player / high-res update writes `movementType=0` (no walk/run). */
     private const val MOVEMENT_TYPE_NONE = 0
+
+    /** Walk form: a single one-tile step — `movementType=1` then `[3-bit dir][1-bit hasFollowup]`. */
+    private const val MOVEMENT_TYPE_WALK = 1
 
     /** Teleport / jump form: read an absolute 30-bit tile next. Used by the first-tick init path. */
     private const val MOVEMENT_TYPE_TELEPORT = 3
@@ -64,20 +69,29 @@ object PlayerMovementEncoder {
     }
 
     /**
-     * High-res update form, per §4B `GetHighResolutionPlayerPosition`:
+     * High-res update form, per §4B `GetHighResolutionPlayerPosition` — the exact inverse of the
+     * decode's `decodeKnownPlayerUpdate` (`core/.../recorder/ClientStateCrossCheck.kt:1245-1284`):
      * ```
      * 1 bit:  hasExtendedInfo
      * 2 bits: movementType  (0 = none, 1 = walk, 2 = run, 3 = teleport)
      * ```
-     * Today every high-res update is `movementType=0` (no movement). When `movementType=0` and
-     * `hasExtendedInfo=1` no further movement bits are emitted; the player just gets new
-     * extended-info, and its index is appended to [flaggedForExtInfo]. When `movementType=0` and
-     * `hasExtendedInfo=0` we write the 1-bit `demoteToLowRes=0` flag (unreachable today: any player
-     * reaching here MUST have ext-info — guarded by [PlayerExtInfoEncoder.needsAnyUpdate]).
+     * The decode reads `hasExtendedInfo` first (line 1251), THEN the 2-bit `movementType` (line 1252),
+     * so both branches below emit `[hasExt][mvt][…]` in that order.
      *
-     * Phase 1.2b: real walk/run replaces the hardcoded `MOVEMENT_TYPE_NONE` here.
+     * **WALK (`movementType=1`, increment 2a):** when the world tick applied a one-tile step this tick
+     * ([Player.lastWalkStepDir] != [MovementQueue.NO_STEP]), emit `[hasExt][mvt=1][3-bit dir][1-bit
+     * hasFollowup=0]` — the inverse of the mvt=1 branch (`ClientStateCrossCheck.kt:1260-1266`, which
+     * reads `gBit(3)` then a 1-bit `hasFollowup`, reading 2 more bits only when set). A single step
+     * emits `hasFollowup=0` and NO followup bits. The 3-bit dir is the verified [Direction8] index the
+     * tick stored. `hasExt` is still set when the player also has deliverable ext-info this tick (its
+     * index is appended to [flaggedForExtInfo]); the WALK bits and the ext-info bit are independent.
      *
-     * Relocated unchanged from `PlayerInfoBuilder.encodeHighResPosition` — byte output is identical.
+     * **STATIONARY (`movementType=0`):** no step this tick → the unchanged hold form. When `hasExt=1`
+     * no further movement bits follow (just new ext-info, index appended); when `hasExt=0` write the
+     * 1-bit `demoteToLowRes=0` flag (unreachable for the per-tick path: any non-walking player reaching
+     * here MUST have ext-info — guarded by [PlayerExtInfoEncoder.needsAnyUpdate]).
+     *
+     * increment 2b: run (`movementType=2`) and the demote-to-low-res transition plug in here.
      */
     fun encodeHighResPosition(
         out: BufferWriter,
@@ -85,6 +99,18 @@ object PlayerMovementEncoder {
         flaggedForExtInfo: MutableList<Int>,
     ) {
         val hasExtInfo = PlayerExtInfoEncoder.hasFlaggableExtendedInfo(target)
+        val walkDir = target.lastWalkStepDir
+
+        if (walkDir != MovementQueue.NO_STEP) {
+            // WALK: [hasExt][mvt=1][3-bit dir][1-bit hasFollowup=0]. Single step → no followup bits.
+            out.writeBits(1, if (hasExtInfo) 1 else 0)
+            out.writeBits(2, MOVEMENT_TYPE_WALK)
+            out.writeBits(3, walkDir)
+            out.writeBits(1, 0)                  // hasFollowup = 0 (single one-tile step)
+            if (hasExtInfo) flaggedForExtInfo.add(target.index)
+            return
+        }
+
         out.writeBits(1, if (hasExtInfo) 1 else 0)
         out.writeBits(2, MOVEMENT_TYPE_NONE)  // movementType 0 — no movement.
         if (!hasExtInfo) {

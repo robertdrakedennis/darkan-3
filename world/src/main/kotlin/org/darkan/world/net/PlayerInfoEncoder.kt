@@ -1,6 +1,7 @@
 package org.darkan.world.net
 
 import org.darkan.core.net.prot.PlayerInfo
+import org.darkan.world.entity.MovementQueue
 import org.darkan.world.entity.Player
 import org.darkan.world.world.PlayerInfoSlots
 import org.darkan.world.world.Players
@@ -281,13 +282,23 @@ object PlayerInfoEncoder {
     }
 
     /**
-     * Does this known-cohort [target] have an update to deliver to [viewer] this tick? Mirrors the
-     * encoder's existing gate ([PlayerExtInfoEncoder.needsAnyUpdate]) — a pending mask or an
-     * undelivered appearance. (For the local slot on the init path the caller forces the absolute-tile
-     * form regardless; this gate still governs the per-tick path.)
+     * Does this known-cohort [target] have an update to deliver to [viewer] this tick? True when the
+     * target has ext-info to send ([PlayerExtInfoEncoder.needsAnyUpdate] — a pending mask or an
+     * undelivered appearance) OR it WALKED this tick (a step applied by the world tick,
+     * [Player.lastWalkStepDir] != [MovementQueue.NO_STEP], increment 2a). Either makes the slot emit
+     * `hasUpdate=1` and breaks any surrounding skip-run, so the walk bits actually reach the wire even
+     * when the appearance is already delivered.
+     *
+     * [PlayerExtInfoEncoder.needsAnyUpdate] is evaluated FIRST and unconditionally so its
+     * first-appearance recording side effect still runs every tick regardless of whether the player
+     * also walked. (For the local slot on the init path the caller forces the absolute-tile form
+     * regardless; this gate governs the per-tick path.)
      */
-    private fun knownHasUpdate(viewer: Player, target: Player): Boolean =
-        PlayerExtInfoEncoder.needsAnyUpdate(viewer, target)
+    private fun knownHasUpdate(viewer: Player, target: Player): Boolean {
+        val needsExtInfo = PlayerExtInfoEncoder.needsAnyUpdate(viewer, target)
+        val walkedThisTick = target.lastWalkStepDir != MovementQueue.NO_STEP
+        return needsExtInfo || walkedThisTick
+    }
 
     /**
      * Count the stationary skip-run starting at [from] in the known cohort [order]: the number of

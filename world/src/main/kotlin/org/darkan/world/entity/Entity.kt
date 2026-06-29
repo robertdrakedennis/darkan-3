@@ -26,4 +26,21 @@ abstract class Entity {
 
     /** Per-tick update mask collector; consumed by PlayerInfoBuilder / NpcInfoBuilder in B6. */
     val pendingUpdates: PendingUpdates = PendingUpdates()
+
+    /**
+     * Pending one-tile walk steps the world tick drains (1/tick). The movement SOURCE: this increment
+     * (1.2b 2a) only the scripted debug path enqueues onto it; client-input-driven enqueue is a later
+     * increment. See [MovementQueue].
+     */
+    val movementQueue: MovementQueue = MovementQueue()
+
+    /**
+     * The 3-bit walk-direction index applied THIS tick, or [MovementQueue.NO_STEP] (`-1`) when the
+     * entity did not walk this tick. Set by the world tick when it polls + applies a step from
+     * [movementQueue]; read by the op22 high-res encoder so the WALK form
+     * ([org.darkan.world.net.PlayerMovementEncoder.encodeHighResPosition]) emits this exact index, then
+     * reset to `-1` at the end of the tick. A non-walking entity keeps `-1` → the stationary form.
+     */
+    @Volatile
+    var lastWalkStepDir: Int = MovementQueue.NO_STEP
 }

@@ -104,6 +104,21 @@ object EnvVars {
      */
     val firstLightScaffolding: Boolean = dotenv.get("FIRST_LIGHT_SCAFFOLDING", "true").toBooleanStrict()
 
+    /**
+     * Scripted local-player WALK path for a debug capture (1.2b increment 2a) — a comma-separated list
+     * of compass steps enqueued onto the local player's [movementQueue][org.darkan.world.entity.Entity.movementQueue]
+     * shortly after world entry, walked one tile per tick. EMPTY by default ⇒ OFF, so a normal run has
+     * NO behaviour change (the local player stays stationary).
+     *
+     * Tokens (case-insensitive, whitespace ignored): the four cardinals `N S E W` and the four
+     * diagonals `NE NW SE SW`. The compass → `(dx,dy)` mapping (RS y increases NORTH):
+     * `N=(0,1) S=(0,-1) E=(1,0) W=(-1,0) NE=(1,1) NW=(-1,1) SE=(1,-1) SW=(-1,-1)`. Each `(dx,dy)`
+     * resolves to its 3-bit direction index via the verified table
+     * ([Direction8][org.darkan.world.entity.Direction8]). Example: `DARKAN_DEBUG_WALK_PATH="E,E,E,N,N"`
+     * walks 3 tiles east then 2 tiles north, one tile per tick. Unknown tokens fail fast at parse time.
+     */
+    val debugWalkPath: String = dotenv.get("DARKAN_DEBUG_WALK_PATH", "")
+
     // Cold-lobby Play handoff. When FALSE (default, PROD-like) the server does NOT push op213
     // SwitchWorld on the lobby "Play Now" click — the client drives the lobby->world connect itself
     // from the login-data world tail and renders the "Joining World / Please Wait" dialog via its own
