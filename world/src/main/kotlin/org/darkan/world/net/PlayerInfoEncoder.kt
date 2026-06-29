@@ -2,31 +2,52 @@ package org.darkan.world.net
 
 import org.darkan.core.net.prot.PlayerInfo
 import org.darkan.world.entity.Player
+import org.darkan.world.world.PlayerInfoSlots
 import org.darkan.world.world.Players
 import world.gregs.voidps.buffer.write.BufferWriter
 
 /**
- * Orchestrator for op22 PLAYER_INFO. Single responsibility: drive the **four byte-aligned GPI
- * passes** (high-res active, high-res inactive, low-res active, low-res inactive) over the viewer's
- * viewport cohorts and assemble the [PlayerInfo] DTO, delegating the actual per-target bytes to
- * [PlayerMovementEncoder] (position / movement bits) and [PlayerExtInfoEncoder] (the ext-info block
- * + the `hasUpdate` / `hasExtendedInfo` gating). Per `docs/net/serverprot/player-info-947-3.md`
- * §4A (pass structure), §4B (position decoders) and §4C (extended-info).
+ * Orchestrator for op22 PLAYER_INFO. Emits the bit-packed body as the **exact inverse** of the
+ * recorder oracle's verified op22 decode (`core/.../recorder/ClientStateCrossCheck.kt`), driving the
+ * per-viewer GPI [PlayerInfoSlots] model so the byte-stream reads back to the same scene.
+ *
+ * ## The four passes, in the VERIFIED decode order
+ *
+ * `decodePlayerInfo` (`ClientStateCrossCheck.kt:1085`) runs FOUR passes, each followed by a byte
+ * align, then rebuilds the cohorts. This encoder mirrors that order exactly:
+ *
+ *  1. **known, active=false** — `runKnownPass(renderList, false)` (`ClientStateCrossCheck.kt:1086`).
+ *  2. **known, active=true**  — `runKnownPass(renderList, true)`  (`ClientStateCrossCheck.kt:1089`).
+ *  3. **external, active=true**  — `runExternalPass(pendingList, true)`  (`ClientStateCrossCheck.kt:1092`).
+ *  4. **external, active=false** — `runExternalPass(pendingList, false)` (`ClientStateCrossCheck.kt:1095`).
+ *
+ * Each pass is wrapped in [byteAlignPass] (the client byte-aligns the bit cursor at every pass
+ * boundary — `alignToByte()` after each pass, `ClientStateCrossCheck.kt:1087/1090/1093/1096`). After
+ * pass 4 the cohorts are rebuilt via [PlayerInfoSlots.rebuildAfterPasses], mirroring
+ * `rebuildActivityFlagsAndLists` (`ClientStateCrossCheck.kt:1098/1259`) — so the server's slot model
+ * tracks the client's tick-over-tick.
+ *
+ * ## Per-slot pass body (the inverse of `runKnownPass` / `runExternalPass`)
+ *
+ * For each slot in the cohort list whose `active == activeFlag` (`ClientStateCrossCheck.kt:1117`):
+ *  * a 1-bit `hasUpdate`; if the slot has an update → `1` + the known/external update bits;
+ *  * else `0` + a [writeSkipCount] run covering the FOLLOWING same-cohort no-update slots, with
+ *    `nextActive=true` set on this slot and every skipped slot (mirroring the decode's
+ *    `slot.nextActive = true` on the skip path, `ClientStateCrossCheck.kt:1130/1122`).
+ *
+ * ## Increment scope (1.2b increment 1 — FOUNDATION; movementType=0 ONLY)
+ *
+ * Every known update is the stationary form `movementType=0` ([PlayerMovementEncoder]); no real
+ * walk/run/teleport motion and no low-res add → high-res promote is produced. The teleport form
+ * ([PlayerMovementEncoder.encodeAbsoluteTile]) belongs to the op81 prefix and is used only by the
+ * standalone first-tick init ([buildInit]). The precise increment-2 seam is documented at
+ * [encodeKnownPass] / [encodeExternalPass].
  *
  * Two public entry points map to the two live call sites:
  *  * [buildWorldEntrySync] — `WorldServer` world-entry. Marks the appearance cached + clears
- *    `firstTick`, then emits the per-tick stationary form.
- *  * [buildIfNeeded] — the `WorldTick` per-tick caller. Emits the first-tick init form ([buildInit])
- *    while `firstTick` is set, otherwise the per-tick stationary form.
- *
- * [buildInit] is public because it is the documented first-tick / teleport-init form (the local
- * player is routed through [PlayerMovementEncoder.encodeAbsoluteTile]); it is exercised on the
- * un-suppressed `firstTick` path and by `PlayerInfoEncoderInitTest`.
- *
- * The per-tick body is the SAME four-pass structure regardless of entry point; the only difference
- * is whether the local high-res slot takes the absolute-tile init path ([buildInit]) or the
- * stationary form ([buildPerTick]). No movement is produced — every high-res update is stationary
- * (`movementType=0`) and every absent slot folds into the low-res skip-run.
+ *    `firstTick`, then emits the per-tick form.
+ *  * [buildIfNeeded] — the `WorldTick` per-tick caller. Emits [buildInit] while `firstTick` is set,
+ *    otherwise the per-tick form.
  */
 object PlayerInfoEncoder {
 
@@ -35,14 +56,15 @@ object PlayerInfoEncoder {
 
     /**
      * Runs one GPI pass inside its OWN bit-access window so the pass's bits are byte-aligned. The NXT
-     * client (`S2C_PLAYER_INFO_OP22 @0x100043500`) rounds the player-info bit cursor UP to the next byte
-     * (`ceil(bp/8)×8`) at every one of the 4 pass boundaries (RE-verified instruction-level
-     * @0x10004363f / 0x100043732 / 0x100043854 / 0x100043938), so each pass MUST begin on a byte boundary.
-     * Packing more than one pass into a byte (the old `c7 ff 40`) made the client read the local entry's
-     * bits, round up, DISCARD that byte's trailing bits — where our skip-run began — and resume the next
-     * pass mid-skip-run → bit-cursor desync → the ext-info drain reads the appearance at the wrong byte →
-     * no `PlayerAppearancePending` constructed → no avatar model. With a zeroed BufferWriter the pad bits
-     * are 0 (the client discards them anyway). Live-verified: solo-spawn bit-block `c7 ff 40` → `c0 7f f4`.
+     * client (`S2C_PLAYER_INFO_OP22 @0x100043500`) rounds the player-info bit cursor UP to the next
+     * byte (`ceil(bp/8)×8`) at every one of the 4 pass boundaries (RE-verified instruction-level
+     * @0x10004363f / 0x100043732 / 0x100043854 / 0x100043938; mirrored by the decode's `alignToByte()`
+     * after each pass, `ClientStateCrossCheck.kt:1087/1090/1093/1096`), so each pass MUST begin on a
+     * byte boundary. Packing more than one pass into a byte (the old `c7 ff 40`) made the client read
+     * the local entry's bits, round up, DISCARD that byte's trailing bits — where our skip-run began —
+     * and resume the next pass mid-skip-run → bit-cursor desync → the ext-info drain reads the
+     * appearance at the wrong byte → no avatar model. With a zeroed BufferWriter the pad bits are 0
+     * (the client discards them). Live-verified: solo-spawn bit-block `c7 ff 40` → `c0 7f f4`.
      *
      * DO NOT regress this — packing passes together reintroduces the invisible-avatar / drift bug.
      */
@@ -57,19 +79,14 @@ object PlayerInfoEncoder {
      *
      * **Always emits (never null) once past the first tick — the "idle loop" prod sends.** The NXT
      * client's local-player avatar is a smoothing/interpolating `PathingEntity` whose per-frame
-     * position integrator is advanced+committed by the per-tick `ProcessPlayerInfo` (the op22 handler
-     * `S2C_PLAYER_INFO_OP22 @0x100043500` → its high-res pass over the local slot). With NO op22
-     * arriving each tick the integrator runs **open-loop** and the avatar's `graphNode` scene-fine
-     * position creeps (capture `session-20260627-231803-41562-local`: a stationary spawn drifts
-     * ~0.12 tiles/tick south, x held — y 3216→3181 over the session). Production sends an op22 EVERY
-     * game tick (`docs/kb/services/world-stream-service.md`); the steady-state form is the
-     * **stationary hold** `[hasUpdate=0][skip-run]` (decoded from prod: `hasUpdate=0, skipMode=1`).
-     * That per-tick decode re-commits the avatar each tick and pins it to its tile.
-     *
-     * So when nothing changed we still emit [buildPerTick]'s stationary-hold body instead of null. The
-     * op81 GPI prefix already placed the local 30-bit tile == `player.tile`; this idle loop keeps the
-     * avatar THERE. The first tick is routed through [buildInit] for the un-suppressed `firstTick`
-     * path (world entry suppresses it via [buildWorldEntrySync], which sets `firstTick=false`).
+     * position integrator is advanced+committed by the per-tick `ProcessPlayerInfo`. With NO op22
+     * arriving each tick the integrator runs **open-loop** and the avatar's scene-fine position creeps
+     * (capture `session-20260627-231803-41562-local`: a stationary spawn drifts ~0.12 tiles/tick
+     * south). Production sends an op22 EVERY game tick; the steady-state form is the **stationary
+     * hold** (`hasUpdate=0` then a skip-run, decoded from prod) which re-commits the avatar each tick
+     * and pins it to its tile. So when nothing changed we still emit [buildPerTick]'s stationary-hold
+     * body. The first tick is routed through [buildInit] for the un-suppressed `firstTick` path
+     * (world entry suppresses it via [buildWorldEntrySync]).
      */
     fun buildIfNeeded(player: Player): PlayerInfo = when {
         player.viewport.firstTick -> buildInit(player)
@@ -82,12 +99,10 @@ object PlayerInfoEncoder {
      * NOTE (2026-06-28): a movementType=3 TELEPORT delivery of the local appearance was tried and
      * REVERTED. The LOCAL player is architecturally excluded from the op22 ext-info APPEARANCE path
      * (RE: DecodeGpiPrefix excludes the local slot from the high-res ext-info walk list;
-     * DecodeKnownPlayerUpdate@0x100025640 idle-returns the local slot), so the appearance never decoded
-     * (current_appearance/avatar+0x12A0 stayed 0x0) AND the teleport's longer bit-block + the unconsumed
-     * local ext-info block regressed the render plane (0→3, avatar floated above the ground). The
-     * prod-accurate fix is to deliver the local appearance INLINE in the GPI add (slotObj+0x48 →
-     * DecodeExternalPlayerUpdate@0x1000266e0 → immediate compose) — pending RE of the exact wire format
-     * (op22 idle ext-info is kept here only as the prior baseline). See memory: avatar-render-next-steps.
+     * DecodeKnownPlayerUpdate idle-returns the local slot — mirrored by the decode at
+     * `ClientStateCrossCheck.kt:1171`), so the appearance never decoded AND the teleport's longer
+     * bit-block regressed the render plane. The prod-accurate fix (deliver the local appearance INLINE
+     * in the GPI add) is pending RE of the exact wire format. See memory: avatar-render-next-steps.
      */
     fun buildWorldEntrySync(player: Player): PlayerInfo {
         player.appearance.ensureCachedBytes()
@@ -97,39 +112,36 @@ object PlayerInfoEncoder {
 
     /**
      * First-tick GPI init form — **generated from local state**, Shape A per
-     * `docs/protocol/world-bootstrap-948.md` §0/§4.3/§5. This is the ONLY GPI on the first tick
-     * (op81 ships no prefix), so it must be a coherent standalone `ProcessPlayerInfo @0x001618a0`
-     * init whose local 30-bit tile equals the op81 coord-header centre zone (the same spawn tile).
+     * `docs/protocol/world-bootstrap-948.md` §0/§4.3/§5. This is a coherent standalone init whose
+     * local 30-bit tile equals the op81 coord-header centre zone (the same spawn tile).
      *
      * The bit block is the same four-pass structure [buildPerTick] emits, with one difference: the
-     * local player (high-res slot 0 == `playerIndex`) is routed through the **absolute-tile /
-     * teleport** high-res path ([PlayerMovementEncoder.encodeAbsoluteTile]) instead of the per-tick
-     * stationary path. On a solo first-light the viewport has ONLY the local player in
-     * `highResIndices` and an empty `lowResIndices`; the other three passes are empty loops — exactly
-     * the "no other players visible" init §4.3 blesses. No 2047-slot region array is written (§1.3/§8:
-     * the prefix is NOT a flat 2047×18-bit array — Shape A sidesteps that bit layout entirely).
+     * local player is routed through the **absolute-tile / teleport** high-res path
+     * ([PlayerMovementEncoder.encodeAbsoluteTile]) instead of the per-tick stationary path. On a solo
+     * first-light the render cohort has ONLY the local player and the pending cohort the 2046 absent
+     * others; the empty cohorts collapse to no bits / a single skip-run.
      *
-     * APPEARANCE ext-info: emitted (with its 2-byte length prefix, added by the op22 codec) from the
-     * local player's real pre-built appearance blob, built by [org.darkan.world.entity.Appearance].
-     * The blob is always present (the Player ctor builds it), so the local player always carries a
-     * real avatar at scene load. `viewport.firstTick` is set to `false`.
+     * NOTE: this standalone init is NO LONGER sent at world entry (op81's [Op81GpiPrefix] IS the
+     * world-entry GPI). It is retained + tested in isolation as the documented teleport-init form; the
+     * un-suppressed `firstTick` path routes here. `viewport.firstTick` is set to `false`.
      */
     fun buildInit(player: Player): PlayerInfo {
         val viewport = player.viewport
         viewport.firstTick = false
 
+        val slots = viewport.playerSlots
         val bitOut = BufferWriter(TICK_BUFFER_CAPACITY)
-        // Players flagged hasExtInfo this tick, in cohort processing order. The local player's
-        // appearance is appended first (pass 1 routes it through the absolute-tile path).
+        // Players flagged hasExtInfo this tick, in cohort-processing order; the ext-info blocks are
+        // emitted in the order the hasExtendedInfo bits fired (§4C).
         val flaggedForExtInfo = ArrayList<Int>(8)
 
-        // BYTE-ALIGN each pass (see [byteAlignPass]). Pass 1: HIGH-RES ACTIVE — the local player
-        // (slot 0) takes the absolute-tile init path; any other high-res actives (none on first
-        // light) fall back to the per-tick high-res path.
-        byteAlignPass(bitOut) { encodeHighResInitPass(bitOut, player, viewport.highResIndices, activeFilter = true, flaggedForExtInfo) }
-        byteAlignPass(bitOut) { encodeHighResInitPass(bitOut, player, viewport.highResIndices, activeFilter = false, flaggedForExtInfo) }
-        byteAlignPass(bitOut) { encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = true, flaggedForExtInfo) }
-        byteAlignPass(bitOut) { encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = false, flaggedForExtInfo) }
+        // Four byte-aligned passes in the verified decode order. The local slot (in renderList,
+        // active=false → pass 1) takes the absolute-tile init path; everything else mirrors buildPerTick.
+        byteAlignPass(bitOut) { encodeKnownPass(bitOut, player, slots, activeFlag = false, init = true, flaggedForExtInfo) }
+        byteAlignPass(bitOut) { encodeKnownPass(bitOut, player, slots, activeFlag = true, init = true, flaggedForExtInfo) }
+        byteAlignPass(bitOut) { encodeExternalPass(bitOut, player, slots, activeFlag = true, flaggedForExtInfo) }
+        byteAlignPass(bitOut) { encodeExternalPass(bitOut, player, slots, activeFlag = false, flaggedForExtInfo) }
+        slots.rebuildAfterPasses()
 
         // Record the appearance we sent so the per-tick path won't re-emit it next tick.
         val cached = player.appearance.cachedBytes
@@ -145,28 +157,21 @@ object PlayerInfoEncoder {
     }
 
     /**
-     * Per-tick incremental form. Per §4A the bit-packed body has four passes, filtering each list by
-     * the `+0x27` (active) flag:
-     *  1. HIGH-RES ACTIVE — `viewport.highResIndices` where `active == true`.
-     *  2. HIGH-RES INACTIVE — `viewport.highResIndices` where `active == false`.
-     *  3. LOW-RES ACTIVE — `viewport.lowResIndices` where `active == true`.
-     *  4. LOW-RES INACTIVE — `viewport.lowResIndices` where `active == false`.
-     *
-     * The local player is the ONLY high-res entry and emits the stationary form; absent low-res slots
-     * fold into the skip-run.
+     * Per-tick incremental form — the four byte-aligned passes in the verified decode order over the
+     * viewer's [PlayerInfoSlots] cohorts, then a cohort rebuild. See the class KDoc for the pass list
+     * and the decode line citations.
      */
     private fun buildPerTick(player: Player): PlayerInfo {
         val viewport = player.viewport
+        val slots = viewport.playerSlots
         val bitOut = BufferWriter(TICK_BUFFER_CAPACITY)
-        // Player indices flagged hasExtInfo this tick, in cohort processing order. Per §4C the
-        // ext-info blocks are emitted in the order the hasExtendedInfo bits fired.
         val flaggedForExtInfo = ArrayList<Int>(8)
 
-        // BYTE-ALIGN each of the 4 passes (see [byteAlignPass]).
-        byteAlignPass(bitOut) { encodeHighResPass(bitOut, player, viewport.highResIndices, activeFilter = true, flaggedForExtInfo) }
-        byteAlignPass(bitOut) { encodeHighResPass(bitOut, player, viewport.highResIndices, activeFilter = false, flaggedForExtInfo) }
-        byteAlignPass(bitOut) { encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = true, flaggedForExtInfo) }
-        byteAlignPass(bitOut) { encodeLowResPass(bitOut, player, viewport.lowResIndices, activeFilter = false, flaggedForExtInfo) }
+        byteAlignPass(bitOut) { encodeKnownPass(bitOut, player, slots, activeFlag = false, init = false, flaggedForExtInfo) }
+        byteAlignPass(bitOut) { encodeKnownPass(bitOut, player, slots, activeFlag = true, init = false, flaggedForExtInfo) }
+        byteAlignPass(bitOut) { encodeExternalPass(bitOut, player, slots, activeFlag = true, flaggedForExtInfo) }
+        byteAlignPass(bitOut) { encodeExternalPass(bitOut, player, slots, activeFlag = false, flaggedForExtInfo) }
+        slots.rebuildAfterPasses()
 
         return PlayerInfo(
             bitBlock = bitOut.toArray(),
@@ -176,107 +181,230 @@ object PlayerInfoEncoder {
     }
 
     /**
-     * High-res pass for the INIT form. Identical cohort filtering to [encodeHighResPass], but the
-     * local player (the viewport owner) is encoded via the absolute-tile teleport path
-     * ([PlayerMovementEncoder.encodeAbsoluteTile]). Any other high-res player (not present on first
-     * light) uses the standard per-tick high-res encoder.
-     */
-    private fun encodeHighResInitPass(
-        out: BufferWriter,
-        viewer: Player,
-        indices: List<Int>,
-        activeFilter: Boolean,
-        flaggedForExtInfo: MutableList<Int>,
-    ) {
-        for (slot in indices) {
-            val target = Players.get(slot) ?: continue
-            val matches = if (activeFilter) target.active else !target.active
-            if (!matches) continue
-
-            if (target.index == viewer.index) {
-                PlayerMovementEncoder.encodeAbsoluteTile(out, target, flaggedForExtInfo)
-            } else {
-                val needsUpdate = PlayerExtInfoEncoder.needsAnyUpdate(viewer, target)
-                if (needsUpdate) {
-                    out.writeBits(1, 1)
-                    PlayerMovementEncoder.encodeHighResPosition(out, target, flaggedForExtInfo)
-                } else {
-                    out.writeBits(1, 0)
-                    out.writeBits(2, 0)
-                }
-            }
-        }
-    }
-
-    /**
-     * Encode one high-res pass (active or inactive filter). Per §4A's per-pass loop body, for each
-     * player in [indices] matching the filter: 1-bit `hasUpdate`; if `hasUpdate==1` the high-res
-     * position bits ([PlayerMovementEncoder.encodeHighResPosition]); else the no-skip stationary
-     * marker (`mode=0`).
+     * Encode ONE known (high-res) pass — the inverse of `runKnownPass` (`ClientStateCrossCheck.kt:1110`).
      *
-     * `activeFilter` mirrors §4A's `+0x27 == 0` (active) vs `!= 0` (inactive) cohort;
-     * [Player.active] is the modern-named mirror of `+0x27`. We emit `skipMode=0` (no skip) per slot
-     * here — the conservative emit-every-player path; Phase 1.2b can batch consecutive no-update
-     * slots via the skip-run for compactness.
+     * Iterates [PlayerInfoSlots.renderList] in order, processing slots whose `active == activeFlag`.
+     * For each processed slot: if it has an update (appearance/masks to deliver, or — when [init] and
+     * it is the local slot — the absolute-tile init), write `hasUpdate=1` + the known position bits.
+     * Otherwise it starts a stationary skip-run: write `hasUpdate=0` + a [writeSkipCount] over the
+     * following matching no-update slots, and set `nextActive=true` on this slot and every skipped
+     * slot (the decode does `slot.nextActive = true` on both the bit-reading slot and each skipped
+     * slot, `ClientStateCrossCheck.kt:1130/1122`).
+     *
+     * INCREMENT-2 SEAM: real walk/run for a known slot plugs into [PlayerMovementEncoder.encodeHighResPosition]
+     * (today `movementType=0`); the demote-to-low-res case (decode mvt=0 + present→false,
+     * `ClientStateCrossCheck.kt:1170`) calls [PlayerInfoSlots.demoteToPending].
      */
-    private fun encodeHighResPass(
+    private fun encodeKnownPass(
         out: BufferWriter,
         viewer: Player,
-        indices: List<Int>,
-        activeFilter: Boolean,
+        slots: PlayerInfoSlots,
+        activeFlag: Boolean,
+        init: Boolean,
         flaggedForExtInfo: MutableList<Int>,
     ) {
-        for (slot in indices) {
-            val target = Players.get(slot) ?: continue
-            val matches = if (activeFilter) target.active else !target.active
-            if (!matches) continue
+        val order = slots.renderList
+        var i = 0
+        while (i < order.size) {
+            val idx = order[i]
+            val slot = slots.slot(idx)
+            if (slot == null || slot.active != activeFlag) {
+                i++
+                continue
+            }
 
-            val needsUpdate = PlayerExtInfoEncoder.needsAnyUpdate(viewer, target)
-            if (needsUpdate) {
+            val target = Players.get(idx)
+            if (init && idx == slots.localIndex && target != null) {
+                // First-tick init ONLY: the local player's known update is the absolute-tile teleport
+                // form, which writes its OWN leading [hasUpdate=1] then [hasExt][mvt=3][30-bit tile].
+                // (Standalone init form per docs/protocol/world-bootstrap-948.md §4.3; NOT sent at the
+                // live world entry — that is op81's [Op81GpiPrefix].)
+                PlayerMovementEncoder.encodeAbsoluteTile(out, target, flaggedForExtInfo)
+                i++
+            } else if (target != null && knownHasUpdate(viewer, target)) {
                 out.writeBits(1, 1)
                 PlayerMovementEncoder.encodeHighResPosition(out, target, flaggedForExtInfo)
+                // The decode does NOT set nextActive for a known mvt=0 stay (local/has-ext idle-return,
+                // ClientStateCrossCheck.kt:1171) — leave nextActive=false so the slot stays in this
+                // cohort next tick.
+                i++
             } else {
-                // No update for this slot. Per §4A passes 2/3/4 use ReadStationary — 2-bit mode then
-                // variable-width skip count. We emit mode=0 (no skip) so the next iteration reads its
-                // own hasUpdate bit. Phase 1.2b: batch consecutive no-update slots via mode 1/2/3.
+                // Start of a stationary skip-run: count the following same-cohort no-update slots.
+                val skip = countKnownSkipRun(viewer, slots, order, i + 1, activeFlag)
                 out.writeBits(1, 0)
-                out.writeBits(2, 0)  // skipMode=0: no skip, continue with next slot.
+                writeSkipCount(out, skip)
+                slot.nextActive = true
+                // Mark the skipped slots (the decode sets nextActive=true on each, ClientStateCrossCheck.kt:1122).
+                markSkippedKnown(slots, order, i + 1, activeFlag, skip)
+                i = advancePastSkipRun(slots, order, i + 1, activeFlag, skip)
             }
         }
     }
 
     /**
-     * Encode one low-res pass (active or inactive filter). Per §4A's per-pass loop body, mirrors the
-     * high-res pass but calls [PlayerMovementEncoder.encodeLowResPosition] when `hasUpdate==1`, and
-     * run-length-encodes consecutive no-update slots into the stationary skip-run.
+     * Encode ONE external (low-res) pass — the inverse of `runExternalPass`
+     * (`ClientStateCrossCheck.kt:1136`). Same structure as [encodeKnownPass] over
+     * [PlayerInfoSlots.pendingList]; an external update would be the low-res add/move form
+     * ([PlayerMovementEncoder.encodeLowResPosition]). This increment produces NO external updates —
+     * every pending slot is absent/no-update, so each matching cohort collapses to a single skip-run.
      *
-     * Today the low-res cohort produces no needed updates (the local player is high-res; all other
-     * slots are absent), so the whole pass collapses to a single skip-run over the absent slots.
+     * INCREMENT-2 SEAM: a low-res "add → promote to high-res" (decode `decodeExternalPlayerUpdate`
+     * branch 0, `ClientStateCrossCheck.kt:1209`) writes `hasUpdate=1` here, emits the add bits via
+     * [PlayerMovementEncoder.encodeLowResPosition], sets `nextActive=true`, and calls
+     * [PlayerInfoSlots.promoteToRender]; the move branches (1-3) call [PlayerInfoSlots.setCoord].
      */
-    private fun encodeLowResPass(
+    private fun encodeExternalPass(
         out: BufferWriter,
         viewer: Player,
-        indices: List<Int>,
-        activeFilter: Boolean,
-        flaggedForExtInfo: MutableList<Int>,
+        slots: PlayerInfoSlots,
+        activeFlag: Boolean,
+        @Suppress("UNUSED_PARAMETER") flaggedForExtInfo: MutableList<Int>,
     ) {
-        var skipRun = 0
-        for (slot in indices) {
-            val target = Players.get(slot)
-            val matches = target?.let { if (activeFilter) it.active else !it.active } ?: activeFilter
-            if (!matches) continue
+        val order = slots.pendingList
+        var i = 0
+        while (i < order.size) {
+            val idx = order[i]
+            val slot = slots.slot(idx)
+            if (slot == null || slot.active != activeFlag) {
+                i++
+                continue
+            }
 
-            val needsUpdate = target != null && PlayerExtInfoEncoder.needsAnyUpdate(viewer, target)
-            if (needsUpdate) {
-                PlayerMovementEncoder.writeStationarySkipRun(out, skipRun)
-                skipRun = 0
-                out.writeBits(1, 1)
-                PlayerMovementEncoder.encodeLowResPosition(out, target, flaggedForExtInfo)
-            } else {
-                skipRun++
+            // No external slot has an update this increment — every matching slot is a no-update run.
+            val skip = countExternalSkipRun(slots, order, i + 1, activeFlag)
+            out.writeBits(1, 0)
+            writeSkipCount(out, skip)
+            slot.nextActive = true
+            markSkippedExternal(slots, order, i + 1, activeFlag, skip)
+            i = advancePastSkipRun(slots, order, i + 1, activeFlag, skip)
+        }
+    }
+
+    /**
+     * Does this known-cohort [target] have an update to deliver to [viewer] this tick? Mirrors the
+     * encoder's existing gate ([PlayerExtInfoEncoder.needsAnyUpdate]) — a pending mask or an
+     * undelivered appearance. (For the local slot on the init path the caller forces the absolute-tile
+     * form regardless; this gate still governs the per-tick path.)
+     */
+    private fun knownHasUpdate(viewer: Player, target: Player): Boolean =
+        PlayerExtInfoEncoder.needsAnyUpdate(viewer, target)
+
+    /**
+     * Count the stationary skip-run starting at [from] in the known cohort [order]: the number of
+     * CONSECUTIVE matching (`active == activeFlag`) slots that have NO update. Mirrors the decode's
+     * skip semantics — the run covers the following same-cohort slots until the next matching slot
+     * WITH an update.
+     */
+    private fun countKnownSkipRun(
+        viewer: Player,
+        slots: PlayerInfoSlots,
+        order: List<Int>,
+        from: Int,
+        activeFlag: Boolean,
+    ): Int {
+        var count = 0
+        var i = from
+        while (i < order.size) {
+            val slot = slots.slot(order[i])
+            if (slot == null || slot.active != activeFlag) {
+                i++
+                continue
+            }
+            val target = Players.get(order[i])
+            if (target != null && knownHasUpdate(viewer, target)) break
+            count++
+            i++
+        }
+        return count
+    }
+
+    /** Count the stationary skip-run starting at [from] in the external cohort — every matching slot is a no-update slot this increment. */
+    private fun countExternalSkipRun(
+        slots: PlayerInfoSlots,
+        order: List<Int>,
+        from: Int,
+        activeFlag: Boolean,
+    ): Int {
+        var count = 0
+        var i = from
+        while (i < order.size) {
+            val slot = slots.slot(order[i])
+            if (slot != null && slot.active == activeFlag) count++
+            i++
+        }
+        return count
+    }
+
+    /** Set `nextActive=true` on the [skip] matching known-cohort slots starting at [from] (decode `ClientStateCrossCheck.kt:1122`). */
+    private fun markSkippedKnown(
+        slots: PlayerInfoSlots,
+        order: List<Int>,
+        from: Int,
+        activeFlag: Boolean,
+        skip: Int,
+    ) {
+        var remaining = skip
+        var i = from
+        while (remaining > 0 && i < order.size) {
+            val slot = slots.slot(order[i])
+            if (slot != null && slot.active == activeFlag) {
+                slot.nextActive = true
+                remaining--
+            }
+            i++
+        }
+    }
+
+    /** Set `nextActive=true` on the [skip] matching external-cohort slots starting at [from] (decode `ClientStateCrossCheck.kt:1148`). */
+    private fun markSkippedExternal(
+        slots: PlayerInfoSlots,
+        order: List<Int>,
+        from: Int,
+        activeFlag: Boolean,
+        skip: Int,
+    ) = markSkippedKnown(slots, order, from, activeFlag, skip)
+
+    /** Advance the cohort index past the [skip] matching slots consumed by a skip-run, returning the next index to process. */
+    private fun advancePastSkipRun(
+        slots: PlayerInfoSlots,
+        order: List<Int>,
+        from: Int,
+        activeFlag: Boolean,
+        skip: Int,
+    ): Int {
+        var remaining = skip
+        var i = from
+        while (remaining > 0 && i < order.size) {
+            val slot = slots.slot(order[i])
+            if (slot != null && slot.active == activeFlag) remaining--
+            i++
+        }
+        return i
+    }
+
+    /**
+     * Write the 2-bit-mode + variable-width skip count tail of the stationary run — the inverse of
+     * `readPlayerSkipCount` (`ClientStateCrossCheck.kt:1290`): mode 0 = no further slots; mode 1 =
+     * 5-bit count (<32); mode 2 = 8-bit count (<256); mode 3 = 11-bit count (<2048). A run longer than
+     * the 11-bit max would need splitting, but a single cohort here never exceeds 2047 matching slots
+     * so one tail always suffices.
+     */
+    private fun writeSkipCount(out: BufferWriter, count: Int) {
+        when {
+            count == 0 -> out.writeBits(2, 0)
+            count < 32 -> {
+                out.writeBits(2, 1)
+                out.writeBits(5, count)
+            }
+            count < 256 -> {
+                out.writeBits(2, 2)
+                out.writeBits(8, count)
+            }
+            else -> {
+                out.writeBits(2, 3)
+                out.writeBits(11, count)
             }
         }
-        PlayerMovementEncoder.writeStationarySkipRun(out, skipRun)
     }
 
     /** Build the ext-info blocks for the players flagged this tick, in flag order. */

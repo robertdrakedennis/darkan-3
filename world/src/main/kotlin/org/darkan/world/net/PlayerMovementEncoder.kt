@@ -11,9 +11,10 @@ import world.gregs.voidps.buffer.write.BufferWriter
  * [PlayerExtInfoEncoder].
  *
  * **Current behavior (preserved EXACTLY):** every live high-res update is the stationary form
- * `movementType=0` and every no-update slot is folded into the run-length-encoded *skip-run*
- * (`writeStationarySkipRun`). The teleport / absolute-tile form ([encodeAbsoluteTile]) is used ONLY
- * by the first-tick init path ([PlayerInfoEncoder.buildInit]); the live world-entry / per-tick path
+ * `movementType=0`. No-update slots are run-length-encoded by the orchestrator's skip-run
+ * ([PlayerInfoEncoder] — the single owner of the skip-count tail, the inverse of the decode's
+ * `readPlayerSkipCount`). The teleport / absolute-tile form ([encodeAbsoluteTile]) is used ONLY by
+ * the first-tick init path ([PlayerInfoEncoder.buildInit]); the live world-entry / per-tick path
  * never reaches it. None of these emit real walk/run motion.
  *
  * Wire references (relocated verbatim with their code — do not delete):
@@ -112,46 +113,5 @@ object PlayerMovementEncoder {
     ) {
         out.writeBits(2, 1)   // updateType=1 (level change only)
         out.writeBits(2, 0)   // levelDelta=0
-    }
-
-    /**
-     * Run-length-encode a stationary skip-run of [count] consecutive no-update slots, per §4A's
-     * `ReadStationary` (a lead `0` bit then a 2-bit mode + variable-width count). Splits runs longer
-     * than the 11-bit max (2047 + 1 slots) into multiple chunks.
-     *
-     * Relocated unchanged from `PlayerInfoBuilder.writeStationarySkipRun`.
-     */
-    fun writeStationarySkipRun(out: BufferWriter, count: Int) {
-        var remaining = count
-        while (remaining > 0) {
-            val following = minOf(remaining - 1, 2047)
-            out.writeBits(1, 0)
-            writeStationarySkipCount(out, following)
-            remaining -= following + 1
-        }
-    }
-
-    /**
-     * The 2-bit-mode + variable-width skip-count tail of `ReadStationary` (§4A): mode 0 = no further
-     * slots; mode 1 = 5-bit count (<32); mode 2 = 8-bit count (<256); mode 3 = 11-bit count.
-     *
-     * Relocated unchanged from `PlayerInfoBuilder.writeStationarySkipCount`.
-     */
-    private fun writeStationarySkipCount(out: BufferWriter, count: Int) {
-        when {
-            count == 0 -> out.writeBits(2, 0)
-            count < 32 -> {
-                out.writeBits(2, 1)
-                out.writeBits(5, count)
-            }
-            count < 256 -> {
-                out.writeBits(2, 2)
-                out.writeBits(8, count)
-            }
-            else -> {
-                out.writeBits(2, 3)
-                out.writeBits(11, count)
-            }
-        }
     }
 }

@@ -26,6 +26,16 @@ class Viewport(val owner: Player) {
     val lowResIndices: MutableList<Int> = mutableListOf()
 
     /**
+     * The op22 PLAYER_INFO **slot model** (VisibilityManager) — the exact server mirror of the
+     * client's GPI decode state. Seeded from the op81 GPI prefix by [resetAfterGpiPrefix] and driven
+     * by [org.darkan.world.net.PlayerInfoEncoder] each tick. Its
+     * [PlayerInfoSlots.renderList]/[PlayerInfoSlots.pendingList] cohorts and per-slot `active` flag
+     * are the SOURCE OF TRUTH for the four GPI passes (the encoder filters on the slot's `active`,
+     * not [Player.active]). See [PlayerInfoSlots] for the decode-contract mapping.
+     */
+    val playerSlots: PlayerInfoSlots = PlayerInfoSlots()
+
+    /**
      * Cached encoded appearance hash per other-player slot. Indexed by player index
      * (0..2047). Builder compares against the latest appearance bytes to decide
      * whether to re-emit the APPEARANCE block this tick.
@@ -87,6 +97,16 @@ class Viewport(val owner: Player) {
     /** First-tick init flag — must send the init-form PlayerInfo with 18-bit region hashes. */
     var firstTick: Boolean = true
 
+    /**
+     * Reset the viewport to its post-op81-prefix state — the local player in the high-res cohort and
+     * every other slot in the low-res cohort — and seed the [playerSlots] model from the SAME prefix
+     * the client just decoded.
+     *
+     * The slot model is seeded with the owner's current [Player.tile] as the local low-res anchor
+     * (only consumed by increment-2 low-res moves; cohort membership is tile-independent). The
+     * legacy [highResIndices] / [lowResIndices] lists are kept in sync for any non-encoder reader,
+     * but the encoder now drives off [playerSlots].
+     */
     fun resetAfterGpiPrefix(localIndex: Int) {
         require(localIndex in 1 until cachedApprHashes.size)
         highResIndices.clear()
@@ -95,5 +115,6 @@ class Viewport(val owner: Player) {
         for (slot in 1 until cachedApprHashes.size) {
             if (slot != localIndex) lowResIndices.add(slot)
         }
+        playerSlots.seedFromGpiPrefix(owner.tile, localIndex)
     }
 }

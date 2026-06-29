@@ -36,8 +36,17 @@ class Player(
     @Volatile
     var readyForTick: Boolean = false
 
-    /** PLAYER_INFO "active" bit — true if this player was moving or had updates the previous tick. */
-    var active: Boolean = true
+    /**
+     * PLAYER_INFO "active" bit — true if this player was moving or had updates the previous tick.
+     *
+     * Defaults to `false` to match the op81 GPI prefix the client decodes at world entry: the local
+     * player seeds `active=false` (`resetFromGpiPrefix` →
+     * [org.darkan.world.world.PlayerInfoSlots.seedFromGpiPrefix]). NOTE the per-viewer GPI slot model
+     * ([org.darkan.world.world.PlayerInfoSlots]) — not this field — is the SOURCE OF TRUTH the
+     * op22 passes filter on; this field is retained as incidental simulation state and kept
+     * consistent with the spawn cohort.
+     */
+    var active: Boolean = false
 
     /** PLAYER_INFO "stationary" bit — true once the player has been idle long enough to qualify for the stationary cohort. */
     var stationary: Boolean = false
