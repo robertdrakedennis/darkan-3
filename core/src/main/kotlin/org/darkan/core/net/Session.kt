@@ -162,7 +162,14 @@ open class Session(
                 }
 
                 val packetData = try {
-                    clientProt.decoder?.invoke(packet, opcode)
+                    // The ClientProt decoder's Int parameter is the PAYLOAD SIZE (the bytes after the
+                    // opcode + any length prefix) — varByte/varShort decoders (op98/op12/op124/op38)
+                    // read `packetSize` bytes from the body. This is the same contract the recorder's
+                    // CapturePacketDecode and the codec unit tests use (`decoder.invoke(source, size)`).
+                    // Passing `opcode` here instead made op98 try to read 98 body bytes from a shorter
+                    // buffer (EOFException) and dropped the packet — the bug that, once the c2s desync
+                    // was fixed, surfaced on every variable-length input packet.
+                    clientProt.decoder?.invoke(packet, size)
                         ?: if (clientProt.protClass == UnhandledClientProt::class) {
                             UnhandledClientProt(opcode, codec.clientProtName(opcode), size)
                         } else {

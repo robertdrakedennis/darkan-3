@@ -412,6 +412,28 @@ object WorldServer {
                     }
                 }
 
+                // Step 16.5: Consume the world client's pre-ISAAC login-confirm opcode.
+                //
+                // After parsing the world-login response, the NXT world client sends ONE bare,
+                // *un-ciphered* byte on the c2s channel before it starts the ISAAC-enciphered game
+                // stream: opcode 26 (the login-stage descriptor 0x100f13380 — distinct from the
+                // normal in-game varShort RESUME_P_COUNTDIALOG op26; see
+                // re-resources/docs/net/recorder-known-opcodes.txt:77 and 948-clientprot-matrix.md
+                // op26). It carries no length prefix and no body — it is a single confirm byte.
+                //
+                // This byte is NOT part of the ISAAC keystream. If we left it for [Session.readPackets]
+                // (which ISAAC-deciphers every opcode), the reader would (1) subtract the first ISAAC
+                // value from a plaintext byte and decode garbage — recorder-confirmed opcode 239 from
+                // wire 0x1a, cipher 0x2b — and (2) burn the first keystream value, permanently
+                // desyncing every subsequent opcode. That halted ALL c2s input at the 2nd post-login
+                // packet (op239 -> logMissingClientProt -> "C2S reads stopped"). Consuming it here
+                // leaves [Session.readPackets] aligned to the first genuinely ISAAC-ciphered opcode
+                // (op52 DisplayMetrics), so the in-game c2s stream — including op74 click-to-walk —
+                // deframes without desync. Verified byte-for-byte against both recorder fixtures
+                // (local session-20260629-043412 and prod session-20260628-223414) in
+                // WorldC2sReplayTest.
+                consumeWorldLoginConfirm(input, ip)
+
                 // Step 17: Session loop
                 coroutineScope {
                     launch { session.readPackets(input) }
@@ -434,6 +456,28 @@ object WorldServer {
             }
         } finally {
             pendingLogins.remove(username)
+        }
+    }
+
+    /**
+     * Reads the world client's single pre-ISAAC login-confirm opcode (op26) off the c2s channel.
+     *
+     * This MUST be called after the world-login response is flushed and BEFORE
+     * [org.darkan.core.net.Session.readPackets] starts, so the ISAAC opcode reader begins at the
+     * first genuinely enciphered opcode rather than this plaintext confirm byte (see the Step 16.5
+     * call site for the full desync rationale and recorder evidence).
+     *
+     * The byte is a bare opcode — no length, no body. We read exactly one byte. The expected value is
+     * [WORLD_LOGIN_CONFIRM_OPCODE] (26); a different value is logged (the stream stays aligned either
+     * way, since the byte is consumed regardless) so a future protocol change is visible rather than
+     * silently swallowed.
+     */
+    private suspend fun consumeWorldLoginConfirm(input: ByteReadChannel, ip: String) {
+        val confirm = input.readByte().toInt() and 0xFF
+        if (confirm != WORLD_LOGIN_CONFIRM_OPCODE) {
+            logWarn("World login-confirm opcode was $confirm (expected $WORLD_LOGIN_CONFIRM_OPCODE) from $ip; consumed it to keep the ISAAC c2s stream aligned")
+        } else {
+            logTrace("World login-confirm op$WORLD_LOGIN_CONFIRM_OPCODE consumed from $ip; ISAAC c2s reader aligned to first in-game opcode")
         }
     }
 
@@ -628,6 +672,15 @@ object WorldServer {
     }
 
     private const val SESSION_POLL_INTERVAL_MS = 1_000L
+
+    /**
+     * The single pre-ISAAC opcode the NXT world client sends on c2s after parsing the world-login
+     * response, before the ISAAC-enciphered game stream begins. It is op26 (login-stage descriptor
+     * 0x100f13380 — a bare confirm byte, NOT the in-game varShort RESUME_P_COUNTDIALOG op26). The
+     * world session consumes it (see [consumeWorldLoginConfirm]) so the ISAAC opcode reader aligns.
+     */
+    private const val WORLD_LOGIN_CONFIRM_OPCODE = 26
+
     /** Rolling window for the inbound packet-rate check. */
     private const val PACKET_RATE_WINDOW_MS = 10_000L
 
