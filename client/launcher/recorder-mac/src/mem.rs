@@ -34,6 +34,16 @@ pub fn read_i32(base: usize, off: usize) -> Option<i32> {
     Some(unsafe { p.read_unaligned() })
 }
 
+/// Read a byte at `base + off`, or `None` if `base` is implausible.
+#[inline]
+pub fn read_u8(base: usize, off: usize) -> Option<u8> {
+    if !is_plausible(base) {
+        return None;
+    }
+    let p = (base + off) as *const u8;
+    Some(unsafe { p.read_unaligned() })
+}
+
 /// Read a pointer-sized value at `base + off`. Returns the raw value (caller
 /// decides whether 0 is acceptable).
 #[inline]

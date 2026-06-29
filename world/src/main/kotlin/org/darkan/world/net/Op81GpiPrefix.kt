@@ -16,11 +16,11 @@ import world.gregs.voidps.type.Tile
  * `FUN_00b254a0` **before** it reads the 18-byte coord header, advancing the packet cursor by the
  * full prefix. That parser is `gBit`-based with **NO bounds check** and reads, MSB-first:
  *   - **Local player FIRST:** `gBit(30)` = the packed absolute tile, read DIRECTLY — there is no
- *     `[hasUpdate][hasExt][movementType]` header. This is the critical structural difference from
- *     [PlayerInfoEncoder.buildInit]/[PlayerMovementEncoder.encodeAbsoluteTile], which emits the per-tick op22 shape
- *     `[gBit(1) hasUpdate][gBit(1) hasExt][gBit(2) moveType=3][gBit(30) tile]`. Feeding the op81
- *     parser that 4-bit-prefixed form would mis-decode the local tile (the 4 header bits would be
- *     swallowed into the high bits of the "tile") — INCOMPATIBLE. Hence a distinct encoder.
+ *     `[hasUpdate][hasExt][movementType]` header. This is the critical structural difference from the
+ *     op22 PLAYER_INFO high-res form ([PlayerInfoEncoder]/[PlayerMovementEncoder]), where every local
+ *     entry is prefixed `[gBit(1) hasUpdate][gBit(1) hasExt][gBit(2) movementType]…`. Feeding the op81
+ *     parser that prefixed form would mis-decode the local tile (the header bits would be swallowed
+ *     into the high bits of the "tile") — INCOMPATIBLE. Hence a distinct encoder.
  *   - **Other slots:** a loop `slot = 1..2047` that **skips the local `playerIndex`** ⇒ exactly
  *     **2046** iterations, each `gBit(20)` = a packed region-init word. NOTE (adversarial review
  *     2026-06-23): a zero word is **NOT** the "absent" sentinel — `DecodePackedCoord`'s absent

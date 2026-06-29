@@ -7,8 +7,7 @@
 
 use crate::mem;
 use crate::offsets::{
-    client as oc, connection_manager as ocm, login_state_machine as olsm,
-    server_connection as osc,
+    client as oc, connection_manager as ocm, login_state_machine as olsm, server_connection as osc,
 };
 use crate::session::Session;
 use once_cell::sync::OnceCell;
@@ -367,8 +366,8 @@ const S2C_ISAAC_DELTA: i32 = 50;
 /// `login-s2c`, `login-c2s`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SeedRole {
-    GameRecv, // game-s2c (conn+0x2B8 on the game connection)
-    GameSend, // game-c2s (conn+0x40  on the game connection)
+    GameRecv,  // game-s2c (conn+0x2B8 on the game connection)
+    GameSend,  // game-c2s (conn+0x40  on the game connection)
     LoginRecv, // login-s2c (conn+0x2B8 on the login connection)
     LoginSend, // login-c2s (conn+0x40  on the login connection)
 }
@@ -499,13 +498,11 @@ struct ConnCipherPtrs {
 /// relationship (the client seeds the recv ISAAC with the send keys each +50).
 /// We only apply this when exactly one captured seed satisfies the relationship,
 /// so it can never mis-assign.
-fn match_seeds(
-    caps: &[SeedCapture],
-    ptrs: &ConnCipherPtrs,
-    by_role: &mut [Option<[i32; 4]>; 4],
-) {
+fn match_seeds(caps: &[SeedCapture], ptrs: &ConnCipherPtrs, by_role: &mut [Option<[i32; 4]>; 4]) {
     let lookup = |state_ptr: usize| -> Option<[i32; 4]> {
-        caps.iter().find(|c| c.state_ptr == state_ptr).map(|c| c.seed)
+        caps.iter()
+            .find(|c| c.state_ptr == state_ptr)
+            .map(|c| c.seed)
     };
 
     // (role, that role's cipher pointer) for each of the 4 planes.
@@ -630,7 +627,10 @@ mod seed_tests {
     use super::*;
 
     fn cap(ptr: usize, seed: [i32; 4]) -> SeedCapture {
-        SeedCapture { state_ptr: ptr, seed }
+        SeedCapture {
+            state_ptr: ptr,
+            seed,
+        }
     }
 
     /// THE BUG FIX: each connection is seeded independently, so the game plane
@@ -641,7 +641,12 @@ mod seed_tests {
         // seeds and their +50 recv counterparts for two connections).
         let login_send_seed: [i32; 4] = [0x11111111, 0x22222222, 0x33333333, 0x44444444];
         let login_recv_seed = login_send_seed.map(|k| k.wrapping_add(S2C_ISAAC_DELTA));
-        let game_send_seed = [0x0a0b0c0du32 as i32, 0x10203040, 0x50607080u32 as i32, 0x0badf00du32 as i32];
+        let game_send_seed = [
+            0x0a0b0c0du32 as i32,
+            0x10203040,
+            0x50607080u32 as i32,
+            0x0badf00du32 as i32,
+        ];
         let game_recv_seed = game_send_seed.map(|k| k.wrapping_add(S2C_ISAAC_DELTA));
 
         // Distinct state-buffer pointers (the RDI of each Isaac::Init call).
@@ -664,10 +669,22 @@ mod seed_tests {
         let mut by_role = [None; 4];
         match_seeds(&caps, &ptrs, &mut by_role);
 
-        assert_eq!(by_role[role_index(SeedRole::GameSend)], Some(game_send_seed));
-        assert_eq!(by_role[role_index(SeedRole::GameRecv)], Some(game_recv_seed));
-        assert_eq!(by_role[role_index(SeedRole::LoginSend)], Some(login_send_seed));
-        assert_eq!(by_role[role_index(SeedRole::LoginRecv)], Some(login_recv_seed));
+        assert_eq!(
+            by_role[role_index(SeedRole::GameSend)],
+            Some(game_send_seed)
+        );
+        assert_eq!(
+            by_role[role_index(SeedRole::GameRecv)],
+            Some(game_recv_seed)
+        );
+        assert_eq!(
+            by_role[role_index(SeedRole::LoginSend)],
+            Some(login_send_seed)
+        );
+        assert_eq!(
+            by_role[role_index(SeedRole::LoginRecv)],
+            Some(login_recv_seed)
+        );
         // The game seed must NOT equal the login seed — the whole point of the fix.
         assert_ne!(
             by_role[role_index(SeedRole::GameSend)],
@@ -691,9 +708,15 @@ mod seed_tests {
         assert_eq!(by_role[role_index(SeedRole::GameSend)], None);
 
         // 2nd pass: the connection now exposes its send cipher pointer → resolves.
-        let ptrs = ConnCipherPtrs { game_send: Some(game_send_ptr), ..Default::default() };
+        let ptrs = ConnCipherPtrs {
+            game_send: Some(game_send_ptr),
+            ..Default::default()
+        };
         match_seeds(&caps, &ptrs, &mut by_role);
-        assert_eq!(by_role[role_index(SeedRole::GameSend)], Some(game_send_seed));
+        assert_eq!(
+            by_role[role_index(SeedRole::GameSend)],
+            Some(game_send_seed)
+        );
     }
 
     /// The +50 tie-breaker recovers the recv seed when the send seed resolved by
@@ -707,7 +730,10 @@ mod seed_tests {
         let caps = vec![cap(send_ptr, send_seed), cap(recv_ptr, recv_seed)];
 
         // Only the game SEND cipher pointer is readable; recv is None.
-        let ptrs = ConnCipherPtrs { game_send: Some(send_ptr), ..Default::default() };
+        let ptrs = ConnCipherPtrs {
+            game_send: Some(send_ptr),
+            ..Default::default()
+        };
         let mut by_role = [None; 4];
         match_seeds(&caps, &ptrs, &mut by_role);
 
@@ -725,7 +751,10 @@ mod seed_tests {
         let mut by_role = [None; 4];
         match_seeds(
             &[cap(first_ptr, first_seed)],
-            &ConnCipherPtrs { game_send: Some(first_ptr), ..Default::default() },
+            &ConnCipherPtrs {
+                game_send: Some(first_ptr),
+                ..Default::default()
+            },
             &mut by_role,
         );
         assert_eq!(by_role[role_index(SeedRole::GameSend)], Some(first_seed));
@@ -735,7 +764,10 @@ mod seed_tests {
         let second_ptr = 0x9000;
         match_seeds(
             &[cap(first_ptr, first_seed), cap(second_ptr, second_seed)],
-            &ConnCipherPtrs { game_send: Some(second_ptr), ..Default::default() },
+            &ConnCipherPtrs {
+                game_send: Some(second_ptr),
+                ..Default::default()
+            },
             &mut by_role,
         );
         // Still the FIRST seed — frozen.

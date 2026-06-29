@@ -14,7 +14,9 @@
 
 #![cfg(target_os = "macos")]
 
-use iced_x86::{BlockEncoder, BlockEncoderOptions, Decoder, DecoderOptions, Instruction, InstructionBlock};
+use iced_x86::{
+    BlockEncoder, BlockEncoderOptions, Decoder, DecoderOptions, Instruction, InstructionBlock,
+};
 use std::path::PathBuf;
 
 const ABS_JMP_LEN: usize = 14;

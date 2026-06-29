@@ -36,13 +36,14 @@ import world.gregs.voidps.buffer.write.BufferWriter
  *    `nextActive=true` set on this slot and every skipped slot (mirroring the decode's
  *    `slot.nextActive = true` on the skip path, `ClientStateCrossCheck.kt:1130/1122`).
  *
- * ## Increment scope (1.2b increment 1 — FOUNDATION; movementType=0 ONLY)
+ * ## Increment scope (1.2b increment 1 — FOUNDATION; movementType=0/walk)
  *
- * Every known update is the stationary form `movementType=0` ([PlayerMovementEncoder]); no real
- * walk/run/teleport motion and no low-res add → high-res promote is produced. The teleport form
- * ([PlayerMovementEncoder.encodeAbsoluteTile]) belongs to the op81 prefix and is used only by the
- * standalone first-tick init ([buildInit]). The precise increment-2 seam is documented at
- * [encodeKnownPass] / [encodeExternalPass].
+ * Every known update is the stationary form `movementType=0` ([PlayerMovementEncoder]) — including
+ * the local first-tick add, which carries the APPEARANCE ext-info INLINE (the prod local form,
+ * `c0 …` + ext-info; see [buildInit]). No real run/teleport motion and no low-res add → high-res
+ * promote is produced. The teleport form ([PlayerMovementEncoder.encodeAbsoluteTile]) is NOT used by
+ * either build path (it was reverted from [buildInit]); it is retained as the increment-2 real-teleport
+ * seam only. The precise increment-2 seam is documented at [encodeKnownPass] / [encodeExternalPass].
  *
  * Two public entry points map to the two live call sites:
  *  * [buildWorldEntrySync] — `WorldServer` world-entry. Marks the appearance cached + clears
@@ -97,13 +98,15 @@ object PlayerInfoEncoder {
     /**
      * World-entry op22 sent by `WorldServer` immediately after the op81 scene build.
      *
-     * NOTE (2026-06-28): a movementType=3 TELEPORT delivery of the local appearance was tried and
-     * REVERTED. The LOCAL player is architecturally excluded from the op22 ext-info APPEARANCE path
-     * (RE: DecodeGpiPrefix excludes the local slot from the high-res ext-info walk list;
-     * DecodeKnownPlayerUpdate idle-returns the local slot — mirrored by the decode at
-     * `ClientStateCrossCheck.kt:1171`), so the appearance never decoded AND the teleport's longer
-     * bit-block regressed the render plane. The prod-accurate fix (deliver the local appearance INLINE
-     * in the GPI add) is pending RE of the exact wire format. See memory: avatar-render-next-steps.
+     * FIXED (2026-06-29): the local appearance is delivered INLINE in the GPI add — the prod
+     * mechanism. The local slot's high-res entry is the stationary form
+     * `[hasUpdate=1][hasExtInfo=1][movementType=0]` ([PlayerMovementEncoder.encodeHighResPosition])
+     * with the APPEARANCE ext-info block following, byte-for-byte matching the production op22
+     * (`session-20260627-044937-74364-production`, local first-tick op22 = `c0 …` then one ext-info
+     * block; mvt=0, NOT mvt=3). The earlier movementType=3 TELEPORT delivery
+     * ([PlayerMovementEncoder.encodeAbsoluteTile]) was REVERTED: prod never sends it, its longer
+     * bit-block regressed the render plane, and it diverged from the steady-state per-tick form. Both
+     * [buildWorldEntrySync] and [buildInit] now emit this same stationary inline-appearance local form.
      */
     fun buildWorldEntrySync(player: Player): PlayerInfo {
         player.appearance.ensureCachedBytes()
@@ -112,23 +115,36 @@ object PlayerInfoEncoder {
     }
 
     /**
-     * First-tick GPI init form — **generated from local state**, Shape A per
-     * `docs/protocol/world-bootstrap-948.md` §0/§4.3/§5. This is a coherent standalone init whose
-     * local 30-bit tile equals the op81 coord-header centre zone (the same spawn tile).
+     * First-tick GPI init form — **generated from local state**, per
+     * `docs/protocol/world-bootstrap-948.md` §0/§4.3/§5 and the production op22 capture. This is a
+     * coherent standalone init whose local 30-bit position is implied by the preceding op81 GPI prefix
+     * (the prefix carries the absolute tile; the op22 add re-commits the avatar in place).
      *
-     * The bit block is the same four-pass structure [buildPerTick] emits, with one difference: the
-     * local player is routed through the **absolute-tile / teleport** high-res path
-     * ([PlayerMovementEncoder.encodeAbsoluteTile]) instead of the per-tick stationary path. On a solo
-     * first-light the render cohort has ONLY the local player and the pending cohort the 2046 absent
-     * others; the empty cohorts collapse to no bits / a single skip-run.
+     * **INLINE local appearance (prod-accurate, the avatar "no model" fix).** The local player is in
+     * the render cohort with `active=false` (pass 1). Its high-res entry is the **stationary**
+     * `[hasUpdate=1][hasExtInfo=1][movementType=0]` form ([PlayerMovementEncoder.encodeHighResPosition]),
+     * and its APPEARANCE ext-info block (default kits, empty equipment — built by
+     * [org.darkan.world.entity.Appearance.ensureCachedBytes]) is emitted INLINE after the bit block,
+     * framed by [org.darkan.core.net.prot.revision.rev948.Rev948ExtInfoTransforms] (mask bit 3 / 0x08,
+     * length mode 3, body mode 2). This is the EXACT form the production op22 sends for the local slot
+     * (`c0 …` + one ext-info block; verified against `session-20260627-044937-74364-production`). The
+     * empty cohorts collapse to no bits / a single skip-run on a solo first-light.
      *
-     * NOTE: this standalone init is NO LONGER sent at world entry (op81's [Op81GpiPrefix] IS the
-     * world-entry GPI). It is retained + tested in isolation as the documented teleport-init form; the
-     * un-suppressed `firstTick` path routes here. `viewport.firstTick` is set to `false`.
+     * The previous movementType=3 absolute-tile / TELEPORT local form was REMOVED — prod never sends
+     * it and it regressed the render plane (see [buildWorldEntrySync]). `buildInit` and [buildPerTick]
+     * now produce the SAME local-slot encoding; the only difference is `PlayerInfo.firstTick`.
+     *
+     * NOTE: at the live world entry op81's generated GPI prefix ([Op81GpiPrefix]) IS the world-entry
+     * GPI and [buildWorldEntrySync] sends the following op22; this `buildInit` form is what the
+     * un-suppressed `firstTick` path emits. `viewport.firstTick` is set to `false`.
      */
     fun buildInit(player: Player): PlayerInfo {
         val viewport = player.viewport
         viewport.firstTick = false
+
+        // Match buildWorldEntrySync / prod: the inline-appearance local entry needs the appearance
+        // bytes resolved before the ext-info pass reads them.
+        player.appearance.ensureCachedBytes()
 
         val slots = viewport.playerSlots
         val bitOut = BufferWriter(TICK_BUFFER_CAPACITY)
@@ -136,10 +152,11 @@ object PlayerInfoEncoder {
         // emitted in the order the hasExtendedInfo bits fired (§4C).
         val flaggedForExtInfo = ArrayList<Int>(8)
 
-        // Four byte-aligned passes in the verified decode order. The local slot (in renderList,
-        // active=false → pass 1) takes the absolute-tile init path; everything else mirrors buildPerTick.
-        byteAlignPass(bitOut) { encodeKnownPass(bitOut, player, slots, activeFlag = false, init = true, flaggedForExtInfo) }
-        byteAlignPass(bitOut) { encodeKnownPass(bitOut, player, slots, activeFlag = true, init = true, flaggedForExtInfo) }
+        // Four byte-aligned passes in the verified decode order. The local slot (renderList,
+        // active=false → pass 1) is the stationary inline-appearance high-res form, identical to
+        // buildPerTick — NOT the reverted absolute-tile teleport.
+        byteAlignPass(bitOut) { encodeKnownPass(bitOut, player, slots, activeFlag = false, flaggedForExtInfo) }
+        byteAlignPass(bitOut) { encodeKnownPass(bitOut, player, slots, activeFlag = true, flaggedForExtInfo) }
         byteAlignPass(bitOut) { encodeExternalPass(bitOut, player, slots, activeFlag = true, flaggedForExtInfo) }
         byteAlignPass(bitOut) { encodeExternalPass(bitOut, player, slots, activeFlag = false, flaggedForExtInfo) }
         slots.rebuildAfterPasses()
@@ -168,8 +185,8 @@ object PlayerInfoEncoder {
         val bitOut = BufferWriter(TICK_BUFFER_CAPACITY)
         val flaggedForExtInfo = ArrayList<Int>(8)
 
-        byteAlignPass(bitOut) { encodeKnownPass(bitOut, player, slots, activeFlag = false, init = false, flaggedForExtInfo) }
-        byteAlignPass(bitOut) { encodeKnownPass(bitOut, player, slots, activeFlag = true, init = false, flaggedForExtInfo) }
+        byteAlignPass(bitOut) { encodeKnownPass(bitOut, player, slots, activeFlag = false, flaggedForExtInfo) }
+        byteAlignPass(bitOut) { encodeKnownPass(bitOut, player, slots, activeFlag = true, flaggedForExtInfo) }
         byteAlignPass(bitOut) { encodeExternalPass(bitOut, player, slots, activeFlag = true, flaggedForExtInfo) }
         byteAlignPass(bitOut) { encodeExternalPass(bitOut, player, slots, activeFlag = false, flaggedForExtInfo) }
         slots.rebuildAfterPasses()
@@ -185,15 +202,20 @@ object PlayerInfoEncoder {
      * Encode ONE known (high-res) pass — the inverse of `runKnownPass` (`ClientStateCrossCheck.kt:1110`).
      *
      * Iterates [PlayerInfoSlots.renderList] in order, processing slots whose `active == activeFlag`.
-     * For each processed slot: if it has an update (appearance/masks to deliver, or — when [init] and
-     * it is the local slot — the absolute-tile init), write `hasUpdate=1` + the known position bits.
-     * Otherwise it starts a stationary skip-run: write `hasUpdate=0` + a [writeSkipCount] over the
-     * following matching no-update slots, and set `nextActive=true` on this slot and every skipped
-     * slot (the decode does `slot.nextActive = true` on both the bit-reading slot and each skipped
-     * slot, `ClientStateCrossCheck.kt:1130/1122`).
+     * For each processed slot: if it has an update (appearance/masks to deliver), write `hasUpdate=1`
+     * + the known position bits ([PlayerMovementEncoder.encodeHighResPosition]). Otherwise it starts a
+     * stationary skip-run: write `hasUpdate=0` + a [writeSkipCount] over the following matching
+     * no-update slots, and set `nextActive=true` on this slot and every skipped slot (the decode does
+     * `slot.nextActive = true` on both the bit-reading slot and each skipped slot,
+     * `ClientStateCrossCheck.kt:1130/1122`).
+     *
+     * The LOCAL slot is NOT special-cased: like every known slot with an undelivered appearance, it
+     * emits the stationary inline-appearance form `[hasUpdate=1][hasExt=1][mvt=0]` and its APPEARANCE
+     * ext-info block follows the bit block. This is the prod local first-tick form (`c0 …`, mvt=0,
+     * NOT the reverted mvt=3 teleport). Both [buildInit] and [buildPerTick] call this identically.
      *
      * INCREMENT-2 SEAM: real walk/run for a known slot plugs into [PlayerMovementEncoder.encodeHighResPosition]
-     * (today `movementType=0`); the demote-to-low-res case (decode mvt=0 + present→false,
+     * (today `movementType=0`/walk); the demote-to-low-res case (decode mvt=0 + present→false,
      * `ClientStateCrossCheck.kt:1170`) calls [PlayerInfoSlots.demoteToPending].
      */
     private fun encodeKnownPass(
@@ -201,7 +223,6 @@ object PlayerInfoEncoder {
         viewer: Player,
         slots: PlayerInfoSlots,
         activeFlag: Boolean,
-        init: Boolean,
         flaggedForExtInfo: MutableList<Int>,
     ) {
         val order = slots.renderList
@@ -215,14 +236,7 @@ object PlayerInfoEncoder {
             }
 
             val target = Players.get(idx)
-            if (init && idx == slots.localIndex && target != null) {
-                // First-tick init ONLY: the local player's known update is the absolute-tile teleport
-                // form, which writes its OWN leading [hasUpdate=1] then [hasExt][mvt=3][30-bit tile].
-                // (Standalone init form per docs/protocol/world-bootstrap-948.md §4.3; NOT sent at the
-                // live world entry — that is op81's [Op81GpiPrefix].)
-                PlayerMovementEncoder.encodeAbsoluteTile(out, target, flaggedForExtInfo)
-                i++
-            } else if (target != null && knownHasUpdate(viewer, target)) {
+            if (target != null && knownHasUpdate(viewer, target)) {
                 out.writeBits(1, 1)
                 PlayerMovementEncoder.encodeHighResPosition(out, target, flaggedForExtInfo)
                 // The decode does NOT set nextActive for a known mvt=0 stay (local/has-ext idle-return,

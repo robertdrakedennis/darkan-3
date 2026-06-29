@@ -10,9 +10,11 @@ import org.darkan.world.entity.MovementQueue
 import org.darkan.world.entity.Player
 import org.darkan.world.world.PlayerInfoSlots
 import org.darkan.world.world.Players
+import org.darkan.core.net.recorder.PlayerInfoDecoder
 import world.gregs.voidps.buffer.read.BufferReader
 import world.gregs.voidps.buffer.write.BufferWriter
 import world.gregs.voidps.type.Tile
+import java.io.ByteArrayOutputStream
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -64,6 +66,77 @@ class PlayerWalkStepTest {
         player.viewport.resetAfterGpiPrefix(allocatedIndex)
         player.tile = spawn
         return player
+    }
+
+    private fun writeSkipCount(out: BufferWriter, following: Int) {
+        when {
+            following == 0 -> out.writeBits(2, 0)
+            following < 32 -> {
+                out.writeBits(2, 1)
+                out.writeBits(5, following)
+            }
+            following < 256 -> {
+                out.writeBits(2, 2)
+                out.writeBits(8, following)
+            }
+            else -> {
+                out.writeBits(2, 3)
+                out.writeBits(11, following)
+            }
+        }
+    }
+
+    private fun writeSkipRun(out: BufferWriter, count: Int) {
+        var remaining = count
+        while (remaining > 0) {
+            val following = minOf(remaining - 1, 2047)
+            out.writeBits(1, 0)
+            writeSkipCount(out, following)
+            remaining -= following + 1
+        }
+    }
+
+    private fun playerRegionWord(tile: Tile): Int =
+        ((tile.level and 0x3) shl 16) or ((tile.x ushr 6) shl 8) or (tile.y ushr 6)
+
+    private fun gpiPrefixBody(localIndex: Int, local: Tile): ByteArray {
+        val out = BufferWriter(8192)
+        out.startBitAccess()
+        out.writeBits(30, ((local.level and 0x3) shl 28) or (local.x shl 14) or local.y)
+        val defaultWord = playerRegionWord(local)
+        for (slot in 1 until 2048) {
+            if (slot != localIndex) out.writeBits(20, defaultWord)
+        }
+        out.stopBitAccess()
+        return out.toArray()
+    }
+
+    private fun playerInfoKnownWalkBody(player: Player, dir: Int): ByteArray {
+        player.lastWalkStepDir = dir
+        val flagged = ArrayList<Int>()
+        val out = BufferWriter(8192)
+
+        out.startBitAccess()
+        out.writeBits(1, 1)
+        PlayerMovementEncoder.encodeHighResPosition(out, player, flagged)
+        out.stopBitAccess()
+
+        out.startBitAccess()
+        out.stopBitAccess()
+
+        out.startBitAccess()
+        writeSkipRun(out, 2046)
+        out.stopBitAccess()
+
+        out.startBitAccess()
+        out.stopBitAccess()
+
+        val extInfo = ByteArrayOutputStream()
+        repeat(flagged.size) {
+            extInfo.write(0)
+            extInfo.write(0)
+        }
+        return out.toArray() + extInfo.toByteArray()
     }
 
     @Test
@@ -136,6 +209,26 @@ class PlayerWalkStepTest {
         // A fresh account carries a default appearance, so hasExt=1 and the slot is flagged for ext-info.
         assertEquals(1, hasExt, "fresh player has deliverable appearance → hasExtendedInfo=1")
         assertEquals(listOf(player.index), flagged, "walking slot with ext-info is flagged for the ext block")
+    }
+
+    @Test
+    fun `PlayerInfoDecoder round-trips a known walk index and dir from op22`() {
+        val player = newPlayer(Tile(3200, 3200, 0))
+        val northDir = Direction8.indexOf(0, 1)
+        val prefix = gpiPrefixBody(player.index, player.tile)
+        val body = playerInfoKnownWalkBody(player, northDir)
+
+        val scene = PlayerInfoDecoder.decode(
+            bytes = body,
+            gpiPrefix = PlayerInfoDecoder.GpiPrefix(prefix, player.index),
+        )
+        val movement = scene.movements.singleOrNull { it.index == player.index && it.movementType == 1 }
+
+        require(movement != null) { "expected one retained walk movement for local player ${player.index}" }
+        assertEquals(player.index, movement.index, "retained movement index must be the player slot")
+        assertEquals(northDir, movement.dir, "retained walk dir must match the encoded 3-bit dir")
+        assertEquals(true, movement.hasExt, "walk record retains the hasExt bit")
+        assertEquals(null, movement.followup, "single-step walk has no follow-up payload")
     }
 
     @Test

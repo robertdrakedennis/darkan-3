@@ -50,7 +50,10 @@ fn peers() -> parking_lot::MutexGuard<'static, Option<HashMap<c_int, (String, u1
 
 /// Parse a `sockaddr*` into (ip, port) for AF_INET / AF_INET6. Returns None for
 /// AF_UNIX and anything we don't format (those connects are ignored).
-unsafe fn parse_sockaddr(addr: *const libc::sockaddr, len: libc::socklen_t) -> Option<(String, u16)> {
+unsafe fn parse_sockaddr(
+    addr: *const libc::sockaddr,
+    len: libc::socklen_t,
+) -> Option<(String, u16)> {
     if addr.is_null() {
         return None;
     }

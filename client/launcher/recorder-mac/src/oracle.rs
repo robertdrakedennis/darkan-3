@@ -16,6 +16,7 @@
 use crate::mem;
 use crate::offsets::avatar as av;
 use crate::offsets::client_oracle as o;
+use std::collections::BTreeMap;
 
 /// The server index our server assigns to the local player (the slot the avatar
 /// must occupy for RefreshLocalVisibility to mark it visible).
@@ -29,6 +30,68 @@ pub struct SkillEntry {
     pub level: i32,
     pub base: i32,
     pub xp: i32,
+}
+
+/// Numeric client-var record from the VARC record tree. The tree key is
+/// `(recordKind,varId)`, so both `kind` and `id` are emitted.
+pub struct VarcNumberEntry {
+    pub kind: i32,
+    pub id: i32,
+    pub value_kind: i32,
+    pub val: i64,
+}
+
+/// String client-var record from the VARC record tree. String values are EA
+/// small strings at `node+0x48` (inline or heap).
+pub struct VarcStringEntry {
+    pub kind: i32,
+    pub id: i32,
+    pub value_kind: i32,
+    pub str_val: String,
+}
+
+/// Occupied item-container slot from the client's persistent inventory store.
+/// Empty slots (`item == -1`) are omitted by the reader.
+pub struct InventorySlotEntry {
+    pub slot: i32,
+    pub item: i32,
+    pub count: u32,
+}
+
+/// Item-container entry keyed by the raw client key `inventoryId*2 + domainBit`.
+/// The derived `inv_id` and `domain_bit` are emitted too; callers must not key by
+/// inventory id alone because the binary keeps both domains in the same vector.
+pub struct InventoryEntry {
+    pub key: i32,
+    pub inv_id: i32,
+    pub domain_bit: i32,
+    pub slots: Vec<InventorySlotEntry>,
+}
+
+/// Scene player read from PlayerManager's full slot array. `idx` is the server
+/// index/slot id; position is the client entity's rounded render tile.
+pub struct ScenePlayerEntry {
+    pub idx: i32,
+    pub x: i32,
+    pub y: i32,
+    pub plane: i32,
+}
+
+/// Scene NPC read from NpcManager's active-index list and hash map. `type_id` is
+/// the raw NPC type id for recorder-side `npc` gameval naming.
+pub struct SceneNpcEntry {
+    pub idx: i32,
+    pub type_id: i32,
+    pub x: i32,
+    pub y: i32,
+    pub plane: i32,
+}
+
+/// Local avatar committed appearance slot token. Array order is the client body
+/// slot index; each pair is `{kitId,itemId}` with `-1` in the unused half.
+pub struct AppearanceSlotEntry {
+    pub kit_id: i32,
+    pub item_id: i32,
 }
 
 /// The LOCAL-PLAYER AVATAR render state, read straight off the client's avatar
@@ -221,14 +284,48 @@ pub struct Snapshot {
     /// can be distinguished from "table unreadable" — only emit `varps` when this
     /// is true).
     pub varps_readable: bool,
+    /// Numeric/long client-vars from the VARC record tree. `kind` is recordKind,
+    /// `id` is varId, and `value_kind` is the client's stored discriminator
+    /// (`0=int32`, `1=int64`).
+    pub varcs: Vec<VarcNumberEntry>,
+    /// String client-vars from the VARC record tree. Values are decoded from EA
+    /// small-string storage at `node+0x48`.
+    pub varcstrings: Vec<VarcStringEntry>,
+    /// Whether the VARC record tree itself was reachable. Empty arrays are emitted
+    /// only when this is true; absent arrays mean the domain/tree was unreadable.
+    pub varcs_readable: bool,
+    /// Occupied slots from the persistent item-container store. Each entry carries
+    /// the raw key plus derived inventory id/domain bit. Empty slots are omitted.
+    pub inventories: Vec<InventoryEntry>,
+    /// Whether the item-container store vector itself was reachable. Empty arrays
+    /// are emitted only when true; absent arrays mean the store was unreadable.
+    pub inventories_readable: bool,
     /// Local-player tile (x, y, plane) — meaningful once in-world.
     pub player: Option<(i32, i32, i32)>,
+    /// All active/readable player entities from PlayerManager slot array.
+    pub players: Vec<ScenePlayerEntry>,
+    /// Whether PlayerManager slot array was reachable. Empty means no readable
+    /// active player entities only when this is true.
+    pub players_readable: bool,
+    /// All active/readable NPC entities from NpcManager active-index list.
+    pub npcs: Vec<SceneNpcEntry>,
+    /// Whether NpcManager active list + hash buckets were reachable. Empty means
+    /// no readable active NPC entities only when this is true.
+    pub npcs_readable: bool,
     /// Skills table — meaningful once in-world.
     pub skills: Vec<SkillEntry>,
     /// Run energy 0..255 — meaningful once in-world.
     pub run_energy: Option<i32>,
     /// Run weight (signed) — meaningful once in-world.
     pub run_weight: Option<i32>,
+    /// LOCAL-avatar committed appearance identity from the applied appearance's
+    /// equip context. This intentionally emits only stable kit/item tokens, not
+    /// worn equipment inventory slots (inv94 already covers those) and not
+    /// transient model handles.
+    pub appearance: Vec<AppearanceSlotEntry>,
+    /// Whether the applied appearance's slot-pair vector was fully reachable.
+    /// Empty means zero slots only when true; absent means unreadable/not applied.
+    pub appearance_readable: bool,
     /// LOCAL-PLAYER AVATAR render state (visible flag, model handle, render vs
     /// logical position). `lip` is `None` until logged in. Always present (the
     /// writer emits a `local_player` object whenever the client base is known so a
@@ -248,12 +345,18 @@ pub fn snapshot(client_base: usize) -> Snapshot {
     snap.main_state = mem::read_i32(client_base, crate::offsets::client::MAIN_STATE);
 
     read_varps(client_base, &mut snap);
+    read_varcs(client_base, &mut snap);
+    read_inventories(client_base, &mut snap);
     snap.player = read_player_tile(client_base);
+    read_scene_players(client_base, &mut snap);
+    read_scene_npcs(client_base, &mut snap);
     snap.skills = read_skills(client_base);
     let (energy, weight) = read_run(client_base);
     snap.run_energy = energy;
     snap.run_weight = weight;
-    snap.local_player = read_local_player(client_base);
+    let local_player = read_local_player(client_base);
+    read_local_appearance(&local_player, &mut snap);
+    snap.local_player = local_player;
 
     snap
 }
@@ -386,9 +489,11 @@ fn read_local_player(client_base: usize) -> LocalPlayer {
     // "appearance never applied / compose never ran" (zero, with pending also zero).
     lp.current_appearance = Some(mem::read_ptr(avatar, av::CURRENT_APPEARANCE).unwrap_or(0));
     if mem::is_plausible(pending) {
-        lp.pending_needs_async_load = mem::read_i32(pending, av::PENDING_NEEDS_ASYNC_LOAD).map(|v| v & 0xff);
+        lp.pending_needs_async_load =
+            mem::read_i32(pending, av::PENDING_NEEDS_ASYNC_LOAD).map(|v| v & 0xff);
         lp.pending_0x89 = mem::read_i32(pending, av::PENDING_BYTE_0X89).map(|v| v & 0xff);
-        lp.pending_composed_flag = mem::read_i32(pending, av::PENDING_COMPOSED_FLAG).map(|v| v & 0xff);
+        lp.pending_composed_flag =
+            mem::read_i32(pending, av::PENDING_COMPOSED_FLAG).map(|v| v & 0xff);
         lp.pending_res_7c = mem::read_i32(pending, av::PENDING_RES_7C);
         lp.pending_res_80 = mem::read_i32(pending, av::PENDING_RES_80);
         lp.pending_0x84 = mem::read_i32(pending, av::PENDING_WORD_0X84);
@@ -445,6 +550,58 @@ fn read_local_player(client_base: usize) -> LocalPlayer {
     }
 
     lp
+}
+
+/// Read LOCAL-avatar committed appearance token pairs. Source is the avatar's
+/// APPLIED appearance object (`avatar+0x12A0`) and its equip context
+/// (`appearance+0x98`), not the worn-equipment inventory and not model handles.
+/// The emitted array preserves body-slot order; if any slot is unreadable, omit
+/// the whole field rather than producing an ambiguous partial array.
+fn read_local_appearance(lp: &LocalPlayer, snap: &mut Snapshot) {
+    const MAX_APPEARANCE_SLOTS: usize = 64;
+
+    let appearance = match lp.current_appearance {
+        Some(p) if mem::is_plausible(p) => p,
+        _ => match lp.avatar {
+            Some(a) if mem::is_plausible(a) => match mem::deref(a, o::AVATAR_APPEARANCE_APPLIED) {
+                Some(p) => p,
+                None => return,
+            },
+            _ => return,
+        },
+    };
+    let equip_ctx = match mem::deref(appearance, o::APPEARANCE_EQUIP_CONTEXT) {
+        Some(p) => p,
+        None => return,
+    };
+    let slot_count = match mem::read_ptr(equip_ctx, o::EQUIP_CTX_SLOT_COUNT) {
+        Some(c) if c <= MAX_APPEARANCE_SLOTS => c,
+        _ => return,
+    };
+
+    if slot_count == 0 {
+        snap.appearance_readable = true;
+        return;
+    }
+
+    let slot_pairs = match mem::deref(equip_ctx, o::EQUIP_CTX_SLOT_PAIRS) {
+        Some(p) => p,
+        None => return,
+    };
+    let mut out = Vec::with_capacity(slot_count);
+    for slot in 0..slot_count {
+        let pair = slot_pairs + slot * o::EQUIP_CTX_SLOT_STRIDE;
+        let (Some(kit_id), Some(item_id)) = (
+            mem::read_i32(pair, o::EQUIP_CTX_SLOT_KIT_ID),
+            mem::read_i32(pair, o::EQUIP_CTX_SLOT_ITEM_ID),
+        ) else {
+            return;
+        };
+        out.push(AppearanceSlotEntry { kit_id, item_id });
+    }
+
+    snap.appearance = out;
+    snap.appearance_readable = true;
 }
 
 /// Walk the PlayerVarDomain VALUES hashtable and collect every `(varId, value)`.
@@ -510,6 +667,398 @@ fn read_varps(client_base: usize, snap: &mut Snapshot) {
     }
 }
 
+/// Walk the client-var record trees. VARC storage is NOT varp-style buckets:
+/// `Client+VARC_DOMAIN` is a pointer to the domain. `GetOrCreateInterfaceRecord`
+/// inserts canonical record nodes under `domain+0x1E120`, but handlers receive a
+/// record payload pointer (`node+0x28`) and `ActivateInterfaceRecord` also links
+/// those payloads through the active update tree at `domain+0x20`.
+///
+/// Live captures showed the periodic/exit oracle can miss transient active
+/// records and that the canonical tree may contain non-varc interface records
+/// (e.g. record kind 7). We therefore enumerate both tree shapes, normalize to
+/// the record payload layout, filter to varc record kinds 1/2, and dedupe by
+/// `(recordKind,varId)`.
+fn read_varcs(client_base: usize, snap: &mut Snapshot) {
+    const MAX_NODES: usize = 1 << 16;
+
+    let domain = match mem::deref(client_base, o::VARC_DOMAIN) {
+        Some(d) => d,
+        None => return,
+    };
+
+    let mut numbers = BTreeMap::<(i32, i32), VarcNumberEntry>::new();
+    let mut strings = BTreeMap::<(i32, i32), VarcStringEntry>::new();
+    let mut readable = false;
+
+    if let Some(count) = mem::read_ptr(domain, o::VARC_RECORD_TREE_COUNT) {
+        readable = true;
+        if count > 0 {
+            if let Some(root) = mem::deref(domain, o::VARC_RECORD_TREE_ROOT) {
+                walk_varc_tree(root, MAX_NODES, |node| {
+                    let record = node.saturating_add(o::VARC_NODE_RECORD_PAYLOAD);
+                    read_varc_record(record, &mut numbers, &mut strings);
+                });
+            }
+        }
+    }
+
+    if let Some(count) = mem::read_ptr(domain, o::VARC_ACTIVE_TREE_COUNT) {
+        readable = true;
+        if count > 0 {
+            if let Some(root) = mem::deref(domain, o::VARC_ACTIVE_TREE_ROOT) {
+                walk_varc_tree(root, MAX_NODES, |node| {
+                    if let Some(record) = mem::deref(node, o::VARC_ACTIVE_NODE_RECORD) {
+                        read_varc_record(record, &mut numbers, &mut strings);
+                    }
+                });
+            }
+        }
+    }
+
+    if !readable {
+        return;
+    }
+
+    snap.varcs_readable = true;
+    snap.varcs = numbers.into_values().collect();
+    snap.varcstrings = strings.into_values().collect();
+}
+
+/// Walk the persistent item-container store written by UPDATE_INV_FULL_OP85 and
+/// UPDATE_INV_PARTIAL_OP121. The store is an EASTL sorted vector at
+/// `*(Client+0x197D8)`, keyed by `inventoryId*2 + (flags&1)`. Each container's
+/// slots are another vector of inline u64 words: low i32 item id, high u32
+/// quantity. Empty slots (`item == -1`) are omitted.
+fn read_inventories(client_base: usize, snap: &mut Snapshot) {
+    const MAX_ENTRIES: usize = 4096;
+    const MAX_SLOTS: usize = 4096;
+
+    let store = match mem::deref(client_base, o::ITEM_CONTAINER_STORE) {
+        Some(s) => s,
+        None => return,
+    };
+    let (entry_begin, entry_count) = match read_eastl_vector(
+        store,
+        o::ITEM_CONTAINER_ENTRY_BEGIN,
+        o::ITEM_CONTAINER_ENTRY_END,
+        o::ITEM_CONTAINER_ENTRY_CAP,
+        o::ITEM_CONTAINER_ENTRY_STRIDE,
+        MAX_ENTRIES,
+    ) {
+        Some(v) => v,
+        None => return,
+    };
+
+    snap.inventories_readable = true;
+    if entry_count == 0 {
+        return;
+    }
+
+    for index in 0..entry_count {
+        let entry = entry_begin + index * o::ITEM_CONTAINER_ENTRY_STRIDE;
+        let Some(key) = mem::read_i32(entry, o::ITEM_CONTAINER_ENTRY_KEY) else {
+            continue;
+        };
+        if key < 0 {
+            continue;
+        }
+
+        let container = entry + o::ITEM_CONTAINER_ENTRY_PAYLOAD;
+        let (slot_begin, slot_count) = match read_eastl_vector(
+            container,
+            o::ITEM_CONTAINER_SLOT_BEGIN,
+            o::ITEM_CONTAINER_SLOT_END,
+            o::ITEM_CONTAINER_SLOT_CAP,
+            o::ITEM_CONTAINER_SLOT_STRIDE,
+            MAX_SLOTS,
+        ) {
+            Some(v) => v,
+            None => continue,
+        };
+
+        let mut slots = Vec::new();
+        for slot in 0..slot_count {
+            let Some(raw) = mem::read_ptr(slot_begin, slot * o::ITEM_CONTAINER_SLOT_STRIDE) else {
+                continue;
+            };
+            let item = (raw as u32) as i32;
+            if item == -1 {
+                continue;
+            }
+            let count = (raw >> 32) as u32;
+            slots.push(InventorySlotEntry {
+                slot: slot as i32,
+                item,
+                count,
+            });
+        }
+
+        if !slots.is_empty() {
+            snap.inventories.push(InventoryEntry {
+                key,
+                inv_id: key >> 1,
+                domain_bit: key & 1,
+                slots,
+            });
+        }
+    }
+}
+
+/// Enumerate every readable player entity by scanning PlayerManager's full slot
+/// array (1..0x7ff). Render/pending vectors are packet-order helpers; the slot
+/// array is the complete scene oracle source.
+fn read_scene_players(client_base: usize, snap: &mut Snapshot) {
+    let pm = match mem::deref(client_base, o::PLAYER_MANAGER) {
+        Some(p) => p,
+        None => return,
+    };
+    let slot_array = match mem::deref(pm, o::PM_PLAYER_LIST) {
+        Some(s) => s,
+        None => return,
+    };
+
+    snap.players_readable = true;
+    for idx in 1..o::PM_PLAYER_LIST_CAPACITY {
+        let Some(slot_rec) = mem::deref(slot_array, idx * 8) else {
+            continue;
+        };
+        let Some(entity) = mem::deref(slot_rec, o::NODE_ENTITY) else {
+            continue;
+        };
+        if let Some((x, y, plane)) = read_entity_tile(entity) {
+            snap.players.push(ScenePlayerEntry {
+                idx: idx as i32,
+                x,
+                y,
+                plane,
+            });
+        }
+    }
+}
+
+/// Enumerate active NPCs through NpcManager's compact active-index list, then
+/// resolve each id through the manager hash table. The active list bounds the
+/// scene cohort; hash lookup gives the entity pointer and type id.
+fn read_scene_npcs(client_base: usize, snap: &mut Snapshot) {
+    const MAX_NPCS: usize = 0x400; // npcMgr+0xA0A0..+0xB0A0 = 1024 u32 slots
+    const MAX_BUCKETS: usize = 1 << 20;
+
+    let npc_mgr = match mem::deref(client_base, o::NPC_MANAGER) {
+        Some(n) => n,
+        None => return,
+    };
+    let buckets = match mem::deref(npc_mgr, o::NPC_BUCKETS) {
+        Some(b) => b,
+        None => return,
+    };
+    let bucket_count = match mem::read_ptr(npc_mgr, o::NPC_BUCKET_COUNT) {
+        Some(c) if c > 0 && c <= MAX_BUCKETS => c,
+        _ => return,
+    };
+    let active_count = match mem::read_i32(npc_mgr, o::NPC_ACTIVE_COUNT) {
+        Some(c) if c >= 0 => (c as usize).min(MAX_NPCS),
+        _ => return,
+    };
+
+    snap.npcs_readable = true;
+    for i in 0..active_count {
+        let Some(idx) = mem::read_i32(npc_mgr, o::NPC_ACTIVE_INDICES + i * 4) else {
+            continue;
+        };
+        if idx < 0 {
+            continue;
+        }
+        let Some(entity) = lookup_npc_entity(buckets, bucket_count, idx as u32) else {
+            continue;
+        };
+        let Some(type_id) = mem::read_i32(entity, o::NPC_ENTITY_TYPE_ID) else {
+            continue;
+        };
+        if let Some((x, y, plane)) = read_entity_tile(entity) {
+            snap.npcs.push(SceneNpcEntry {
+                idx,
+                type_id,
+                x,
+                y,
+                plane,
+            });
+        }
+    }
+}
+
+fn lookup_npc_entity(buckets: usize, bucket_count: usize, npc_index: u32) -> Option<usize> {
+    const MAX_CHAIN: usize = 4096;
+    let bucket = (npc_index as usize) % bucket_count;
+    let mut node = mem::deref(buckets, bucket * 8)?;
+
+    for _ in 0..MAX_CHAIN {
+        if !mem::is_plausible(node) {
+            return None;
+        }
+        if mem::read_i32(node, o::NPC_NODE_KEY)? as u32 == npc_index {
+            return mem::deref(node, o::NPC_NODE_ENTITY);
+        }
+        let next = mem::read_ptr(node, o::NPC_NODE_NEXT).unwrap_or(0);
+        if next == 0 || next == node {
+            return None;
+        }
+        node = next;
+    }
+    None
+}
+
+/// Read EASTL vector begin/end/cap fields and return `(begin,count)`. Empty
+/// vectors (`begin=end=0`) are readable and produce count 0. Non-empty vectors
+/// must have plausible begin/end/cap, monotonic pointers, and stride alignment.
+fn read_eastl_vector(
+    base: usize,
+    begin_off: usize,
+    end_off: usize,
+    cap_off: usize,
+    stride: usize,
+    max_count: usize,
+) -> Option<(usize, usize)> {
+    if stride == 0 || max_count == 0 {
+        return None;
+    }
+    let begin = mem::read_ptr(base, begin_off)?;
+    let end = mem::read_ptr(base, end_off)?;
+    let cap = mem::read_ptr(base, cap_off)?;
+
+    if begin == 0 && end == 0 {
+        return Some((0, 0));
+    }
+    if !mem::is_plausible(begin) || end < begin || cap < end {
+        return None;
+    }
+
+    let bytes = end - begin;
+    if bytes % stride != 0 {
+        return None;
+    }
+    Some((begin, (bytes / stride).min(max_count)))
+}
+
+fn walk_varc_tree<F>(root: usize, max_nodes: usize, mut visit: F)
+where
+    F: FnMut(usize),
+{
+    let mut stack = Vec::with_capacity(64);
+    let mut seen = Vec::new();
+    stack.push(root);
+
+    while let Some(node) = stack.pop() {
+        if seen.len() >= max_nodes || !mem::is_plausible(node) || seen.contains(&node) {
+            continue;
+        }
+        seen.push(node);
+
+        // Touch left/right/parent through mem::* and traverse only plausible
+        // children. Parent/color are not emitted, but reading them keeps this walk
+        // aligned to the documented red-black node layout and catches bad offsets
+        // in tests.
+        let left = mem::read_ptr(node, o::VARC_NODE_LEFT).unwrap_or(0);
+        let right = mem::read_ptr(node, o::VARC_NODE_RIGHT).unwrap_or(0);
+        let _parent = mem::read_ptr(node, o::VARC_NODE_PARENT).unwrap_or(0);
+        let _color = mem::read_u8(node, o::VARC_NODE_COLOR).unwrap_or(0);
+        for child in [right, left] {
+            if mem::is_plausible(child) && !seen.contains(&child) && stack.len() < max_nodes {
+                stack.push(child);
+            }
+        }
+
+        visit(node);
+    }
+}
+
+fn read_varc_record(
+    record: usize,
+    numbers: &mut BTreeMap<(i32, i32), VarcNumberEntry>,
+    strings: &mut BTreeMap<(i32, i32), VarcStringEntry>,
+) {
+    let (Some(kind), Some(id), Some(value_kind)) = (
+        mem::read_i32(record, o::VARC_RECORD_KIND),
+        mem::read_i32(record, o::VARC_RECORD_VAR_ID),
+        mem::read_i32(record, o::VARC_RECORD_VALUE_KIND),
+    ) else {
+        return;
+    };
+
+    match (kind, value_kind) {
+        (1, 0) => {
+            if let Some(v) = mem::read_i32(record, o::VARC_RECORD_VALUE) {
+                numbers.insert(
+                    (kind, id),
+                    VarcNumberEntry {
+                        kind,
+                        id,
+                        value_kind,
+                        val: v as i64,
+                    },
+                );
+            }
+        }
+        (1, 1) => {
+            if let Some(v) = read_i64(record, o::VARC_RECORD_VALUE) {
+                numbers.insert(
+                    (kind, id),
+                    VarcNumberEntry {
+                        kind,
+                        id,
+                        value_kind,
+                        val: v,
+                    },
+                );
+            }
+        }
+        (2, 2) => {
+            if let Some(s) = read_varc_string(record) {
+                strings.insert(
+                    (kind, id),
+                    VarcStringEntry {
+                        kind,
+                        id,
+                        value_kind,
+                        str_val: s,
+                    },
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn read_varc_string(record: usize) -> Option<String> {
+    const MAX_STRING_BYTES: usize = 0x4000;
+    let tag = mem::read_u8(record, o::VARC_RECORD_STRING_INLINE_TAG)?;
+    if (tag as usize) < o::VARC_STRING_INLINE_LIMIT {
+        let len = (o::VARC_STRING_INLINE_LIMIT - 1).saturating_sub(tag as usize);
+        if len > MAX_STRING_BYTES {
+            return None;
+        }
+        let bytes = if len == 0 {
+            Vec::new()
+        } else {
+            mem::copy_bytes(record + o::VARC_RECORD_VALUE, len)?
+        };
+        return Some(String::from_utf8_lossy(&bytes).into_owned());
+    }
+
+    let len = mem::read_ptr(record, o::VARC_RECORD_STRING_LENGTH)?;
+    let cap = mem::read_ptr(record, o::VARC_RECORD_STRING_CAP_TAG)?;
+    let heap_bit = 1usize << (usize::BITS as usize - 1);
+    if len > MAX_STRING_BYTES || (cap & heap_bit) == 0 {
+        return None;
+    }
+    let ptr = mem::deref(record, o::VARC_RECORD_VALUE)?;
+    let bytes = if len == 0 {
+        Vec::new()
+    } else {
+        mem::copy_bytes(ptr, len)?
+    };
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 /// Resolve the local player's tile (x, y, plane) via the LoggedInPlayer →
 /// PlayerManager → player-list → entity → graphNode chain (RE §10.2), then apply
 /// the engine's float→tile formula. `None` if any hop is unreadable (i.e. not
@@ -524,10 +1073,17 @@ fn read_player_tile(client_base: usize) -> Option<(i32, i32, i32)> {
     let list = mem::deref(pm, o::PM_PLAYER_LIST)?;
     let node = mem::deref(list, (server_idx as usize) * 8)?;
     let entity = mem::deref(node, o::NODE_ENTITY)?;
+    read_entity_tile(entity)
+}
+
+fn read_entity_tile(entity: usize) -> Option<(i32, i32, i32)> {
     let graph_node = mem::deref(entity, o::ENTITY_GRAPH_NODE)?;
 
     let scene_x = read_f32(graph_node, o::GRAPH_SCENE_X_FINE)?;
     let scene_y = read_f32(graph_node, o::GRAPH_SCENE_Y_FINE)?;
+    if !scene_x.is_finite() || !scene_y.is_finite() {
+        return None;
+    }
     let plane = mem::read_i32(entity, o::ENTITY_PLANE)?;
     // size is a single byte; read the low byte of the i32 at +0x184.
     let size = mem::read_i32(entity, o::ENTITY_SIZE)? & 0xff;
@@ -568,7 +1124,12 @@ fn read_skills(client_base: usize) -> Vec<SkillEntry> {
             mem::read_i32(entry, o::STAT_BASE_LEVEL),
             mem::read_i32(entry, o::STAT_BOOST_LEVEL),
         ) {
-            out.push(SkillEntry { id, level, base, xp });
+            out.push(SkillEntry {
+                id,
+                level,
+                base,
+                xp,
+            });
         }
     }
     out
@@ -598,6 +1159,13 @@ fn status_object(client_base: usize) -> Option<usize> {
 #[inline]
 fn read_f32(base: usize, off: usize) -> Option<f32> {
     mem::read_i32(base, off).map(|raw| f32::from_bits(raw as u32))
+}
+
+/// Read an `i64` at `base + off`, or `None` if `base` is implausible. Used for
+/// long varcs (`valueKind=1`) stored raw at `node+0x48`.
+#[inline]
+fn read_i64(base: usize, off: usize) -> Option<i64> {
+    mem::read_ptr(base, off).map(|raw| raw as u64 as i64)
 }
 
 /// Read an `f64` at `base + off`, or `None` if `base` is implausible. Used for the
@@ -638,6 +1206,17 @@ mod tests {
         assert!(snap.main_state.is_none());
         assert!(!snap.varps_readable);
         assert!(snap.varps.is_empty());
+        assert!(!snap.varcs_readable);
+        assert!(snap.varcs.is_empty());
+        assert!(snap.varcstrings.is_empty());
+        assert!(!snap.inventories_readable);
+        assert!(snap.inventories.is_empty());
+        assert!(!snap.appearance_readable);
+        assert!(snap.appearance.is_empty());
+        assert!(!snap.players_readable);
+        assert!(snap.players.is_empty());
+        assert!(!snap.npcs_readable);
+        assert!(snap.npcs.is_empty());
         assert!(snap.player.is_none());
         assert!(snap.skills.is_empty());
         assert!(snap.run_energy.is_none());
@@ -658,6 +1237,86 @@ mod tests {
     }
 
     #[test]
+    fn local_appearance_reads_applied_slot_token_pairs_in_order() {
+        let mut appearance = vec![0u8; o::APPEARANCE_EQUIP_CONTEXT + 8];
+        let mut equip_ctx = vec![0u8; o::EQUIP_CTX_SLOT_PAIRS + 8];
+        let mut slots = vec![0u8; o::EQUIP_CTX_SLOT_STRIDE * 3];
+
+        write_i32(&mut slots, o::EQUIP_CTX_SLOT_KIT_ID, 8);
+        write_i32(&mut slots, o::EQUIP_CTX_SLOT_ITEM_ID, -1);
+        write_i32(
+            &mut slots,
+            o::EQUIP_CTX_SLOT_STRIDE + o::EQUIP_CTX_SLOT_KIT_ID,
+            -1,
+        );
+        write_i32(
+            &mut slots,
+            o::EQUIP_CTX_SLOT_STRIDE + o::EQUIP_CTX_SLOT_ITEM_ID,
+            1205,
+        );
+        write_i32(
+            &mut slots,
+            o::EQUIP_CTX_SLOT_STRIDE * 2 + o::EQUIP_CTX_SLOT_KIT_ID,
+            -1,
+        );
+        write_i32(
+            &mut slots,
+            o::EQUIP_CTX_SLOT_STRIDE * 2 + o::EQUIP_CTX_SLOT_ITEM_ID,
+            -1,
+        );
+
+        write_ptr(&mut equip_ctx, o::EQUIP_CTX_SLOT_COUNT, 3);
+        write_ptr(
+            &mut equip_ctx,
+            o::EQUIP_CTX_SLOT_PAIRS,
+            slots.as_ptr() as usize,
+        );
+        write_ptr(
+            &mut appearance,
+            o::APPEARANCE_EQUIP_CONTEXT,
+            equip_ctx.as_ptr() as usize,
+        );
+
+        let lp = LocalPlayer {
+            current_appearance: Some(appearance.as_ptr() as usize),
+            ..Default::default()
+        };
+        let mut snap = Snapshot::default();
+        read_local_appearance(&lp, &mut snap);
+
+        assert!(snap.appearance_readable);
+        assert_eq!(snap.appearance.len(), 3);
+        assert_eq!(snap.appearance[0].kit_id, 8);
+        assert_eq!(snap.appearance[0].item_id, -1);
+        assert_eq!(snap.appearance[1].kit_id, -1);
+        assert_eq!(snap.appearance[1].item_id, 1205);
+        assert_eq!(snap.appearance[2].kit_id, -1);
+        assert_eq!(snap.appearance[2].item_id, -1);
+    }
+
+    #[test]
+    fn local_appearance_omits_unbounded_slot_count() {
+        let mut appearance = vec![0u8; o::APPEARANCE_EQUIP_CONTEXT + 8];
+        let mut equip_ctx = vec![0u8; o::EQUIP_CTX_SLOT_COUNT + 8];
+        write_ptr(&mut equip_ctx, o::EQUIP_CTX_SLOT_COUNT, 65);
+        write_ptr(
+            &mut appearance,
+            o::APPEARANCE_EQUIP_CONTEXT,
+            equip_ctx.as_ptr() as usize,
+        );
+
+        let lp = LocalPlayer {
+            current_appearance: Some(appearance.as_ptr() as usize),
+            ..Default::default()
+        };
+        let mut snap = Snapshot::default();
+        read_local_appearance(&lp, &mut snap);
+
+        assert!(!snap.appearance_readable);
+        assert!(snap.appearance.is_empty());
+    }
+
+    #[test]
     fn null_client_base_local_player_is_none_source() {
         // read_local_player on a null base returns the empty "none"-source block
         // without dereferencing anything.
@@ -666,5 +1325,402 @@ mod tests {
         assert!(lp.avatar.is_none());
         assert!(lp.visible_flag.is_none());
         assert_eq!(lp.avatar_source, "none");
+    }
+
+    fn write_i32(buf: &mut [u8], off: usize, value: i32) {
+        buf[off..off + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_i64(buf: &mut [u8], off: usize, value: i64) {
+        buf[off..off + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_f32(buf: &mut [u8], off: usize, value: f32) {
+        write_i32(buf, off, value.to_bits() as i32);
+    }
+
+    fn write_ptr(buf: &mut [u8], off: usize, value: usize) {
+        buf[off..off + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_u8(buf: &mut [u8], off: usize, value: u8) {
+        buf[off] = value;
+    }
+
+    fn slot_word(item: i32, count: u32) -> u64 {
+        (item as u32 as u64) | ((count as u64) << 32)
+    }
+
+    fn varc_node() -> Vec<u8> {
+        vec![0u8; o::VARC_NODE_VALUE_KIND + 4]
+    }
+
+    fn write_varc_record_key(buf: &mut [u8], kind: i32, id: i32, value_kind: i32) -> usize {
+        let record = o::VARC_NODE_RECORD_PAYLOAD;
+        write_i32(buf, record + o::VARC_RECORD_KIND, kind);
+        write_i32(buf, record + o::VARC_RECORD_VAR_ID, id);
+        write_i32(buf, record + o::VARC_RECORD_VALUE_KIND, value_kind);
+        record
+    }
+
+    fn read_staged_varcs(root: usize, count: usize) -> Snapshot {
+        let mut client = vec![0u8; o::VARC_DOMAIN + 8];
+        let mut domain = vec![0u8; o::VARC_RECORD_TREE_COUNT + 8];
+        write_ptr(&mut domain, o::VARC_RECORD_TREE_ROOT, root);
+        write_ptr(&mut domain, o::VARC_RECORD_TREE_COUNT, count);
+        write_ptr(&mut client, o::VARC_DOMAIN, domain.as_ptr() as usize);
+
+        let mut snap = Snapshot::default();
+        read_varcs(client.as_ptr() as usize, &mut snap);
+        snap
+    }
+
+    fn read_staged_inventories(entries: &mut [u8]) -> Snapshot {
+        let mut client = vec![0u8; o::ITEM_CONTAINER_STORE + 8];
+        let mut store = vec![0u8; o::ITEM_CONTAINER_ENTRY_CAP + 8];
+        let begin = entries.as_ptr() as usize;
+        let end = begin + entries.len();
+        write_ptr(&mut store, o::ITEM_CONTAINER_ENTRY_BEGIN, begin);
+        write_ptr(&mut store, o::ITEM_CONTAINER_ENTRY_END, end);
+        write_ptr(&mut store, o::ITEM_CONTAINER_ENTRY_CAP, end);
+        write_ptr(
+            &mut client,
+            o::ITEM_CONTAINER_STORE,
+            store.as_ptr() as usize,
+        );
+
+        let mut snap = Snapshot::default();
+        read_inventories(client.as_ptr() as usize, &mut snap);
+        snap
+    }
+
+    fn write_inventory_entry(entry: &mut [u8], key: i32, slots: &[u64]) {
+        write_i32(entry, o::ITEM_CONTAINER_ENTRY_KEY, key);
+        let container = o::ITEM_CONTAINER_ENTRY_PAYLOAD;
+        write_i32(entry, container + o::ITEM_CONTAINER_INVENTORY_ID, key >> 1);
+        let begin = slots.as_ptr() as usize;
+        let end = begin + slots.len() * o::ITEM_CONTAINER_SLOT_STRIDE;
+        write_ptr(entry, container + o::ITEM_CONTAINER_SLOT_BEGIN, begin);
+        write_ptr(entry, container + o::ITEM_CONTAINER_SLOT_END, end);
+        write_ptr(entry, container + o::ITEM_CONTAINER_SLOT_CAP, end);
+    }
+
+    fn write_entity_tile(entity: &mut [u8], graph: &mut [u8], x: i32, y: i32, plane: i32) {
+        write_ptr(entity, o::ENTITY_GRAPH_NODE, graph.as_ptr() as usize);
+        write_i32(entity, o::ENTITY_PLANE, plane);
+        write_i32(entity, o::ENTITY_SIZE, 1);
+        let scene_x = 256.0 + ((1 << 8) as f32) + 512.0 * x as f32;
+        let scene_y = 256.0 + ((1 << 8) as f32) + 512.0 * y as f32;
+        write_f32(graph, o::GRAPH_SCENE_X_FINE, scene_x);
+        write_f32(graph, o::GRAPH_SCENE_Y_FINE, scene_y);
+    }
+
+    #[test]
+    fn scene_player_reader_scans_full_player_manager_slot_array() {
+        let mut client = vec![0u8; o::PLAYER_MANAGER + 8];
+        let mut pm = vec![0u8; o::PM_PLAYER_LIST + 8];
+        let mut slots = vec![0u8; o::PM_PLAYER_LIST_CAPACITY * 8];
+        let mut slot_rec = vec![0u8; o::NODE_ENTITY + 8];
+        let mut entity = vec![0u8; o::ENTITY_SIZE + 4];
+        let mut graph = vec![0u8; o::GRAPH_SCENE_Y_FINE + 4];
+
+        write_entity_tile(&mut entity, &mut graph, 3222, 3222, 0);
+        write_ptr(&mut slot_rec, o::NODE_ENTITY, entity.as_ptr() as usize);
+        write_ptr(&mut slots, 1302 * 8, slot_rec.as_ptr() as usize);
+        write_ptr(&mut pm, o::PM_PLAYER_LIST, slots.as_ptr() as usize);
+        write_ptr(&mut client, o::PLAYER_MANAGER, pm.as_ptr() as usize);
+
+        let mut snap = Snapshot::default();
+        read_scene_players(client.as_ptr() as usize, &mut snap);
+
+        assert!(snap.players_readable);
+        assert_eq!(snap.players.len(), 1);
+        assert_eq!(snap.players[0].idx, 1302);
+        assert_eq!(snap.players[0].x, 3222);
+        assert_eq!(snap.players[0].y, 3222);
+        assert_eq!(snap.players[0].plane, 0);
+    }
+
+    #[test]
+    fn scene_npc_reader_uses_active_indices_hash_lookup_and_type_id() {
+        let mut client = vec![0u8; o::NPC_MANAGER + 8];
+        let mut npc_mgr = vec![0u8; o::NPC_ACTIVE_COUNT + 4];
+        let mut buckets = vec![0u8; 4 * 8];
+        let mut node = vec![0u8; o::NPC_NODE_NEXT + 8];
+        let mut entity = vec![0u8; o::NPC_ENTITY_TYPE_ID + 4];
+        let mut graph = vec![0u8; o::GRAPH_SCENE_Y_FINE + 4];
+        let npc_index = 11684i32;
+
+        write_entity_tile(&mut entity, &mut graph, 3219, 3218, 0);
+        write_i32(&mut entity, o::NPC_ENTITY_TYPE_ID, 11);
+        write_i32(&mut node, o::NPC_NODE_KEY, npc_index);
+        write_ptr(&mut node, o::NPC_NODE_ENTITY, entity.as_ptr() as usize);
+        write_ptr(
+            &mut buckets,
+            (npc_index as usize % 4) * 8,
+            node.as_ptr() as usize,
+        );
+        write_ptr(&mut npc_mgr, o::NPC_BUCKETS, buckets.as_ptr() as usize);
+        write_ptr(&mut npc_mgr, o::NPC_BUCKET_COUNT, 4);
+        write_i32(&mut npc_mgr, o::NPC_ACTIVE_INDICES, npc_index);
+        write_i32(&mut npc_mgr, o::NPC_ACTIVE_COUNT, 1);
+        write_ptr(&mut client, o::NPC_MANAGER, npc_mgr.as_ptr() as usize);
+
+        let mut snap = Snapshot::default();
+        read_scene_npcs(client.as_ptr() as usize, &mut snap);
+
+        assert!(snap.npcs_readable);
+        assert_eq!(snap.npcs.len(), 1);
+        assert_eq!(snap.npcs[0].idx, 11684);
+        assert_eq!(snap.npcs[0].type_id, 11);
+        assert_eq!(snap.npcs[0].x, 3219);
+        assert_eq!(snap.npcs[0].y, 3218);
+        assert_eq!(snap.npcs[0].plane, 0);
+    }
+
+    #[test]
+    fn item_container_store_reads_occupied_slots_with_raw_key_and_domain() {
+        let slots_795 = vec![slot_word(52555, 1000)];
+        let slots_93 = vec![slot_word(315, 1)];
+        let slots_94 = vec![
+            slot_word(-1, 0),
+            slot_word(-1, 0),
+            slot_word(-1, 0),
+            slot_word(1205, 1),
+        ];
+
+        let mut entries = vec![0u8; o::ITEM_CONTAINER_ENTRY_STRIDE * 3];
+        write_inventory_entry(
+            &mut entries[0..o::ITEM_CONTAINER_ENTRY_STRIDE],
+            1590,
+            &slots_795,
+        );
+        write_inventory_entry(
+            &mut entries[o::ITEM_CONTAINER_ENTRY_STRIDE..o::ITEM_CONTAINER_ENTRY_STRIDE * 2],
+            186,
+            &slots_93,
+        );
+        write_inventory_entry(
+            &mut entries[o::ITEM_CONTAINER_ENTRY_STRIDE * 2..o::ITEM_CONTAINER_ENTRY_STRIDE * 3],
+            188,
+            &slots_94,
+        );
+
+        let snap = read_staged_inventories(&mut entries);
+
+        assert!(snap.inventories_readable);
+        assert_eq!(snap.inventories.len(), 3);
+        assert_eq!(snap.inventories[0].key, 1590);
+        assert_eq!(snap.inventories[0].inv_id, 795);
+        assert_eq!(snap.inventories[0].domain_bit, 0);
+        assert_eq!(snap.inventories[0].slots.len(), 1);
+        assert_eq!(snap.inventories[0].slots[0].slot, 0);
+        assert_eq!(snap.inventories[0].slots[0].item, 52555);
+        assert_eq!(snap.inventories[0].slots[0].count, 1000);
+
+        assert_eq!(snap.inventories[1].key, 186);
+        assert_eq!(snap.inventories[1].inv_id, 93);
+        assert_eq!(snap.inventories[1].slots[0].slot, 0);
+        assert_eq!(snap.inventories[1].slots[0].item, 315);
+        assert_eq!(snap.inventories[1].slots[0].count, 1);
+
+        assert_eq!(snap.inventories[2].key, 188);
+        assert_eq!(snap.inventories[2].inv_id, 94);
+        assert_eq!(snap.inventories[2].slots.len(), 1);
+        assert_eq!(snap.inventories[2].slots[0].slot, 3);
+        assert_eq!(snap.inventories[2].slots[0].item, 1205);
+        assert_eq!(snap.inventories[2].slots[0].count, 1);
+    }
+
+    #[test]
+    fn item_container_store_emits_domain_bit_and_omits_empty_containers() {
+        let slots_empty = vec![slot_word(-1, 0), slot_word(-1, 0)];
+        let slots_domain = vec![slot_word(100, 2)];
+        let mut entries = vec![0u8; o::ITEM_CONTAINER_ENTRY_STRIDE * 2];
+        write_inventory_entry(
+            &mut entries[0..o::ITEM_CONTAINER_ENTRY_STRIDE],
+            10,
+            &slots_empty,
+        );
+        write_inventory_entry(
+            &mut entries[o::ITEM_CONTAINER_ENTRY_STRIDE..o::ITEM_CONTAINER_ENTRY_STRIDE * 2],
+            11,
+            &slots_domain,
+        );
+
+        let snap = read_staged_inventories(&mut entries);
+
+        assert!(snap.inventories_readable);
+        assert_eq!(snap.inventories.len(), 1);
+        assert_eq!(snap.inventories[0].key, 11);
+        assert_eq!(snap.inventories[0].inv_id, 5);
+        assert_eq!(snap.inventories[0].domain_bit, 1);
+        assert_eq!(snap.inventories[0].slots[0].slot, 0);
+        assert_eq!(snap.inventories[0].slots[0].item, 100);
+        assert_eq!(snap.inventories[0].slots[0].count, 2);
+    }
+
+    #[test]
+    fn varc_tree_reads_numeric_long_and_inline_string_records() {
+        let mut root = varc_node();
+        let mut left = varc_node();
+        let mut right = varc_node();
+
+        write_ptr(&mut root, o::VARC_NODE_LEFT, left.as_ptr() as usize);
+        write_ptr(&mut root, o::VARC_NODE_RIGHT, right.as_ptr() as usize);
+        let root_record = write_varc_record_key(&mut root, 1, 20, 0);
+        write_i32(&mut root, root_record + o::VARC_RECORD_VALUE, -42);
+
+        write_ptr(&mut left, o::VARC_NODE_PARENT, root.as_ptr() as usize);
+        let left_record = write_varc_record_key(&mut left, 2, 20, 2);
+        left[left_record + o::VARC_RECORD_VALUE..left_record + o::VARC_RECORD_VALUE + 5]
+            .copy_from_slice(b"hello");
+        write_u8(
+            &mut left,
+            left_record + o::VARC_RECORD_STRING_INLINE_TAG,
+            0x17 - 5,
+        );
+
+        write_ptr(&mut right, o::VARC_NODE_PARENT, root.as_ptr() as usize);
+        let right_record = write_varc_record_key(&mut right, 1, 30, 1);
+        write_i64(
+            &mut right,
+            right_record + o::VARC_RECORD_VALUE,
+            0x1122_3344_5566_7788,
+        );
+
+        let snap = read_staged_varcs(root.as_ptr() as usize, 3);
+
+        assert!(snap.varcs_readable);
+        assert_eq!(snap.varcs.len(), 2);
+        assert_eq!(snap.varcs[0].kind, 1);
+        assert_eq!(snap.varcs[0].id, 20);
+        assert_eq!(snap.varcs[0].value_kind, 0);
+        assert_eq!(snap.varcs[0].val, -42);
+        assert_eq!(snap.varcs[1].kind, 1);
+        assert_eq!(snap.varcs[1].id, 30);
+        assert_eq!(snap.varcs[1].value_kind, 1);
+        assert_eq!(snap.varcs[1].val, 0x1122_3344_5566_7788);
+        assert_eq!(snap.varcstrings.len(), 1);
+        assert_eq!(snap.varcstrings[0].kind, 2);
+        assert_eq!(snap.varcstrings[0].id, 20);
+        assert_eq!(snap.varcstrings[0].value_kind, 2);
+        assert_eq!(snap.varcstrings[0].str_val, "hello");
+    }
+
+    #[test]
+    fn varc_heap_string_uses_pointer_length_and_heap_tag() {
+        let heap = b"abcdefghijklmnopqrstuvwxyz".to_vec();
+        let mut node = varc_node();
+        let record = write_varc_record_key(&mut node, 2, 100, 2);
+        write_ptr(
+            &mut node,
+            record + o::VARC_RECORD_VALUE,
+            heap.as_ptr() as usize,
+        );
+        write_ptr(&mut node, record + o::VARC_RECORD_STRING_LENGTH, heap.len());
+        write_ptr(
+            &mut node,
+            record + o::VARC_RECORD_STRING_CAP_TAG,
+            (1usize << (usize::BITS as usize - 1)) | heap.len(),
+        );
+
+        let snap = read_staged_varcs(node.as_ptr() as usize, 1);
+
+        assert_eq!(snap.varcstrings.len(), 1);
+        assert_eq!(snap.varcstrings[0].kind, 2);
+        assert_eq!(snap.varcstrings[0].id, 100);
+        assert_eq!(snap.varcstrings[0].str_val, "abcdefghijklmnopqrstuvwxyz");
+    }
+
+    #[test]
+    fn varc_tree_cycle_guard_emits_self_linked_node_once() {
+        let mut node = varc_node();
+        let ptr = node.as_ptr() as usize;
+        write_ptr(&mut node, o::VARC_NODE_LEFT, ptr);
+        write_ptr(&mut node, o::VARC_NODE_RIGHT, ptr);
+        write_ptr(&mut node, o::VARC_NODE_PARENT, ptr);
+        let record = write_varc_record_key(&mut node, 1, 7, 0);
+        write_i32(&mut node, record + o::VARC_RECORD_VALUE, 99);
+
+        let snap = read_staged_varcs(ptr, 64);
+
+        assert!(snap.varcs_readable);
+        assert_eq!(snap.varcs.len(), 1);
+        assert_eq!(snap.varcs[0].kind, 1);
+        assert_eq!(snap.varcs[0].id, 7);
+        assert_eq!(snap.varcs[0].val, 99);
+    }
+
+    #[test]
+    fn varc_active_tree_payloads_are_read_and_non_varc_record_kinds_filtered() {
+        let mut client = vec![0u8; o::VARC_DOMAIN + 8];
+        let mut domain = vec![0u8; o::VARC_RECORD_TREE_COUNT + 8];
+        let mut active_root = varc_node();
+        let mut active_left = varc_node();
+        let mut numeric_record = vec![0u8; o::VARC_RECORD_VALUE_KIND + 4];
+        let mut string_record = vec![0u8; o::VARC_RECORD_VALUE_KIND + 4];
+        let mut ignored_node = varc_node();
+
+        write_ptr(
+            &mut active_root,
+            o::VARC_NODE_LEFT,
+            active_left.as_ptr() as usize,
+        );
+        write_ptr(
+            &mut active_root,
+            o::VARC_ACTIVE_NODE_RECORD,
+            numeric_record.as_ptr() as usize,
+        );
+        write_ptr(
+            &mut active_left,
+            o::VARC_ACTIVE_NODE_RECORD,
+            string_record.as_ptr() as usize,
+        );
+
+        write_i32(&mut numeric_record, o::VARC_RECORD_KIND, 1);
+        write_i32(&mut numeric_record, o::VARC_RECORD_VAR_ID, 4969);
+        write_i32(&mut numeric_record, o::VARC_RECORD_VALUE_KIND, 0);
+        write_i32(&mut numeric_record, o::VARC_RECORD_VALUE, 17);
+
+        write_i32(&mut string_record, o::VARC_RECORD_KIND, 2);
+        write_i32(&mut string_record, o::VARC_RECORD_VAR_ID, 147);
+        write_i32(&mut string_record, o::VARC_RECORD_VALUE_KIND, 2);
+        string_record[o::VARC_RECORD_VALUE..o::VARC_RECORD_VALUE + 3].copy_from_slice(b"hey");
+        write_u8(
+            &mut string_record,
+            o::VARC_RECORD_STRING_INLINE_TAG,
+            0x17 - 3,
+        );
+
+        let ignored_record = write_varc_record_key(&mut ignored_node, 7, 96797272, 0);
+        write_i32(&mut ignored_node, ignored_record + o::VARC_RECORD_VALUE, 1);
+
+        write_ptr(
+            &mut domain,
+            o::VARC_ACTIVE_TREE_ROOT,
+            active_root.as_ptr() as usize,
+        );
+        write_ptr(&mut domain, o::VARC_ACTIVE_TREE_COUNT, 2);
+        write_ptr(
+            &mut domain,
+            o::VARC_RECORD_TREE_ROOT,
+            ignored_node.as_ptr() as usize,
+        );
+        write_ptr(&mut domain, o::VARC_RECORD_TREE_COUNT, 1);
+        write_ptr(&mut client, o::VARC_DOMAIN, domain.as_ptr() as usize);
+
+        let mut snap = Snapshot::default();
+        read_varcs(client.as_ptr() as usize, &mut snap);
+
+        assert!(snap.varcs_readable);
+        assert_eq!(snap.varcs.len(), 1);
+        assert_eq!(snap.varcs[0].kind, 1);
+        assert_eq!(snap.varcs[0].id, 4969);
+        assert_eq!(snap.varcs[0].val, 17);
+        assert_eq!(snap.varcstrings.len(), 1);
+        assert_eq!(snap.varcstrings[0].kind, 2);
+        assert_eq!(snap.varcstrings[0].id, 147);
+        assert_eq!(snap.varcstrings[0].str_val, "hey");
     }
 }

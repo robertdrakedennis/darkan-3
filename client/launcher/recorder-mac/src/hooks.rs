@@ -26,11 +26,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 // -- Typed target signatures (System V AMD64; same arg order as Linux) --------
 
 type FnReadPacket = unsafe extern "C" fn(this: *mut c_void, msg_ctx: *mut c_void) -> u64;
-type FnTcpMsgInit =
-    unsafe extern "C" fn(packet: *mut c_void, opcode_desc: *const i32, size_class: u32, isaac_out: *mut c_void);
+type FnTcpMsgInit = unsafe extern "C" fn(
+    packet: *mut c_void,
+    opcode_desc: *const i32,
+    size_class: u32,
+    isaac_out: *mut c_void,
+);
 type FnFlushQueue = unsafe extern "C" fn(this: *mut c_void) -> u64;
-type FnClientStreamRw =
-    unsafe extern "C" fn(this: *mut c_void, buf: *mut c_void, len: u64) -> u64;
+type FnClientStreamRw = unsafe extern "C" fn(this: *mut c_void, buf: *mut c_void, len: u64) -> u64;
 type FnSetMainState = unsafe extern "C" fn(this: *mut c_void, new_state: i32);
 type FnIsaacInit = unsafe extern "C" fn(isaac_state: *mut c_void, seed4: *const i32);
 type FnClientStreamFill = unsafe extern "C" fn(this: *mut c_void);
@@ -200,10 +203,34 @@ fn write_isaac_seeds(s: &crate::session::Session) {
 unsafe extern "C" fn read_packet_detour(this: *mut c_void, msg_ctx: *mut c_void) -> u64 {
     let ret = TRAMP_READ_PACKET.get().unwrap()(this, msg_ctx);
     try_publish_client_from_connmgr(this as usize);
+    maybe_emit_post_handler_varc_snapshot(msg_ctx as usize);
     if !S2C_INLINE_ACTIVE.load(Ordering::Relaxed) {
         capture_s2c_backstop(msg_ctx as usize);
     }
     ret
+}
+
+fn maybe_emit_post_handler_varc_snapshot(msg_ctx: usize) {
+    if !state::is_recording() || state::client_base() == 0 {
+        return;
+    }
+    let Some(conn) = mem::deref(msg_ctx, ocm::MSG_CTX_CONN) else {
+        return;
+    };
+    let role = state::conn_role(conn);
+    if role != "game" && role != "login" {
+        return;
+    }
+    let Some(op) = mem::read_i32(conn, osc::LAST_OPCODE) else {
+        return;
+    };
+    if is_varc_state_opcode(op) {
+        state::emit_state_snapshot();
+    }
+}
+
+fn is_varc_state_opcode(op: i32) -> bool {
+    matches!(op, 5 | 47 | 48 | 64 | 69 | 92 | 116 | 196)
 }
 
 /// Post-`ReadPacket` S2C capture (BACKSTOP ONLY). Reads the stale `LAST_OPCODE`
@@ -689,21 +716,21 @@ unsafe extern "C" fn setup_login_ciphers_detour(this: *mut c_void) -> u64 {
 macro_rules! install {
     ($image:expr, $sig:expr, $cell:expr, $ty:ty, $detour:expr, $label:expr) => {{
         match sig::resolve($image, &$sig) {
-            Some(addr) => match unsafe {
-                detour::install(addr, $detour as $ty as *const () as usize)
-            } {
-                Ok(d) => {
-                    let tramp: $ty = unsafe { std::mem::transmute(d.trampoline()) };
-                    let _ = $cell.set(tramp);
-                    INSTALLED.lock().push(d);
-                    crate::log(&format!("hook installed: {} @ 0x{:x}", $label, addr));
-                    true
+            Some(addr) => {
+                match unsafe { detour::install(addr, $detour as $ty as *const () as usize) } {
+                    Ok(d) => {
+                        let tramp: $ty = unsafe { std::mem::transmute(d.trampoline()) };
+                        let _ = $cell.set(tramp);
+                        INSTALLED.lock().push(d);
+                        crate::log(&format!("hook installed: {} @ 0x{:x}", $label, addr));
+                        true
+                    }
+                    Err(e) => {
+                        crate::log(&format!("hook install failed: {} ({e})", $label));
+                        false
+                    }
                 }
-                Err(e) => {
-                    crate::log(&format!("hook install failed: {} ({e})", $label));
-                    false
-                }
-            },
+            }
             None => false,
         }
     }};

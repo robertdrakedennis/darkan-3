@@ -4,8 +4,14 @@ import org.darkan.core.net.Isaac
 import org.darkan.core.net.prot.Codec
 import org.darkan.core.net.prot.ProtSize
 import org.darkan.core.net.prot.revision.rev948.register948
+import org.darkan.core.net.prot.update.AppearanceSlot
+import org.darkan.core.net.prot.update.PlayerAppearance
+import org.darkan.core.net.prot.update.PlayerAppearanceEncoder
+import org.darkan.core.net.recorder.CapturePacketDecode
 import org.darkan.core.net.recorder.CaptureDeframer
 import org.darkan.core.net.recorder.ClientStateCrossCheck
+import org.darkan.core.net.recorder.Confidence
+import org.darkan.core.net.recorder.ConfidenceAssigner
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
@@ -634,11 +640,295 @@ fun main() {
         (value ushr 24).toByte(), (value ushr 16).toByte(), (value ushr 8).toByte(), value.toByte(),
         (id ushr 8).toByte(), id.toByte(),
     )
+    fun varpLongBody(id: Int, value: Long): ByteArray {                                               // id shortAdd, high/low g4_alt3
+        fun g4Alt3(v: Int) = byteArrayOf(
+            (v ushr 16).toByte(), (v ushr 24).toByte(), v.toByte(), (v ushr 8).toByte(),
+        )
+        val high = (value ushr 32).toInt()
+        val low = value.toInt()
+        return byteArrayOf((id ushr 8).toByte(), ((id - 128) and 0xFF).toByte()) + g4Alt3(high) + g4Alt3(low)
+    }
     fun updateStatBody(skillId: Int, level: Int, xp: Int): ByteArray = byteArrayOf(                   // xp g4 LE, level g1, skillId byteInverse
         xp.toByte(), (xp ushr 8).toByte(), (xp ushr 16).toByte(), (xp ushr 24).toByte(),
         level.toByte(), ((-skillId) and 0xFF).toByte(),
     )
     fun runEnergyBody(energy: Int): ByteArray = byteArrayOf(energy.toByte())                          // g1
+    fun varcSmallBody(id: Int, value: Int): ByteArray = byteArrayOf(                                  // value byteAdd, id u16 LE
+        ((value + 128) and 0xFF).toByte(), id.toByte(), (id ushr 8).toByte(),
+    )
+    fun varcLargeBody(id: Int, value: Int): ByteArray = byteArrayOf(                                  // value intMiddle, id shortAddLittle
+        (value ushr 8).toByte(), value.toByte(), (value ushr 24).toByte(), (value ushr 16).toByte(),
+        ((id + 128) and 0xFF).toByte(), (id ushr 8).toByte(),
+    )
+    fun varcLongBody(id: Int, value: Long): ByteArray = byteArrayOf(                                  // value g8 BE, id g2 BE
+        (value ushr 56).toByte(), (value ushr 48).toByte(), (value ushr 40).toByte(), (value ushr 32).toByte(),
+        (value ushr 24).toByte(), (value ushr 16).toByte(), (value ushr 8).toByte(), value.toByte(),
+        (id ushr 8).toByte(), id.toByte(),
+    )
+    fun rsString(value: String): ByteArray = value.encodeToByteArray() + byteArrayOf(0)
+    fun varcStrBody(id: Int, value: String): ByteArray = byteArrayOf(id.toByte(), (id ushr 8).toByte()) + rsString(value)
+    fun varcStrLargeBody(id: Int, value: String): ByteArray = rsString(value) +
+        byteArrayOf((id ushr 8).toByte(), ((id + 128) and 0xFF).toByte())
+    fun varcBitSmallBody(id: Int, value: Int): ByteArray = byteArrayOf(                               // value raw, id shortAdd
+        value.toByte(), (id ushr 8).toByte(), ((id + 128) and 0xFF).toByte(),
+    )
+    fun varcBitLargeBody(id: Int, value: Int): ByteArray = byteArrayOf(                               // id BE, value BE
+        (id ushr 8).toByte(), id.toByte(),
+        (value ushr 24).toByte(), (value ushr 16).toByte(), (value ushr 8).toByte(), value.toByte(),
+    )
+    data class InvEntry(val slot: Int, val itemId: Int, val count: Long)
+    fun ByteArrayOutputStream.u8(value: Int) { write(value and 0xFF) }
+    fun ByteArrayOutputStream.u16(value: Int) {
+        u8(value ushr 8)
+        u8(value)
+    }
+    fun ByteArrayOutputStream.u32(value: Long) {
+        u8((value ushr 24).toInt())
+        u8((value ushr 16).toInt())
+        u8((value ushr 8).toInt())
+        u8(value.toInt())
+    }
+    fun ByteArrayOutputStream.smart(value: Int) {
+        if (value >= 128) u16(value + 32768) else u8(value)
+    }
+    fun ByteArrayOutputStream.quantity(value: Long) {
+        if (value < 0xFF) {
+            u8(value.toInt())
+        } else {
+            u8(0xFF)
+            u32(value)
+        }
+    }
+    fun invFullBody(invId: Int, flags: Int = 0, entries: List<InvEntry> = emptyList()): ByteArray {
+        val bySlot = entries.associateBy { it.slot }
+        val count = (entries.maxOfOrNull { it.slot } ?: -1) + 1
+        return ByteArrayOutputStream().apply {
+            u16(invId)
+            u8(flags)
+            u16(count)
+            repeat(count) { slot ->
+                val entry = bySlot[slot]
+                u16((entry?.itemId ?: -1) + 1)
+                quantity(entry?.count ?: 0L)
+                if (flags and 0x2 != 0) u8(0)
+            }
+        }.toByteArray()
+    }
+    fun invPartialBody(invId: Int, flags: Int = 0, entries: List<InvEntry>): ByteArray =
+        ByteArrayOutputStream().apply {
+            u16(invId)
+            u8(flags)
+            for (entry in entries) {
+                smart(entry.slot)
+                u16(entry.itemId + 1)
+                if (entry.itemId == -1) continue
+                quantity(entry.count)
+                if (flags and 0x2 != 0) u8(0)
+            }
+        }.toByteArray()
+    data class NpcAdd(val idx: Int, val typeId: Int, val x: Int, val y: Int, val plane: Int)
+    data class PlayerAdd(val idx: Int, val x: Int, val y: Int, val plane: Int = 0)
+    class BitWriter {
+        private val bytes = ArrayList<Int>()
+        private var bit = 0
+
+        fun writeBits(count: Int, value: Int) {
+            repeat(count) { i ->
+                val srcBit = (value ushr (count - 1 - i)) and 1
+                val byteIndex = bit ushr 3
+                while (bytes.size <= byteIndex) bytes += 0
+                if (srcBit != 0) bytes[byteIndex] = bytes[byteIndex] or (1 shl (7 - (bit and 7)))
+                bit++
+            }
+        }
+
+        fun alignToByte() {
+            val used = bit and 7
+            if (used != 0) writeBits(8 - used, 0)
+        }
+
+        fun toByteArray(): ByteArray = bytes.map { it.toByte() }.toByteArray()
+    }
+    fun writePlayerSkipRun(out: BitWriter, count: Int) {
+        var remaining = count
+        while (remaining > 0) {
+            val following = minOf(remaining - 1, 2047)
+            out.writeBits(1, 0)
+            when {
+                following == 0 -> out.writeBits(2, 0)
+                following < 32 -> {
+                    out.writeBits(2, 1)
+                    out.writeBits(5, following)
+                }
+                following < 256 -> {
+                    out.writeBits(2, 2)
+                    out.writeBits(8, following)
+                }
+                else -> {
+                    out.writeBits(2, 3)
+                    out.writeBits(11, following)
+                }
+            }
+            remaining -= following + 1
+        }
+    }
+    fun playerRegionWord(tileX: Int, tileY: Int, plane: Int = 0, active: Boolean = true): Int {
+        val activeBits = if (active) 0 else 1
+        return (activeBits shl 18) or ((plane and 0x3) shl 16) or ((tileX ushr 6) shl 8) or (tileY ushr 6)
+    }
+    fun gpiPrefixBody(localIndex: Int, localX: Int, localY: Int, localPlane: Int, lowWords: Map<Int, Int>): ByteArray {
+        val out = BitWriter()
+        out.writeBits(30, ((localPlane and 0x3) shl 28) or (localX shl 14) or localY)
+        val defaultWord = playerRegionWord(localX, localY)
+        for (slot in 1 until 2048) {
+            if (slot == localIndex) continue
+            out.writeBits(20, lowWords[slot] ?: defaultWord)
+        }
+        return out.toByteArray()
+    }
+    fun playerInfoAddBody(localIndex: Int, adds: List<PlayerAdd>): ByteArray {
+        val out = BitWriter()
+        // Pass 1: local high-res slot, +0x27=false. Keep it present with mvt=0/no-ext.
+        out.writeBits(1, 1)
+        out.writeBits(1, 0)
+        out.writeBits(2, 0)
+        out.alignToByte()
+        // Pass 2: no high-res inactive slots yet.
+        out.alignToByte()
+        val activeOrder = (1 until 2048).filter { it != localIndex }
+        var cursor = 0
+        for (add in adds.sortedBy { it.idx }) {
+            val pos = activeOrder.indexOf(add.idx)
+            require(pos >= cursor) { "player add indices must be ascending active low-res slots" }
+            writePlayerSkipRun(out, pos - cursor)
+            out.writeBits(1, 1)
+            out.writeBits(2, 0) // external update mode 0: add/promote to high-res
+            out.writeBits(1, 0) // no recursive low-res update
+            out.writeBits(6, add.x and 0x3f)
+            out.writeBits(6, add.y and 0x3f)
+            out.writeBits(1, 0) // no ext-info block
+            cursor = pos + 1
+        }
+        writePlayerSkipRun(out, activeOrder.size - cursor)
+        out.alignToByte()
+        // Pass 4: no inactive pending slots in this synthetic prefix.
+        out.alignToByte()
+        return out.toByteArray()
+    }
+    val appearanceEnabledSlots = (0..18).filter { it !in setOf(12, 13, 17) }
+    fun appearanceSlots(overrides: Map<Int, Pair<Int, Int>>): List<AppearanceSlot> =
+        appearanceEnabledSlots.map { slot ->
+            val (kitId, itemId) = overrides[slot] ?: (-1 to -1)
+            when {
+                itemId >= 0 -> AppearanceSlot.Item(itemId)
+                kitId >= 0 -> AppearanceSlot.Kit(kitId)
+                else -> AppearanceSlot.Empty
+            }
+        }
+    fun appearancePayload(overrides: Map<Int, Pair<Int, Int>>): ByteArray =
+        PlayerAppearanceEncoder.encode(
+            PlayerAppearance(
+                slots = appearanceSlots(overrides),
+                kitColours = IntArray(10),
+                kitStyles = IntArray(10),
+                name = "SelfTest",
+            ),
+        )
+    fun ByteArrayOutputStream.appearanceEntry(payload: ByteArray) {
+        u8((-0x80 - payload.size) and 0xFF)
+        for (b in payload) u8(((b.toInt() and 0xFF) + 0x80) and 0xFF)
+    }
+    fun playerInfoLocalAppearanceBody(localIndex: Int, payload: ByteArray): ByteArray {
+        val bits = BitWriter()
+        // Pass 1: local high-res slot, mvt=0, has ext-info.
+        bits.writeBits(1, 1)
+        bits.writeBits(1, 1)
+        bits.writeBits(2, 0)
+        bits.alignToByte()
+        // Pass 2: no active rendered slots.
+        bits.alignToByte()
+        // Pass 3: all other slots are low-res active in the synthetic prefix; skip them.
+        writePlayerSkipRun(bits, 2046)
+        bits.alignToByte()
+        // Pass 4: no inactive pending slots.
+        bits.alignToByte()
+
+        val extBlock = ByteArrayOutputStream().apply {
+            u8(0x08) // player update mask bit 3: APPEARANCE
+            appearanceEntry(payload)
+        }.toByteArray()
+        return bits.toByteArray() + ByteArrayOutputStream().apply {
+            u16(extBlock.size)
+            write(extBlock)
+        }.toByteArray()
+    }
+    fun playerInfoLocalEmptyAppearanceBody(localIndex: Int): ByteArray {
+        val bits = BitWriter()
+        bits.writeBits(1, 1)
+        bits.writeBits(1, 1)
+        bits.writeBits(2, 0)
+        bits.alignToByte()
+        bits.alignToByte()
+        writePlayerSkipRun(bits, 2046)
+        bits.alignToByte()
+        bits.alignToByte()
+        val extBlock = byteArrayOf(0x08, 0x80.toByte()) // mask APPEARANCE + zero-length transformed payload
+        return bits.toByteArray() + ByteArrayOutputStream().apply {
+            u16(extBlock.size)
+            write(extBlock)
+        }.toByteArray()
+    }
+    fun appearanceJson(overrides: Map<Int, Pair<Int, Int>>): String =
+        (0 until 19).joinToString(prefix = "[", postfix = "]") { slot ->
+            val (kitId, itemId) = overrides[slot] ?: (-1 to -1)
+            """{"kitId":$kitId,"itemId":$itemId}"""
+        }
+    fun playerInfoRemoveThenAddBody(localIndex: Int, removeIdx: Int, add: PlayerAdd): ByteArray {
+        val out = BitWriter()
+        // Pass 1: local high-res slot, +0x27=false. Keep it present with mvt=0/no-ext.
+        out.writeBits(1, 1)
+        out.writeBits(1, 0)
+        out.writeBits(2, 0)
+        out.alignToByte()
+        // Pass 2: remove the already-rendered active player.
+        out.writeBits(1, 1)
+        out.writeBits(1, 0)
+        out.writeBits(2, 0)
+        out.writeBits(1, 0)
+        out.alignToByte()
+        // Pass 3 must use the pending vector from packet entry, before removeIdx becomes pending.
+        val activePendingOrder = (1 until 2048).filter { it != localIndex && it != removeIdx }
+        val pos = activePendingOrder.indexOf(add.idx)
+        require(pos >= 0) { "add index ${add.idx} must be in the old active pending vector" }
+        writePlayerSkipRun(out, pos)
+        out.writeBits(1, 1)
+        out.writeBits(2, 0)
+        out.writeBits(1, 0)
+        out.writeBits(6, add.x and 0x3f)
+        out.writeBits(6, add.y and 0x3f)
+        out.writeBits(1, 0)
+        writePlayerSkipRun(out, activePendingOrder.size - pos - 1)
+        out.alignToByte()
+        // Pass 4: no inactive pending slots in this synthetic prefix.
+        out.alignToByte()
+        return out.toByteArray()
+    }
+    fun npcInfoAddBody(localX: Int, localY: Int, adds: List<NpcAdd>): ByteArray {
+        val out = BitWriter()
+        out.writeBits(8, 0) // no existing NPCs in phase 1
+        for (add in adds) {
+            out.writeBits(16, add.idx)
+            out.writeBits(7, (add.x - localX) and 0x7F)
+            out.writeBits(2, add.plane and 0x3)
+            out.writeBits(7, (add.y - localY) and 0x7F)
+            out.writeBits(16, (add.typeId shl 1) or 1)
+            out.writeBits(1, 0)
+            out.writeBits(3, 0)
+            out.writeBits(1, 0)
+        }
+        out.writeBits(16, 0xFFFF)
+        return out.toByteArray()
+    }
 
     /**
      * Write a session whose framed s2c plane is exactly [packets] (op -> body) and whose
@@ -658,6 +948,56 @@ fun main() {
         return dir
     }
 
+    fun writeTimedClientStateSession(name: String, packets: List<Triple<Int, Long, ByteArray>>, snapshotJson: String): File {
+        val dir = File(tmp, name).apply { mkdirs() }
+        File(dir, "framed-s2c.jsonl").bufferedWriter().use { w ->
+            for ((op, monoUs, b) in packets) {
+                w.appendLine("""{"plane":"framed","dir":"s2c","conn":"game","state":30,"op":$op,"len":${b.size},"mono_us":$monoUs,"body":"${b64.encodeToString(b)}"}""")
+            }
+        }
+        File(dir, "framed-c2s.jsonl").writeText("")
+        File(dir, "session.json").writeText("""{"session_id":"$name","build":"RS2Engine-948-NXT-5","server_mode":"production"}""")
+        File(dir, "state-snapshots.jsonl").writeText(snapshotJson)
+        return dir
+    }
+
+    // 12a-0. AVATAR TRAJECTORY: trustReport summarizes the local player's per-tick tile path from
+    //         state-snapshots.jsonl in both Markdown and JSON. Multiple oracle lines in one tick use
+    //         the last tile for that tick, and the older top-level `player` shape still parses.
+    run {
+        val snapshot = buildString {
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":100,"tick":42,"local_player":{"render_tile":{"x":3200,"y":3200,"plane":0}}}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":180,"tick":42,"local_player":{"render_tile":{"x":3201,"y":3200,"plane":0}}}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":260,"tick":43,"player":{"x":3202,"y":3201,"plane":0}}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":340,"tick":44,"local_player":{"render_tile":{"x":3202,"y":3202,"plane":1}}}""")
+        }
+        val dir = writeTimedClientStateSession("session-king-avatar-trajectory", emptyList(), snapshot)
+        val r = verify(dir)
+        val expected = listOf(
+            42 to ClientStateCrossCheck.Tile(3201, 3200, 0),
+            43 to ClientStateCrossCheck.Tile(3202, 3201, 0),
+            44 to ClientStateCrossCheck.Tile(3202, 3202, 1),
+        )
+        val trajectoryOk = r.avatarTrajectory.map { it.tick to it.tile } == expected
+        val lastTickWins = r.avatarTrajectory.firstOrNull()?.monoUs == 180L
+        val md = TrustReportRenderer.markdown(r)
+        val jsonText = TrustReportRenderer.jsonText(r)
+        val markdownOk = md.contains("### Avatar tile trajectory") &&
+            md.contains("| 42 | (3201,3200,0) |") &&
+            md.contains("| 43 | (3202,3201,0) |") &&
+            md.contains("| 44 | (3202,3202,1) |")
+        val jsonOk = jsonText.contains("\"avatar_trajectory\"") &&
+            jsonText.contains("\"source\": \"state-snapshots.jsonl\"") &&
+            jsonText.contains("\"local_player\"") &&
+            jsonText.contains("\"tick\": 42") &&
+            jsonText.contains("\"mono_us\": 180") &&
+            jsonText.contains("\"x\": 3201") &&
+            jsonText.contains("\"plane\": 1")
+        if (trajectoryOk && lastTickWins && markdownOk && jsonOk)
+            pass("avatar trajectory: per-tick local tile path renders in Markdown and JSON; same-tick snapshots use the latest tile")
+        else fail("avatar trajectory: trajectoryOk=$trajectoryOk lastTickWins=$lastTickWins markdownOk=$markdownOk jsonOk=$jsonOk trajectory=${r.avatarTrajectory}\nMD:\n$md\nJSON:\n$jsonText")
+    }
+
     // 12. CLIENT-IS-KING AGREE: a synthetic snapshot whose varps/skills/run-energy exactly match the
     //     values our decoder recovers from the state-bearing s2c packets -> OK, no failure, and the
     //     verdict is not FAIL on the cross-check's account.
@@ -670,12 +1010,13 @@ fun main() {
             OP_VS to varpSmallBody(100, 3),
             OP_VS to varpSmallBody(100, 7),          // last write wins
             OP_VL to varpLargeBody(200, 123456),
+            OP_VLONG to varpLongBody(250, 654321L),
             OP_US to updateStatBody(skillId = 6, level = 99, xp = 13_034_431),  // magic, level 99
             OP_RE to runEnergyBody(100),                                        // op 0x0d, 0..100 RAW
             80 to runEnergyBody(1),   // op 0x50 chat-filter "Friends" — MUST NOT be read as run energy
         )
         // base for xp 13_034_431 is level 99 (the xp→level table); the snapshot mirrors that.
-        val snapshot = """{"kind":"state_snapshot","main_state":30,"varps":{"100":7,"200":123456},""" +
+        val snapshot = """{"kind":"state_snapshot","main_state":30,"varps":{"100":7,"200":123456,"250":654321},""" +
             """"skills":[{"id":6,"level":99,"base":99,"xp":13034431}],"run_energy":100,"run_weight":12}""" + "\n"
         val dir = writeClientStateSession("session-king-agree", packets, snapshot)
         val r = verify(dir)
@@ -683,13 +1024,867 @@ fun main() {
         // Run energy decoded from op 0x0d must equal the client snapshot's 100 (proves op 0x0d is the
         // run-energy source); the op80 frame must NOT have overwritten it with the chat-filter 1.
         val energyOk = cc.scalarMismatches.none { it.field == "runEnergy" }
-        val ok = cc.available && !cc.hasFailure && cc.varpMatches == 2 && cc.skillMatches == 1 &&
+        val ok = cc.available && !cc.hasFailure && cc.varpMatches == 3 && cc.skillMatches == 1 &&
             cc.varpMismatches.isEmpty() && cc.varpMissed.isEmpty() && cc.scalarMismatches.isEmpty()
         // The cross-check must NOT contribute a FAIL (a missing-socket WARN is fine).
         val noKingFail = r.reasons.none { it.contains("client-is-king: our decoded state does NOT", ignoreCase = true) }
-        if (ok && energyOk && noKingFail)
-            pass("client-king AGREE: decoded varps(2)+skills(1)+runEnergy(op0x0d=100, NOT op80) match the synthetic client snapshot (no failure)")
-        else fail("client-king AGREE: available=${cc.available} hasFailure=${cc.hasFailure} varpMatch=${cc.varpMatches} skillMatch=${cc.skillMatches} mism=${cc.varpMismatches} missed=${cc.varpMissed} scalar=${cc.scalarMismatches} energyOk=$energyOk noKingFail=$noKingFail")
+        val verifiedOps = r.opcodeTrust
+            .filter { it.confidence == Confidence.CLIENT_VERIFIED }
+            .map { it.opcode }
+            .toSet()
+        val allFiveVerified = setOf(OP_VS, OP_VL, OP_VLONG, OP_US, OP_RE).all { it in verifiedOps }
+        val s2cBreadth = r.clientVerifiedBreadth.first { it.dir == "s2c" }
+        val s2cVolume = r.clientVerifiedCoverage.first { it.dir == "s2c" }
+        val breadthOk = s2cBreadth.clientVerifiedOpcodes == 5 && s2cBreadth.observedOpcodes == 6
+        val volumeOk = s2cVolume.clientVerifiedPackets == 6 && s2cVolume.observedPackets == 7
+        val rendered = TrustReportRenderer.markdown(r)
+        val breadthIndex = rendered.indexOf("s2c Client-verified opcodes")
+        val volumeIndex = rendered.indexOf("s2c Client-verified volume")
+        val breadthLeads = breadthIndex >= 0 && volumeIndex > breadthIndex
+        if (ok && energyOk && noKingFail && allFiveVerified && breadthOk && volumeOk && breadthLeads)
+            pass("client-king AGREE: decoded varps(3 incl long)+skills(1)+runEnergy(op0x0d=100, NOT op80) match snapshot; ops 28/61/147/44/13 are CLIENT_VERIFIED; breadth=5/6 opcodes leads volume=6/7 packets")
+        else fail("client-king AGREE: available=${cc.available} hasFailure=${cc.hasFailure} varpMatch=${cc.varpMatches} skillMatch=${cc.skillMatches} mism=${cc.varpMismatches} missed=${cc.varpMissed} scalar=${cc.scalarMismatches} energyOk=$energyOk noKingFail=$noKingFail verifiedOps=$verifiedOps breadth=$s2cBreadth volume=$s2cVolume breadthLeads=$breadthLeads")
+
+        File(dir, "prot-table.json").writeText(
+            """
+            {
+              "build": "selftest",
+              "server_prot": [
+                {"op":13,"size_class":1},
+                {"op":28,"size_class":6},
+                {"op":44,"size_class":6},
+                {"op":61,"size_class":3},
+                {"op":80,"size_class":1},
+                {"op":147,"size_class":10},
+                {"op":191,"size_class":4}
+              ],
+              "client_prot": []
+            }
+            """.trimIndent()
+        )
+        val ledger = CoverageLedger(codec).write(dir, r)
+        val s2cLedger = ledger.directions.first { it.dir == "s2c" }
+        val ledgerOk = s2cLedger.tableSource == "prot-table" &&
+            s2cLedger.inTable == 7 &&
+            s2cLedger.observed == 6 &&
+            s2cLedger.clientVerified == 5 &&
+            s2cLedger.unseen.singleOrNull()?.opcode == 191 &&
+            File(dir, "coverage.json").exists() &&
+            File(dir, "coverage.md").exists()
+        if (ledgerOk) pass("coverage ledger: live table minus observed writes coverage.{md,json}; s2c in_table=7 observed=6 client_verified=5 unseen=op191")
+        else fail("coverage ledger: $s2cLedger")
+    }
+
+    // 12a-1b. CLIENT-IS-KING VARC AGREE: plain numeric/string varcs fold into the expected state,
+    //          keyed by (recordKind,varId), op5 resets the expected varc state, and varcbit op48/69
+    //          remain BINARY_PROVEN (not client-verified) until cache varcbit defs are wired.
+    run {
+        val inline = "inline-sso" // len < 0x18, oracle SSO inline branch
+        val heap = "abcdefghijklmnopqrstuvwxyz" // len >= 0x18, oracle SSO heap branch
+        val longValue = 0x0102_0304_0506_0708L
+        val packets = listOf(
+            OP_VC_SMALL to varcSmallBody(999, 1),
+            OP_VC_STR to varcStrBody(999, "before-reset"),
+            OP_RESET_VARCACHE to ByteArray(0),
+            OP_VC_SMALL to varcSmallBody(28, -12),
+            OP_VC_LARGE to varcLargeBody(61, 0x01020304),
+            OP_VC_LONG to varcLongBody(196, longValue),
+            OP_VC_STR to varcStrBody(147, inline),
+            OP_VC_STR_LARGE to varcStrLargeBody(148, heap),
+            OP_VCBIT_SMALL to varcBitSmallBody(5188, 3),
+            OP_VCBIT_LARGE to varcBitLargeBody(5189, 0x01020304),
+        )
+        val snapshot = """{"kind":"state_snapshot","main_state":30,"varcs":[""" +
+            """{"kind":1,"id":28,"value_kind":0,"val":-12},""" +
+            """{"kind":1,"id":61,"value_kind":0,"val":16909060},""" +
+            """{"kind":1,"id":196,"value_kind":1,"val":$longValue}],""" +
+            """"varcstrings":[""" +
+            """{"kind":2,"id":147,"value_kind":2,"str":"$inline"},""" +
+            """{"kind":2,"id":148,"value_kind":2,"str":"$heap"}]}""" + "\n"
+        val dir = writeClientStateSession("session-king-varc-agree", packets, snapshot)
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val verifiedOps = r.opcodeTrust
+            .filter { it.confidence == Confidence.CLIENT_VERIFIED }
+            .map { it.opcode }
+            .toSet()
+        val binaryOps = r.opcodeTrust
+            .filter { it.confidence == Confidence.BINARY_PROVEN }
+            .map { it.opcode }
+            .toSet()
+        val varcOk = cc.available && !cc.hasFailure &&
+            cc.varcMatches == 3 && cc.varcMismatches.isEmpty() && cc.varcMissed.isEmpty() &&
+            cc.varcUnverified.isEmpty() && cc.varcExtra.isEmpty() &&
+            cc.varcStringMatches == 2 && cc.varcStringMismatches.isEmpty() && cc.varcStringMissed.isEmpty() &&
+            cc.varcStringUnverified.isEmpty() && cc.varcStringExtra.isEmpty()
+        val allVarcVerified = setOf(OP_VC_SMALL, OP_VC_LARGE, OP_VC_LONG, OP_VC_STR, OP_VC_STR_LARGE).all { it in verifiedOps }
+        val varcbitDeferred = OP_VCBIT_SMALL in binaryOps && OP_VCBIT_LARGE in binaryOps &&
+            OP_VCBIT_SMALL !in verifiedOps && OP_VCBIT_LARGE !in verifiedOps
+        val resetNotVerified = OP_RESET_VARCACHE !in verifiedOps
+        val sizesAndNames = codec.serverProtSize(OP_RESET_VARCACHE) == 0 && codec.serverProtName(OP_RESET_VARCACHE) == "ResetClientVarcache" &&
+            codec.serverProtSize(OP_VC_SMALL) == 3 && codec.serverProtName(OP_VC_SMALL) == "ClientSetVarcSmall" &&
+            codec.serverProtSize(OP_VC_LARGE) == 6 && codec.serverProtName(OP_VC_LARGE) == "ClientSetVarcLarge" &&
+            codec.serverProtSize(OP_VC_LONG) == 10 && codec.serverProtName(OP_VC_LONG) == "UNKNOWN_196" &&
+            codec.serverProtSize(OP_VC_STR) == -1 && codec.serverProtName(OP_VC_STR) == "ClientSetVarcStr" &&
+            codec.serverProtSize(OP_VC_STR_LARGE) == -2 && codec.serverProtName(OP_VC_STR_LARGE) == "ClientSetVarcStrLarge" &&
+            codec.serverProtSize(OP_VCBIT_SMALL) == 3 && codec.serverProtName(OP_VCBIT_SMALL) == "ClientSetVarcBitSmall" &&
+            codec.serverProtSize(OP_VCBIT_LARGE) == 6 && codec.serverProtName(OP_VCBIT_LARGE) == "ClientSetVarcBitLarge"
+        if (varcOk && allVarcVerified && varcbitDeferred && resetNotVerified && sizesAndNames)
+            pass("client-king VARC AGREE: op47/64/196 numeric + op92/116 strings (inline+heap SSO snapshot values) match by (recordKind,varId); op5 reset honored; op48/69 stay BINARY_PROVEN")
+        else fail("client-king VARC AGREE: varcOk=$varcOk verifiedOps=$verifiedOps binaryOps=$binaryOps resetNotVerified=$resetNotVerified sizesAndNames=$sizesAndNames cc=$cc")
+    }
+
+    // 12a-1b2. CLIENT-IS-KING VARC SNAPSHOT ACCUMULATION: varcs are captured from the client's
+    //           transient active update tree, which drains by the final snapshot. Accumulate
+    //           varcs/varcstrings across all post-handler snapshots, last-write-wins, reset on op5,
+    //           while keeping varps on the final-snapshot model.
+    run {
+        val packets = listOf(
+            Triple(OP_VC_SMALL, 1_000L, varcSmallBody(999, 1)),
+            Triple(OP_RESET_VARCACHE, 2_000L, ByteArray(0)),
+            Triple(OP_VS, 2_100L, varpSmallBody(100, 7)),
+            Triple(OP_VC_SMALL, 3_000L, varcSmallBody(28, -12)),
+            Triple(OP_VC_LARGE, 3_100L, varcLargeBody(61, 0x01020304)),
+            Triple(OP_VC_STR, 3_200L, varcStrBody(147, "first")),
+            Triple(OP_VC_STR, 3_300L, varcStrBody(147, "second")),
+        )
+        val snapshot = buildString {
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":1500,"varps":{"999":1},"varcs":[{"kind":1,"id":999,"value_kind":0,"val":1}],"varcstrings":[]}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":2001,"varps":{"999":1},"varcs":[],"varcstrings":[]}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":3001,"varps":{"999":1},"varcs":[{"kind":1,"id":28,"value_kind":0,"val":-12}],"varcstrings":[]}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":3201,"varps":{"999":1},"varcs":[{"kind":1,"id":61,"value_kind":0,"val":16909060}],"varcstrings":[{"kind":2,"id":147,"value_kind":2,"str":"first"}]}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":3301,"varps":{"100":7},"varcs":[],"varcstrings":[{"kind":2,"id":147,"value_kind":2,"str":"second"}]}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":4000,"varps":{"100":7},"varcs":[],"varcstrings":[]}""")
+        }
+        val dir = writeTimedClientStateSession("session-king-varc-accumulate", packets, snapshot)
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val verifiedOps = r.opcodeTrust
+            .filter { it.confidence == Confidence.CLIENT_VERIFIED }
+            .map { it.opcode }
+            .toSet()
+        val accumulated = cc.available && !cc.hasFailure &&
+            cc.varpMatches == 1 &&
+            999 !in cc.varpMissed &&
+            cc.varcMatches == 2 &&
+            cc.varcMismatches.isEmpty() &&
+            cc.varcMissed.isEmpty() &&
+            cc.varcUnverified.isEmpty() &&
+            cc.varcExtra.isEmpty() &&
+            cc.varcStringMatches == 1 &&
+            cc.varcStringMismatches.isEmpty() &&
+            cc.varcStringMissed.isEmpty() &&
+            cc.varcStringUnverified.isEmpty()
+        val lastWriteWins = cc.varcStringExtra.isEmpty()
+        val promoted = listOf(OP_VC_SMALL, OP_VC_LARGE, OP_VC_STR).all { it in verifiedOps }
+        if (accumulated && lastWriteWins && promoted)
+            pass("client-king VARC ACCUMULATION: varcs/varcstrings union across drained snapshots, last-write-wins for strings; varps stay final-only; op47/64/92 promote")
+        else fail("client-king VARC ACCUMULATION: accumulated=$accumulated lastWriteWins=$lastWriteWins promoted=$promoted verifiedOps=$verifiedOps cc=$cc")
+    }
+
+    // 12a-1c. CLIENT-IS-KING VARC MISMATCH: the client's varc tree is authoritative. A wrong value
+    //          or a client-held varc we never decoded is a hard FAIL, same as varps.
+    run {
+        val packets = listOf(OP_VC_SMALL to varcSmallBody(28, 5))
+        val snapshot = """{"kind":"state_snapshot","main_state":30,"varcs":[""" +
+            """{"kind":1,"id":28,"value_kind":0,"val":6},""" +
+            """{"kind":1,"id":61,"value_kind":0,"val":99}],""" +
+            """"varcstrings":[]}""" + "\n"
+        val dir = writeClientStateSession("session-king-varc-mismatch", packets, snapshot)
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val mismatchFlagged = cc.varcMismatches.any {
+            it.key == ClientStateCrossCheck.VarcKey(ClientStateCrossCheck.VARC_RECORD_KIND_NUMERIC, 28) &&
+                it.ourValue == "kind0:5" && it.clientValue == "kind0:6"
+        }
+        val missedFlagged = cc.varcMissed.any {
+            it.key == ClientStateCrossCheck.VarcKey(ClientStateCrossCheck.VARC_RECORD_KIND_NUMERIC, 61) &&
+                it.valueKind == ClientStateCrossCheck.VARC_VALUE_KIND_INT32 &&
+                it.value == 99L
+        }
+        val verdictFail = r.verdict == SessionTrustVerifier.Verdict.FAIL
+        val reasonFail = r.reasons.any { it.contains("varc MISMATCH", ignoreCase = true) }
+        if (mismatchFlagged && missedFlagged && verdictFail && reasonFail)
+            pass("client-king VARC MISMATCH: numeric varc kind1/id28 ours=5≠client=6 + missed kind1/id61 -> FAIL")
+        else fail("client-king VARC MISMATCH: mismatchFlagged=$mismatchFlagged missedFlagged=$missedFlagged verdictFail=$verdictFail reasonFail=$reasonFail cc=$cc reasons=${r.reasons}")
+    }
+
+    // 12a-1c2. CLIENT-IS-KING VARC UNVERIFIED: folded varc writes with an empty oracle array are not
+    //           matches, are not advisory extras, and must never promote their opcodes.
+    run {
+        val packets = listOf(
+            OP_VC_SMALL to varcSmallBody(28, 5),
+            OP_VC_LARGE to varcLargeBody(61, 6),
+            OP_VC_STR to varcStrBody(147, "no-oracle"),
+        )
+        val snapshot = """{"kind":"state_snapshot","main_state":30,"varcs":[],"varcstrings":[]}""" + "\n"
+        val dir = writeClientStateSession("session-king-varc-unverified", packets, snapshot)
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val verifiedOps = r.opcodeTrust
+            .filter { it.confidence == Confidence.CLIENT_VERIFIED }
+            .map { it.opcode }
+            .toSet()
+        val checks = cc.opcodeWriteChecks.associateBy { it.opcode }
+        val zeroMatchStats = listOf(OP_VC_SMALL, OP_VC_LARGE, OP_VC_STR).all { op ->
+            val stat = checks[op]
+            stat != null && stat.matches == 0 && stat.mismatches == 0 && stat.unverified == 1 && !stat.clientVerified
+        }
+        val unverifiedNotExtra = cc.varcMatches == 0 &&
+            cc.varcUnverified.size == 2 &&
+            cc.varcExtra.isEmpty() &&
+            cc.varcStringMatches == 0 &&
+            cc.varcStringUnverified.size == 1 &&
+            cc.varcStringExtra.isEmpty()
+        val noPromotion = listOf(OP_VC_SMALL, OP_VC_LARGE, OP_VC_STR).none { it in verifiedOps }
+        val jsonText = TrustReportRenderer.jsonText(r)
+        val jsonUnverified = jsonText.contains("\"varc_unverified\"") &&
+            jsonText.contains("\"varcstring_unverified\"") &&
+            jsonText.contains("\"unverified\": 1")
+        if (zeroMatchStats && unverifiedNotExtra && noPromotion && jsonUnverified)
+            pass("client-king VARC UNVERIFIED: domain with 0 matches keeps op47/64/92 out of CLIENT_VERIFIED and reports folded writes as unverified, not extras")
+        else fail("client-king VARC UNVERIFIED: zeroMatchStats=$zeroMatchStats unverifiedNotExtra=$unverifiedNotExtra noPromotion=$noPromotion jsonUnverified=$jsonUnverified checks=${cc.opcodeWriteChecks} verifiedOps=$verifiedOps cc=$cc")
+    }
+
+    // 12a-1c3. CLIENT-IS-KING INVENTORY AGREE: op85 full inventory folds to final snapshot,
+    //           item ids render through obj gamevals, and op85 promotes only through matches>0.
+    run {
+        val packets = listOf(OP_INV_FULL to invFullBody(93, entries = listOf(InvEntry(0, 995, 17))))
+        val snapshot = """{"kind":"state_snapshot","main_state":30,"inventories":[""" +
+            """{"key":186,"invId":93,"domainBit":0,"slots":[{"slot":0,"item":995,"count":17}]}]}""" + "\n"
+        val dir = writeClientStateSession("session-king-inventory-agree", packets, snapshot)
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val verifiedOps = r.opcodeTrust
+            .filter { it.confidence == Confidence.CLIENT_VERIFIED }
+            .map { it.opcode }
+            .toSet()
+        val jsonText = TrustReportRenderer.jsonText(r)
+        val agreed = cc.available && !cc.hasFailure &&
+            cc.inventoryMatches == 1 &&
+            cc.inventoryMismatches.isEmpty() &&
+            cc.inventoryMissed.isEmpty()
+        val promoted = OP_INV_FULL in verifiedOps
+        val jsonCount = jsonText.contains("\"inventory_matches\": 1")
+        if (agreed && promoted && jsonCount)
+            pass("client-king INVENTORY AGREE: op85 full inventory slot matches final snapshot and promotes")
+        else fail("client-king INVENTORY AGREE: agreed=$agreed promoted=$promoted jsonCount=$jsonCount verifiedOps=$verifiedOps cc=$cc\nJSON:\n$jsonText")
+    }
+
+    // 12a-1c4. CLIENT-IS-KING INVENTORY MISMATCH: final inventory store is authoritative.
+    run {
+        val packets = listOf(OP_INV_FULL to invFullBody(93, entries = listOf(InvEntry(0, 995, 17))))
+        val snapshot = """{"kind":"state_snapshot","main_state":30,"inventories":[""" +
+            """{"key":186,"invId":93,"domainBit":0,"slots":[{"slot":0,"item":995,"count":18}]}]}""" + "\n"
+        val dir = writeClientStateSession("session-king-inventory-mismatch", packets, snapshot)
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val verifiedOps = r.opcodeTrust
+            .filter { it.confidence == Confidence.CLIENT_VERIFIED }
+            .map { it.opcode }
+            .toSet()
+        val mismatchFlagged = cc.inventoryMismatches.singleOrNull()?.let {
+            it.invId == 93 && it.slot == 0 && it.ourItemId == 995 && it.ourCount == 17L &&
+                it.clientItemId == 995 && it.clientCount == 18L
+        } == true
+        val verdictFail = r.verdict == SessionTrustVerifier.Verdict.FAIL
+        val noPromotion = OP_INV_FULL !in verifiedOps
+        val reasonFail = r.reasons.any { it.contains("inventory MISMATCH", ignoreCase = true) }
+        val md = TrustReportRenderer.markdown(r)
+        val jsonText = TrustReportRenderer.jsonText(r)
+        val named = md.contains("obj:coins(995)×17") &&
+            md.contains("obj:coins(995)×18") &&
+            jsonText.contains("\"item_id\": 995") &&
+            jsonText.contains("\"gameval_type\": \"obj\"") &&
+            jsonText.contains("\"name\": \"coins\"")
+        if (mismatchFlagged && verdictFail && noPromotion && reasonFail && named)
+            pass("client-king INVENTORY MISMATCH: op85 ours coins×17 vs client coins×18 hard-fails, names obj coins(995), and does not promote")
+        else fail("client-king INVENTORY MISMATCH: mismatchFlagged=$mismatchFlagged verdictFail=$verdictFail noPromotion=$noPromotion reasonFail=$reasonFail named=$named verifiedOps=$verifiedOps cc=$cc reasons=${r.reasons}\nMD:\n$md\nJSON:\n$jsonText")
+    }
+
+    // 12a-1c5. CLIENT-IS-KING INVENTORY RESET/MUTATE: later op85 replaces container, then op121
+    //           mutates slots; removed pre-reset slots must not survive expected state.
+    run {
+        val packets = listOf(
+            OP_INV_FULL to invFullBody(93, entries = listOf(InvEntry(0, 995, 17), InvEntry(1, 315, 1))),
+            OP_INV_FULL to invFullBody(93, entries = listOf(InvEntry(0, 315, 1))),
+            OP_INV_PARTIAL to invPartialBody(93, entries = listOf(InvEntry(3, 1205, 1))),
+        )
+        val snapshot = """{"kind":"state_snapshot","main_state":30,"inventories":[""" +
+            """{"key":186,"invId":93,"domainBit":0,"slots":[""" +
+            """{"slot":0,"item":315,"count":1},""" +
+            """{"slot":3,"item":1205,"count":1}]}]}""" + "\n"
+        val dir = writeClientStateSession("session-king-inventory-reset-mutate", packets, snapshot)
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val checks = cc.opcodeWriteChecks.associateBy { it.opcode }
+        val verifiedOps = r.opcodeTrust
+            .filter { it.confidence == Confidence.CLIENT_VERIFIED }
+            .map { it.opcode }
+            .toSet()
+        val agreed = cc.available && !cc.hasFailure &&
+            cc.inventoryMatches == 2 &&
+            cc.inventoryMismatches.isEmpty() &&
+            cc.inventoryMissed.isEmpty()
+        val gate = checks[OP_INV_FULL]?.let { it.matches == 1 && it.mismatches == 0 && it.clientVerified } == true &&
+            checks[OP_INV_PARTIAL]?.let { it.matches == 1 && it.mismatches == 0 && it.clientVerified } == true
+        val promoted = OP_INV_FULL in verifiedOps && OP_INV_PARTIAL in verifiedOps
+        if (agreed && gate && promoted)
+            pass("client-king INVENTORY RESET/MUTATE: op85 replacement drops stale slot, op121 adds dagger slot, both op85/op121 promote via match gate")
+        else fail("client-king INVENTORY RESET/MUTATE: agreed=$agreed gate=$gate promoted=$promoted checks=${cc.opcodeWriteChecks} verifiedOps=$verifiedOps cc=$cc")
+    }
+
+    // 12a-1c6. CLIENT-IS-KING SCENE NPC AGREE: op52 phase-2 adds fold to the final scene oracle by
+    //           index, type id, and best-effort tile; op52 promotes only when matches>0 and no
+    //           scene mismatches exist.
+    run {
+        val body = npcInfoAddBody(
+            localX = 3200,
+            localY = 3200,
+            adds = listOf(
+                NpcAdd(idx = 608, typeId = 0, x = 3202, y = 3202, plane = 0),
+                NpcAdd(idx = 11684, typeId = 11, x = 3199, y = 3198, plane = 0),
+            ),
+        )
+        val snapshot = buildString {
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":100,"local_player":{"render_tile":{"x":3200,"y":3200,"plane":0}},"npcs":[],"players":[]}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":300,"local_player":{"render_tile":{"x":3200,"y":3200,"plane":0}},"npcs":[""" +
+                """{"idx":608,"type":0,"x":3202,"y":3202,"plane":0},""" +
+                """{"idx":11684,"type":11,"x":3199,"y":3198,"plane":0}],"players":[]}""")
+        }
+        val dir = writeTimedClientStateSession("session-king-scene-npc-agree", listOf(Triple(OP_NPC_INFO, 200L, body)), snapshot)
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val verifiedOps = r.opcodeTrust.filter { it.confidence == Confidence.CLIENT_VERIFIED }.map { it.opcode }.toSet()
+        val agreed = cc.available && !cc.hasFailure &&
+            cc.sceneNpcPresenceMatches == 2 &&
+            cc.sceneNpcPresenceMismatches.isEmpty() &&
+            cc.sceneNpcTypeMatches == 2 &&
+            cc.sceneNpcTypeMismatches.isEmpty() &&
+            cc.sceneNpcPositionMatches == 2 &&
+            cc.sceneNpcPositionMismatches.isEmpty()
+        val promoted = OP_NPC_INFO in verifiedOps
+        val rendered = TrustReportRenderer.markdown(r)
+        val named = rendered.contains("scene") || TrustReportRenderer.jsonText(r).contains("\"scene_npc_presence_matches\": 2")
+        if (agreed && promoted && named)
+            pass("client-king SCENE NPC AGREE: op52 add list matches final scene oracle for presence/type/tile and promotes")
+        else fail("client-king SCENE NPC AGREE: agreed=$agreed promoted=$promoted named=$named verifiedOps=$verifiedOps cc=$cc\n${TrustReportRenderer.jsonText(r)}")
+    }
+
+    // 12a-1c7. CLIENT-IS-KING SCENE PLAYER AGREE: op81 seeds the GPI low-res slots, then op22
+    //           promotes external players to high-res. Presence and best-effort add positions match.
+    run {
+        val localIndex = 100
+        val adds = listOf(
+            PlayerAdd(idx = 101, x = 3202, y = 3203),
+            PlayerAdd(idx = 110, x = 3210, y = 3211),
+        )
+        val prefix = gpiPrefixBody(
+            localIndex = localIndex,
+            localX = 3200,
+            localY = 3200,
+            localPlane = 0,
+            lowWords = adds.associate { it.idx to playerRegionWord(it.x, it.y, it.plane) },
+        )
+        val body = playerInfoAddBody(localIndex, adds)
+        val snapshot = buildString {
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":150,"local_player":{"server_index":$localIndex,"render_tile":{"x":3200,"y":3200,"plane":0}},"players":[{"idx":$localIndex,"x":3200,"y":3200,"plane":0}],"npcs":[]}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":300,"local_player":{"server_index":$localIndex,"render_tile":{"x":3200,"y":3200,"plane":0}},"players":[""" +
+                """{"idx":101,"x":3202,"y":3203,"plane":0},""" +
+                """{"idx":110,"x":3210,"y":3211,"plane":0},""" +
+                """{"idx":$localIndex,"x":3200,"y":3200,"plane":0}],"npcs":[]}""")
+        }
+        val dir = writeTimedClientStateSession(
+            "session-king-scene-player-agree",
+            listOf(
+                Triple(OP_REBUILD_NORMAL_SIMPLE, 100L, prefix),
+                Triple(OP_PLAYER_INFO, 200L, body),
+            ),
+            snapshot,
+        )
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val checks = cc.opcodeWriteChecks.associateBy { it.opcode to it.domain }
+        val verifiedOps = r.opcodeTrust.filter { it.confidence == Confidence.CLIENT_VERIFIED }.map { it.opcode }.toSet()
+        val agreed = cc.available && !cc.hasFailure &&
+            cc.scenePlayerPresenceMatches == 3 &&
+            cc.scenePlayerPresenceMismatches.isEmpty() &&
+            cc.scenePlayerPositionMatches == 3 &&
+            cc.scenePlayerPositionMismatches.isEmpty()
+        val op22Gate = checks[OP_PLAYER_INFO to "scene-player"]?.let {
+            it.matches == 2 && it.mismatches == 0 && it.clientVerified
+        } == true
+        val promoted = OP_PLAYER_INFO in verifiedOps && OP_REBUILD_NORMAL_SIMPLE !in verifiedOps
+        if (agreed && op22Gate && promoted)
+            pass("client-king SCENE PLAYER AGREE: op81 GPI prefix + op22 external adds match player presence/tile; op22 promotes, op81 does not")
+        else fail("client-king SCENE PLAYER AGREE: agreed=$agreed op22Gate=$op22Gate promoted=$promoted checks=${cc.opcodeWriteChecks} verifiedOps=$verifiedOps cc=$cc\n${TrustReportRenderer.jsonText(r)}")
+    }
+
+    // 12a-1c7a. CLIENT-IS-KING LOCAL APPEARANCE AGREE: op22 APPEARANCE ext-info decodes the
+    //             local avatar's 19 kit/item identity slots and compares them to oracle appearance.
+    run {
+        val localIndex = 100
+        val appearance = mapOf(
+            4 to (880 to -1),
+            14 to (-1 to 1205),
+        )
+        val prefix = gpiPrefixBody(
+            localIndex = localIndex,
+            localX = 3200,
+            localY = 3200,
+            localPlane = 0,
+            lowWords = emptyMap(),
+        )
+        val body = playerInfoLocalAppearanceBody(localIndex, appearancePayload(appearance))
+        val snapshot = buildString {
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":150,"local_player":{"server_index":$localIndex,"render_tile":{"x":3200,"y":3200,"plane":0}},"players":[{"idx":$localIndex,"x":3200,"y":3200,"plane":0}],"npcs":[],"appearance":${appearanceJson(appearance)}}""")
+        }
+        val dir = writeTimedClientStateSession(
+            "session-king-appearance-agree",
+            listOf(
+                Triple(OP_REBUILD_NORMAL_SIMPLE, 100L, prefix),
+                Triple(OP_PLAYER_INFO, 120L, body),
+            ),
+            snapshot,
+        )
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val checks = cc.opcodeWriteChecks.associateBy { it.opcode to it.domain }
+        val verifiedOps = r.opcodeTrust.filter { it.confidence == Confidence.CLIENT_VERIFIED }.map { it.opcode }.toSet()
+        val agreed = cc.available && !cc.hasFailure &&
+            cc.appearanceMatches == 19 &&
+            cc.appearanceMismatches.isEmpty() &&
+            cc.appearanceMissed.isEmpty()
+        val gate = checks[OP_PLAYER_INFO to "appearance"]?.let {
+            it.matches == 19 && it.mismatches == 0 && it.clientVerified
+        } == true
+        val promoted = OP_PLAYER_INFO in verifiedOps
+        if (agreed && gate && promoted)
+            pass("client-king APPEARANCE AGREE: op22 APPEARANCE folded 19 local kit/item slots (slot4 kit880, slot14 dagger) and promotes through the match gate")
+        else fail("client-king APPEARANCE AGREE: agreed=$agreed gate=$gate promoted=$promoted checks=${cc.opcodeWriteChecks} verifiedOps=$verifiedOps cc=$cc\n${TrustReportRenderer.jsonText(r)}")
+    }
+
+    // 12a-1c7a1. CLIENT-IS-KING LOCAL APPEARANCE EMPTY-THEN-VALID: a zero-length local APPEARANCE
+    //              block must not abort GPI list maintenance or prevent a later valid local payload.
+    run {
+        val localIndex = 100
+        val appearance = mapOf(4 to (880 to -1), 15 to (-1 to 1205))
+        val prefix = gpiPrefixBody(
+            localIndex = localIndex,
+            localX = 3200,
+            localY = 3200,
+            localPlane = 0,
+            lowWords = emptyMap(),
+        )
+        val empty = playerInfoLocalEmptyAppearanceBody(localIndex)
+        val valid = playerInfoLocalAppearanceBody(localIndex, appearancePayload(appearance))
+        val snapshot = buildString {
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":150,"local_player":{"server_index":$localIndex,"render_tile":{"x":3200,"y":3200,"plane":0}},"players":[{"idx":$localIndex,"x":3200,"y":3200,"plane":0}],"npcs":[],"appearance":${appearanceJson(appearance)}}""")
+        }
+        val dir = writeTimedClientStateSession(
+            "session-king-appearance-empty-then-valid",
+            listOf(
+                Triple(OP_REBUILD_NORMAL_SIMPLE, 100L, prefix),
+                Triple(OP_PLAYER_INFO, 120L, empty),
+                Triple(OP_PLAYER_INFO, 140L, valid),
+            ),
+            snapshot,
+        )
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val agreed = cc.available && !cc.hasFailure &&
+            cc.decodeFailures == 0 &&
+            cc.appearanceMatches == 19 &&
+            cc.appearanceMismatches.isEmpty() &&
+            cc.appearanceMissed.isEmpty()
+        if (agreed)
+            pass("client-king APPEARANCE EMPTY-THEN-VALID: zero-length local appearance is ignored without poisoning GPI; later valid op22 matches 19 slots")
+        else fail("client-king APPEARANCE EMPTY-THEN-VALID: agreed=$agreed cc=$cc\n${TrustReportRenderer.jsonText(r)}")
+    }
+
+    // 12a-1c7a1b. CLIENT-IS-KING LOCAL APPEARANCE EQUIPMENT WEAPON: live capture proved the local
+    //                op22 APPEARANCE block omits the worn weapon, while the client fills appearance
+    //                weapon slot15 from verified worn-equipment inv94 slot3.
+    run {
+        val localIndex = 100
+        val packetAppearance = mapOf(4 to (880 to -1))
+        val clientAppearance = mapOf(
+            4 to (880 to -1),
+            15 to (-1 to 1205),
+        )
+        val prefix = gpiPrefixBody(
+            localIndex = localIndex,
+            localX = 3200,
+            localY = 3200,
+            localPlane = 0,
+            lowWords = emptyMap(),
+        )
+        val body = playerInfoLocalAppearanceBody(localIndex, appearancePayload(packetAppearance))
+        val inv94 = invFullBody(94, entries = listOf(InvEntry(3, 1205, 1)))
+        val snapshot = buildString {
+            appendLine(
+                """{"kind":"state_snapshot","main_state":30,"mono_us":150,"local_player":{"server_index":$localIndex,"render_tile":{"x":3200,"y":3200,"plane":0}},"players":[{"idx":$localIndex,"x":3200,"y":3200,"plane":0}],"npcs":[],"inventories":[{"invId":94,"slots":[{"slot":3,"item":1205,"count":1}]}],"appearance":${appearanceJson(clientAppearance)}}""",
+            )
+        }
+        val dir = writeTimedClientStateSession(
+            "session-king-appearance-equipment-weapon",
+            listOf(
+                Triple(OP_INV_FULL, 100L, inv94),
+                Triple(OP_REBUILD_NORMAL_SIMPLE, 110L, prefix),
+                Triple(OP_PLAYER_INFO, 120L, body),
+            ),
+            snapshot,
+        )
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val checks = cc.opcodeWriteChecks.associateBy { it.opcode to it.domain }
+        val agreed = cc.available && !cc.hasFailure &&
+            cc.inventoryMatches == 1 &&
+            cc.appearanceMatches == 19 &&
+            cc.appearanceMismatches.isEmpty() &&
+            cc.appearanceMissed.isEmpty()
+        val equipmentSourced = checks[OP_INV_FULL to "appearance"]?.matches == 1
+        if (agreed && equipmentSourced)
+            pass("client-king APPEARANCE EQUIPMENT WEAPON: op22 local appearance omits weapon; expected slot15 is sourced from verified inv94 slot3 bronze_dagger(1205)")
+        else fail("client-king APPEARANCE EQUIPMENT WEAPON: agreed=$agreed equipmentSourced=$equipmentSourced checks=${cc.opcodeWriteChecks} cc=$cc")
+    }
+
+    // 12a-1c7a2. CLIENT-IS-KING LOCAL APPEARANCE MISMATCH: final oracle appearance is authoritative,
+    //              item ids render through obj gamevals, and any mismatch blocks op22 promotion.
+    run {
+        val localIndex = 100
+        val ours = mapOf(
+            4 to (880 to -1),
+            14 to (-1 to 1205),
+        )
+        val client = mapOf(
+            4 to (880 to -1),
+            14 to (-1 to 995),
+        )
+        val prefix = gpiPrefixBody(
+            localIndex = localIndex,
+            localX = 3200,
+            localY = 3200,
+            localPlane = 0,
+            lowWords = emptyMap(),
+        )
+        val body = playerInfoLocalAppearanceBody(localIndex, appearancePayload(ours))
+        val snapshot = buildString {
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":150,"local_player":{"server_index":$localIndex,"render_tile":{"x":3200,"y":3200,"plane":0}},"players":[{"idx":$localIndex,"x":3200,"y":3200,"plane":0}],"npcs":[],"appearance":${appearanceJson(client)}}""")
+        }
+        val dir = writeTimedClientStateSession(
+            "session-king-appearance-mismatch",
+            listOf(
+                Triple(OP_REBUILD_NORMAL_SIMPLE, 100L, prefix),
+                Triple(OP_PLAYER_INFO, 120L, body),
+            ),
+            snapshot,
+        )
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val verifiedOps = r.opcodeTrust.filter { it.confidence == Confidence.CLIENT_VERIFIED }.map { it.opcode }.toSet()
+        val mismatch = cc.appearanceMismatches.singleOrNull()?.let {
+            it.slot == 14 && it.ourItemId == 1205 && it.clientItemId == 995
+        } == true
+        val noPromotion = OP_PLAYER_INFO !in verifiedOps
+        val verdictFail = r.verdict == SessionTrustVerifier.Verdict.FAIL
+        val reasonFail = r.reasons.any { it.contains("appearance MISMATCH", ignoreCase = true) }
+        val md = TrustReportRenderer.markdown(r)
+        val jsonText = TrustReportRenderer.jsonText(r)
+        val named = md.contains("obj:bronze_dagger(1205)") &&
+            md.contains("obj:coins(995)") &&
+            jsonText.contains("\"appearance_mismatches\"") &&
+            jsonText.contains("\"gameval_type\": \"obj\"") &&
+            jsonText.contains("\"name\": \"bronze_dagger\"") &&
+            jsonText.contains("\"name\": \"coins\"")
+        if (mismatch && noPromotion && verdictFail && reasonFail && named)
+            pass("client-king APPEARANCE MISMATCH: op22 item slot ours bronze_dagger(1205) vs client coins(995) hard-fails and blocks promotion")
+        else fail("client-king APPEARANCE MISMATCH: mismatch=$mismatch noPromotion=$noPromotion verdictFail=$verdictFail reasonFail=$reasonFail named=$named verifiedOps=$verifiedOps cc=$cc\nMD:\n$md\nJSON:\n$jsonText")
+    }
+
+    // 12a-1c7b. CLIENT-IS-KING SCENE PLAYER PERSISTENT VECTORS: op22's four passes walk the
+    //             render/pending vectors captured at packet entry. A high-res removal in pass 2 must
+    //             not be visible to pass 3's low-res add scan until the final rebuild.
+    run {
+        val localIndex = 100
+        val initial = PlayerAdd(idx = 101, x = 3201, y = 3201)
+        val replacement = PlayerAdd(idx = 120, x = 3220, y = 3221)
+        val prefix = gpiPrefixBody(
+            localIndex = localIndex,
+            localX = 3200,
+            localY = 3200,
+            localPlane = 0,
+            lowWords = listOf(initial, replacement).associate { it.idx to playerRegionWord(it.x, it.y, it.plane) },
+        )
+        val addInitial = playerInfoAddBody(localIndex, listOf(initial))
+        val removeThenAdd = playerInfoRemoveThenAddBody(localIndex, removeIdx = initial.idx, add = replacement)
+        val snapshot = buildString {
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":150,"local_player":{"server_index":$localIndex,"render_tile":{"x":3200,"y":3200,"plane":0}},"players":[{"idx":$localIndex,"x":3200,"y":3200,"plane":0}],"npcs":[]}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":350,"local_player":{"server_index":$localIndex,"render_tile":{"x":3200,"y":3200,"plane":0}},"players":[""" +
+                """{"idx":${replacement.idx},"x":${replacement.x},"y":${replacement.y},"plane":${replacement.plane}},""" +
+                """{"idx":$localIndex,"x":3200,"y":3200,"plane":0}],"npcs":[]}""")
+        }
+        val dir = writeTimedClientStateSession(
+            "session-king-scene-player-persistent-vectors",
+            listOf(
+                Triple(OP_REBUILD_NORMAL_SIMPLE, 100L, prefix),
+                Triple(OP_PLAYER_INFO, 200L, addInitial),
+                Triple(OP_PLAYER_INFO, 300L, removeThenAdd),
+            ),
+            snapshot,
+        )
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val verifiedOps = r.opcodeTrust.filter { it.confidence == Confidence.CLIENT_VERIFIED }.map { it.opcode }.toSet()
+        val agreed = cc.available && !cc.hasFailure &&
+            cc.scenePlayerPresenceMatches == 2 &&
+            cc.scenePlayerPresenceMismatches.isEmpty() &&
+            cc.scenePlayerPositionMismatches.isEmpty()
+        val noEarlySlot = cc.scenePlayerPresenceMismatches.none { it.idx == replacement.idx - 1 }
+        val promoted = OP_PLAYER_INFO in verifiedOps
+        if (agreed && noEarlySlot && promoted)
+            pass("client-king SCENE PLAYER VECTORS: pass-2 removal is invisible to pass-3 pending scan until rebuild, so op22 adds idx${replacement.idx} and promotes")
+        else fail("client-king SCENE PLAYER VECTORS: agreed=$agreed noEarlySlot=$noEarlySlot promoted=$promoted verifiedOps=$verifiedOps cc=$cc\n${TrustReportRenderer.jsonText(r)}")
+    }
+
+    // 12a-1c8. CLIENT-IS-KING SCENE PLAYER MISMATCH: final scene oracle is authoritative. A missing
+    //           folded player or a client-only player is a hard FAIL and blocks op22 promotion.
+    run {
+        val localIndex = 100
+        val adds = listOf(PlayerAdd(idx = 101, x = 3202, y = 3203))
+        val prefix = gpiPrefixBody(
+            localIndex = localIndex,
+            localX = 3200,
+            localY = 3200,
+            localPlane = 0,
+            lowWords = adds.associate { it.idx to playerRegionWord(it.x, it.y, it.plane) },
+        )
+        val body = playerInfoAddBody(localIndex, adds)
+        val snapshot = buildString {
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":150,"local_player":{"server_index":$localIndex,"render_tile":{"x":3200,"y":3200,"plane":0}},"players":[{"idx":$localIndex,"x":3200,"y":3200,"plane":0}],"npcs":[]}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":300,"local_player":{"server_index":$localIndex,"render_tile":{"x":3200,"y":3200,"plane":0}},"players":[""" +
+                """{"idx":120,"x":3212,"y":3212,"plane":0},""" +
+                """{"idx":$localIndex,"x":3200,"y":3200,"plane":0}],"npcs":[]}""")
+        }
+        val dir = writeTimedClientStateSession(
+            "session-king-scene-player-mismatch",
+            listOf(
+                Triple(OP_REBUILD_NORMAL_SIMPLE, 100L, prefix),
+                Triple(OP_PLAYER_INFO, 200L, body),
+            ),
+            snapshot,
+        )
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val verifiedOps = r.opcodeTrust.filter { it.confidence == Confidence.CLIENT_VERIFIED }.map { it.opcode }.toSet()
+        val mismatch = cc.scenePlayerPresenceMismatches.size == 2 &&
+            cc.scenePlayerPresenceMismatches.any { it.idx == 101 && it.expectedPresent && !it.clientPresent } &&
+            cc.scenePlayerPresenceMismatches.any { it.idx == 120 && !it.expectedPresent && it.clientPresent }
+        val noPromotion = OP_PLAYER_INFO !in verifiedOps
+        val verdictFail = r.verdict == SessionTrustVerifier.Verdict.FAIL
+        if (mismatch && noPromotion && verdictFail)
+            pass("client-king SCENE PLAYER MISMATCH: op22 expected idx101 but oracle held idx120 -> FAIL and no promotion")
+        else fail("client-king SCENE PLAYER MISMATCH: mismatch=$mismatch noPromotion=$noPromotion verdictFail=$verdictFail verifiedOps=$verifiedOps cc=$cc\n${TrustReportRenderer.jsonText(r)}")
+    }
+
+    // 12a-1c9. CLIENT-IS-KING SCENE NPC MISMATCH: final scene oracle is authoritative. A missing
+    //           folded NPC or a client-only NPC is a hard FAIL and blocks op52 promotion.
+    run {
+        val body = npcInfoAddBody(
+            localX = 3200,
+            localY = 3200,
+            adds = listOf(NpcAdd(idx = 608, typeId = 0, x = 3202, y = 3202, plane = 0)),
+        )
+        val snapshot = buildString {
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":100,"local_player":{"render_tile":{"x":3200,"y":3200,"plane":0}},"npcs":[],"players":[]}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":300,"local_player":{"render_tile":{"x":3200,"y":3200,"plane":0}},"npcs":[""" +
+                """{"idx":700,"type":11,"x":3199,"y":3198,"plane":0}],"players":[]}""")
+        }
+        val dir = writeTimedClientStateSession("session-king-scene-npc-mismatch", listOf(Triple(OP_NPC_INFO, 200L, body)), snapshot)
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val verifiedOps = r.opcodeTrust.filter { it.confidence == Confidence.CLIENT_VERIFIED }.map { it.opcode }.toSet()
+        val mismatch = cc.sceneNpcPresenceMismatches.size == 2 &&
+            cc.sceneNpcPresenceMismatches.any { it.idx == 608 && it.expectedPresent && !it.clientPresent } &&
+            cc.sceneNpcPresenceMismatches.any { it.idx == 700 && !it.expectedPresent && it.clientPresent }
+        val noPromotion = OP_NPC_INFO !in verifiedOps
+        val verdictFail = r.verdict == SessionTrustVerifier.Verdict.FAIL
+        val jsonText = TrustReportRenderer.jsonText(r)
+        val named = jsonText.contains("\"gameval_type\": \"npc\"") && jsonText.contains("\"client_type_id\": 11")
+        if (mismatch && noPromotion && verdictFail && named)
+            pass("client-king SCENE NPC MISMATCH: op52 expected idx608 but oracle held npc:tramp(11) idx700 -> FAIL and no promotion")
+        else fail("client-king SCENE NPC MISMATCH: mismatch=$mismatch noPromotion=$noPromotion verdictFail=$verdictFail named=$named verifiedOps=$verifiedOps cc=$cc\n$jsonText")
+    }
+
+    // 12a-1d. VARC NAMING: report detail keeps (recordKind,varId) authoritative but decorates with
+    //          var_client gameval names when known, falls back to varc_<id>, and JSON carries raw
+    //          fields plus structured valueKind/value or valueKind/str.
+    run {
+        val knownId = 4969 // mtxmgt_total_untradeable_bonds in re-resources/gamevals/var_client.json
+        val unknownId = 65000
+        val knownStringId = 147 // quickchat_phrase_obj2
+        val packets = listOf(
+            OP_VC_SMALL to varcSmallBody(knownId, 17),
+            OP_VC_SMALL to varcSmallBody(unknownId, 19),
+            OP_VC_STR to varcStrBody(knownStringId, "ours-inline"),
+        )
+        val snapshot = """{"kind":"state_snapshot","main_state":30,"varcs":[""" +
+            """{"kind":1,"id":$knownId,"value_kind":0,"val":18},""" +
+            """{"kind":1,"id":$unknownId,"value_kind":0,"val":20}],""" +
+            """"varcstrings":[""" +
+            """{"kind":2,"id":$knownStringId,"value_kind":2,"str":"client-inline"}]}""" + "\n"
+        val dir = writeClientStateSession("session-king-varc-names", packets, snapshot)
+        val r = verify(dir)
+        val md = TrustReportRenderer.markdown(r)
+        val jsonText = TrustReportRenderer.jsonText(r)
+        val knownMd = md.contains("kind1:mtxmgt_total_untradeable_bonds(4969)=17") &&
+            md.contains("kind1:mtxmgt_total_untradeable_bonds(4969)=18")
+        val fallbackMd = md.contains("kind1:varc_65000=19") && md.contains("kind1:varc_65000=20")
+        val stringMd = md.contains("kind2:quickchat_phrase_obj2(147)=\"ours-inline\"") &&
+            md.contains("kind2:quickchat_phrase_obj2(147)=\"client-inline\"")
+        val jsonRawKnown = jsonText.contains("\"recordKind\": 1") &&
+            jsonText.contains("\"varId\": 4969") &&
+            jsonText.contains("\"gameval_type\": \"var_client\"") &&
+            jsonText.contains("\"name\": \"mtxmgt_total_untradeable_bonds\"") &&
+            jsonText.contains("\"valueKind\": 0") &&
+            jsonText.contains("\"value\": 17")
+        val jsonStringKnown = jsonText.contains("\"recordKind\": 2") &&
+            jsonText.contains("\"varId\": 147") &&
+            jsonText.contains("\"gameval_type\": \"var_client\"") &&
+            jsonText.contains("\"name\": \"quickchat_phrase_obj2\"") &&
+            jsonText.contains("\"valueKind\": 2") &&
+            jsonText.contains("\"str\": \"ours-inline\"")
+        val jsonFallback = jsonText.contains("\"varId\": 65000") &&
+            jsonText.contains("\"display\": \"kind1:varc_65000=19\"") &&
+            !jsonText.contains("\"name\": \"varc_65000\"")
+        if (knownMd && fallbackMd && stringMd && jsonRawKnown && jsonStringKnown && jsonFallback)
+            pass("varc naming: known id renders as mtxmgt_total_untradeable_bonds(4969), unknown id falls back to varc_65000, JSON keeps raw recordKind/varId + name/valueKind/value")
+        else fail("varc naming: knownMd=$knownMd fallbackMd=$fallbackMd stringMd=$stringMd jsonRawKnown=$jsonRawKnown jsonStringKnown=$jsonStringKnown jsonFallback=$jsonFallback\nMD:\n$md\nJSON:\n$jsonText")
+    }
+
+    // 12a-1e. GENERIC GAMEVAL NAMING: var_player names use the same resolver as var_client, unknown
+    //          ids fall back to <type>_<id>, JSON carries raw ids plus gameval metadata, and a missing
+    //          dictionary root degrades to fallback display rather than failing report generation.
+    run {
+        val knownVarp = 0 // lastcastspell in re-resources/gamevals/var_player.json
+        val unknownVarp = 65000
+        val packets = listOf(
+            OP_VS to varpSmallBody(knownVarp, 7),
+            OP_VS to varpSmallBody(unknownVarp, 1),
+        )
+        val snapshot = """{"kind":"state_snapshot","main_state":30,"varps":{"$knownVarp":9,"$unknownVarp":2}}""" + "\n"
+        val dir = writeClientStateSession("session-king-varp-names", packets, snapshot)
+        val r = verify(dir)
+        val md = TrustReportRenderer.markdown(r)
+        val jsonText = TrustReportRenderer.jsonText(r)
+        val knownMd = md.contains("var_player:lastcastspell(0): 7≠9")
+        val fallbackMd = md.contains("var_player:var_player_65000: 1≠2")
+        val jsonKnown = jsonText.contains("\"var_id\": 0") &&
+            jsonText.contains("\"gameval_type\": \"var_player\"") &&
+            jsonText.contains("\"name\": \"lastcastspell\"") &&
+            jsonText.contains("\"display\": \"var_player:lastcastspell(0)\"") &&
+            jsonText.contains("\"our_value\": 7") &&
+            jsonText.contains("\"client_value\": 9")
+        val jsonFallback = jsonText.contains("\"var_id\": 65000") &&
+            jsonText.contains("\"display\": \"var_player:var_player_65000\"") &&
+            !jsonText.contains("\"name\": \"var_player_65000\"")
+        val missingRoot = File(tmp, "missing-gameval-root").apply { mkdirs() }
+        val missing = GamevalNameResolver.load(missingRoot)
+        val missingFallback = missing.display(GamevalNameResolver.TYPE_VAR_PLAYER, knownVarp) == "var_player:var_player_0" &&
+            missing.varcKeyDisplay(ClientStateCrossCheck.VarcKey(ClientStateCrossCheck.VARC_RECORD_KIND_NUMERIC, 4969)) == "kind1:varc_4969"
+        if (knownMd && fallbackMd && jsonKnown && jsonFallback && missingFallback)
+            pass("generic gameval naming: var_player lastcastspell(0) renders with raw id, unknown varp falls back, JSON carries gameval metadata, missing dictionary root is non-fatal")
+        else fail("generic gameval naming: knownMd=$knownMd fallbackMd=$fallbackMd jsonKnown=$jsonKnown jsonFallback=$jsonFallback missingFallback=$missingFallback\nMD:\n$md\nJSON:\n$jsonText")
+    }
+
+    // 12a-1f. CLIENT-DYNAMIC VARP ADVISORY: D&D timer varps are only downgraded from hard-fail when
+    //          snapshot history proves the packet value matched first and later drifted client-side.
+    run {
+        val timerVarp = 3913
+        val packets = listOf(Triple(OP_VL, 1_000L, varpLargeBody(timerVarp, 1_000)))
+        val snapshot = buildString {
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":1100,"tick":10,"varps":{"$timerVarp":1000}}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":2100,"tick":11,"varps":{"$timerVarp":999}}""")
+            appendLine("""{"kind":"state_snapshot","main_state":30,"mono_us":3000,"tick":12,"varps":{"$timerVarp":999}}""")
+        }
+        val dir = writeTimedClientStateSession("session-king-dynamic-varp-advisory", packets, snapshot)
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val advisory = cc.varpAdvisory.singleOrNull()?.let {
+            it.varId == timerVarp && it.ourValue == 1_000 && it.clientValue == 999 &&
+                it.evidence.contains("tick10") && it.evidence.contains("tick11")
+        } == true
+        val noHardFail = !cc.hasFailure && cc.varpMismatches.isEmpty() &&
+            r.reasons.none { it.contains("client-is-king: our decoded state does NOT", ignoreCase = true) }
+        val jsonText = TrustReportRenderer.jsonText(r)
+        val rendered = TrustReportRenderer.markdown(r)
+        val reported = jsonText.contains("\"varp_advisory\"") &&
+            jsonText.contains("\"reason\": \"client_dynamic\"") &&
+            rendered.contains("client-local timer drift")
+        if (advisory && noHardFail && reported)
+            pass("client-dynamic VARP ADVISORY: var3913 first matches packet fold, then drifts in snapshots without another write; reported advisory, not FAIL")
+        else fail("client-dynamic VARP ADVISORY: advisory=$advisory noHardFail=$noHardFail reported=$reported reasons=${r.reasons} cc=$cc\nJSON:\n$jsonText\nMD:\n$rendered")
+    }
+
+    // 12a-1f2. CLIENT-DYNAMIC VARP NO-PROOF: known timer ids still hard-fail if the capture lacks
+    //           the match-then-drift evidence needed to prove client-local mutation.
+    run {
+        val timerVarp = 3913
+        val packets = listOf(Triple(OP_VL, 1_000L, varpLargeBody(timerVarp, 1_000)))
+        val snapshot = """{"kind":"state_snapshot","main_state":30,"mono_us":3000,"tick":12,"varps":{"$timerVarp":999}}""" + "\n"
+        val dir = writeTimedClientStateSession("session-king-dynamic-varp-no-proof", packets, snapshot)
+        val r = verify(dir)
+        val cc = r.clientCrossCheck
+        val mismatchFlagged = cc.varpMismatches.singleOrNull()?.let {
+            it.varId == timerVarp && it.ourValue == 1_000 && it.clientValue == 999
+        } == true
+        val noAdvisory = cc.varpAdvisory.isEmpty()
+        val verdictFail = r.verdict == SessionTrustVerifier.Verdict.FAIL
+        if (mismatchFlagged && noAdvisory && verdictFail)
+            pass("client-dynamic VARP NO-PROOF: timer varp without prior matching snapshot remains a hard client-king mismatch")
+        else fail("client-dynamic VARP NO-PROOF: mismatchFlagged=$mismatchFlagged noAdvisory=$noAdvisory verdictFail=$verdictFail reasons=${r.reasons} cc=$cc")
+    }
+
+    // 12a-2. CONFIDENCE TAXONOMY: each tier is reachable through the shared assignment rule, and
+    //         capture-observed only applies when round-trip proof passes.
+    run {
+        val tiers = listOf(
+            ConfidenceAssigner.assign(clientVerified = true, binaryProven = false, captureObserved = false),
+            ConfidenceAssigner.assign(clientVerified = false, binaryProven = true, captureObserved = true),
+            ConfidenceAssigner.assign(clientVerified = false, binaryProven = false, captureObserved = true),
+            ConfidenceAssigner.assign(clientVerified = false, binaryProven = false, captureObserved = false),
+        )
+        val ordered = tiers == listOf(
+            Confidence.CLIENT_VERIFIED,
+            Confidence.BINARY_PROVEN,
+            Confidence.CAPTURE_OBSERVED,
+            Confidence.HYPOTHESIS,
+        )
+        if (ordered) pass("confidence taxonomy: CLIENT_VERIFIED > BINARY_PROVEN > CAPTURE_OBSERVED > HYPOTHESIS assignment asserted")
+        else fail("confidence taxonomy: got $tiers")
+    }
+
+    // 12a-3. ROUND-TRIP PROOF: a field-swapped op28 decoder would parse without throwing, but its
+    //         re-encoded body differs from the original. Correct decoder round-trips the same body.
+    run {
+        val body = varpLargeBody(0x1234, 0x01020304)
+        val correct = CapturePacketDecode.roundTripServer(codec, OP_VL, body)
+        val wrongDidNotThrow = runCatching {
+            val wrongId = ((body[0].toInt() and 0xFF) shl 8) or (body[1].toInt() and 0xFF)
+            val wrongValue = ((body[2].toInt() and 0xFF) shl 24) or
+                ((body[3].toInt() and 0xFF) shl 16) or
+                ((body[4].toInt() and 0xFF) shl 8) or
+                (body[5].toInt() and 0xFF)
+            byteArrayOf(
+                (wrongValue ushr 24).toByte(), (wrongValue ushr 16).toByte(),
+                (wrongValue ushr 8).toByte(), wrongValue.toByte(),
+                (wrongId ushr 8).toByte(), wrongId.toByte(),
+            )
+        }.getOrNull()
+        val wrongCaught = wrongDidNotThrow != null && !wrongDidNotThrow.contentEquals(body)
+        if (correct.roundTrips && wrongCaught)
+            pass("round-trip proof: correct op28 body round-trips; field-swapped decoder would not throw but re-encodes different bytes")
+        else fail("round-trip proof: correct=${correct.roundTrips}/${correct.failure} wrongCaught=$wrongCaught")
     }
 
     // 12b. RUN-ENERGY OPCODE (the RE resolution, §10.4): run energy is s2c op 0x0d (13), g1, 0..100
@@ -907,5 +2102,19 @@ fun main() {
 // State-bearing s2c opcodes used by the client-is-king self-tests (mirrors ClientStateCrossCheck).
 private const val OP_VS = 61   // VARP_SMALL
 private const val OP_VL = 28   // VARP_LARGE
+private const val OP_VLONG = 147 // VARP_LONG
+private const val OP_RESET_VARCACHE = 5 // RESET_CLIENT_VARCACHE
+private const val OP_VC_SMALL = 47 // CLIENT_SETVARC_SMALL
+private const val OP_VC_LARGE = 64 // CLIENT_SETVARC_LARGE
+private const val OP_VC_STR = 92 // CLIENT_SETVARC_STR
+private const val OP_VC_STR_LARGE = 116 // CLIENT_SETVARC_STR_LARGE
+private const val OP_VC_LONG = 196 // CLIENT_SETVARC_LONG (metadata name UNKNOWN_196 in register948)
+private const val OP_VCBIT_SMALL = 48 // CLIENT_SETVARCBIT_SMALL (deferred for client verification)
+private const val OP_VCBIT_LARGE = 69 // CLIENT_SETVARCBIT_LARGE (deferred for client verification)
 private const val OP_US = 44   // UPDATE_STAT
 private const val OP_RE = 13   // UPDATE_RUNENERGY (s2c op 0x0d, g1, 0..100 RAW; NOT op 0x50/80 = chat filter)
+private const val OP_INV_FULL = 85 // UPDATE_INV_FULL
+private const val OP_INV_PARTIAL = 121 // UPDATE_INV_PARTIAL
+private const val OP_REBUILD_NORMAL_SIMPLE = 81 // REBUILD_NORMAL_SIMPLE (GPI prefix initializer)
+private const val OP_PLAYER_INFO = 22 // PLAYER_INFO
+private const val OP_NPC_INFO = 52 // NPC_INFO

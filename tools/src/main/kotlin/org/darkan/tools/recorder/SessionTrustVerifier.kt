@@ -8,6 +8,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.darkan.core.net.prot.Codec
 import org.darkan.core.net.recorder.CapturePacketDecode
 import org.darkan.core.net.recorder.ClientStateCrossCheck
+import org.darkan.core.net.recorder.Confidence
+import org.darkan.core.net.recorder.ConfidenceAssigner
 import java.io.File
 import java.util.Base64
 import kotlin.math.abs
@@ -39,6 +41,7 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
 
     private val json = Json { ignoreUnknownKeys = true }
     private val base64 = Base64.getDecoder()
+    private val gamevals = GamevalNameResolver.default()
 
     // ---- result model (also the shape serialized to trust-report.json) --------------------------
 
@@ -104,12 +107,52 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
         val conn: String,
         val dir: String,
         val decodable: Int,
+        val decoded: Int,
         val cleanDecoded: Int,
         val failed: Int,
         val encryptedSkipped: Int,
+        val roundTripSupported: Int,
+        val roundTripPassed: Int,
+        val roundTripFailed: Int,
+        val roundTripUnsupported: Int,
         val cleanRatePct: Double,
+        val roundTripRatePct: Double,
         val failingOpcodes: Map<Int, Int>,
     )
+
+    data class OpcodeTrust(
+        val dir: String,
+        val opcode: Int,
+        val name: String,
+        val observedPackets: Int,
+        val decodedPackets: Int,
+        val roundTripSupported: Int,
+        val roundTripPassed: Int,
+        val roundTripFailed: Int,
+        val roundTripUnsupported: Int,
+        val confidence: Confidence,
+    ) {
+        val roundTripRatePct: Double
+            get() = if (roundTripSupported == 0) 100.0 else roundTripPassed.toDouble() / roundTripSupported.toDouble() * 100.0
+    }
+
+    data class ClientVerifiedCoverage(
+        val dir: String,
+        val clientVerifiedPackets: Int,
+        val observedPackets: Int,
+    ) {
+        val pct: Double
+            get() = if (observedPackets == 0) 100.0 else clientVerifiedPackets.toDouble() / observedPackets.toDouble() * 100.0
+    }
+
+    data class ClientVerifiedBreadth(
+        val dir: String,
+        val clientVerifiedOpcodes: Int,
+        val observedOpcodes: Int,
+    ) {
+        val pct: Double
+            get() = if (observedOpcodes == 0) 100.0 else clientVerifiedOpcodes.toDouble() / observedOpcodes.toDouble() * 100.0
+    }
 
     data class SanityDelta(
         val conn: String,
@@ -132,6 +175,9 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
         /** Detected duplicate-frame runs — the positive "frames invented / double-counted" signal. */
         val doubleCounts: List<DoubleCount>,
         val sanityDeltas: List<SanityDelta>,
+        val opcodeTrust: List<OpcodeTrust>,
+        val clientVerifiedBreadth: List<ClientVerifiedBreadth>,
+        val clientVerifiedCoverage: List<ClientVerifiedCoverage>,
         val crossValidation: String,
         /**
          * The CLIENT-IS-KING cross-check: our decoded state-bearing s2c packets folded into the
@@ -142,6 +188,8 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
         val clientCrossCheck: ClientStateCrossCheck.CrossCheck,
         /** Human-readable rendering of [clientCrossCheck] for the report body. */
         val clientCrossSummary: String,
+        /** Local-player tile trajectory sampled from `state-snapshots.jsonl`. */
+        val avatarTrajectory: List<ClientStateCrossChecker.AvatarTrajectoryPoint>,
         /** Non-game socket volume (cache/JS5/HTTP, e.g. `conn=unknown`) reported separately as INFO. */
         val nonGameSocket: List<NonGameSocket>,
         val verdict: Verdict,
@@ -196,6 +244,7 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
         val sanityDeltas = ArrayList<SanityDelta>()
         val nonGameSocket = ArrayList<NonGameSocket>()
         val doubleCounts = ArrayList<DoubleCount>()
+        val opcodeProofs = LinkedHashMap<Pair<String, Int>, MutableOpcodeProof>()
 
         for (dir in listOf("s2c", "c2s")) {
             val framedFile = File(session, "framed-$dir.jsonl")
@@ -211,7 +260,7 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
             for ((conn, records) in byConn) {
                 if (!isGameConn(conn)) continue
                 byteAccounts += accountBytes(conn, dir, records, socketByConn[conn]?.bytes, desyncs)
-                decodeStats += decodeRate(conn, dir, records)
+                decodeStats += decodeRate(conn, dir, records, opcodeProofs)
                 sanityDeltas += sanityCheck(conn, dir, records)
                 doubleCounts += detectDoubleCount(conn, dir, records)
             }
@@ -221,6 +270,9 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
             }
         }
 
+        val opcodeTrust = buildOpcodeTrust(opcodeProofs, clientCross.check)
+        val clientVerifiedBreadth = buildClientVerifiedBreadth(opcodeTrust)
+        val clientVerifiedCoverage = buildClientVerifiedCoverage(opcodeTrust)
         val (verdict, reasons) = verdict(
             byteAccounts, decodeStats, desyncs, sanityDeltas, nonGameSocket, clientCross.check, doubleCounts,
         )
@@ -233,9 +285,13 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
             desyncs = desyncs,
             doubleCounts = doubleCounts,
             sanityDeltas = sanityDeltas,
+            opcodeTrust = opcodeTrust,
+            clientVerifiedBreadth = clientVerifiedBreadth,
+            clientVerifiedCoverage = clientVerifiedCoverage,
             crossValidation = crossValidation,
             clientCrossCheck = clientCross.check,
             clientCrossSummary = clientCross.summary,
+            avatarTrajectory = clientCross.avatarTrajectory,
             nonGameSocket = nonGameSocket,
             verdict = verdict,
             reasons = reasons,
@@ -398,14 +454,39 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
 
     // ---- 2. clean-decode rate ------------------------------------------------------------------
 
-    private fun decodeRate(conn: String, dir: String, records: List<FramedRecord>): DecodeStat {
+    private data class MutableOpcodeProof(
+        val dir: String,
+        val opcode: Int,
+        val name: String,
+        var observed: Int = 0,
+        var decoded: Int = 0,
+        var roundTripSupported: Int = 0,
+        var roundTripPassed: Int = 0,
+        var roundTripFailed: Int = 0,
+        var roundTripUnsupported: Int = 0,
+    )
+
+    private fun decodeRate(
+        conn: String,
+        dir: String,
+        records: List<FramedRecord>,
+        opcodeProofs: MutableMap<Pair<String, Int>, MutableOpcodeProof>,
+    ): DecodeStat {
         var decodable = 0
+        var decodedPackets = 0
         var clean = 0
         var failed = 0
         var encrypted = 0
+        var roundTripSupported = 0
+        var roundTripFailed = 0
+        var roundTripUnsupported = 0
         val failing = HashMap<Int, Int>()
 
         for (rec in records) {
+            val opProof = opcodeProofs.getOrPut(dir to rec.opcode) {
+                MutableOpcodeProof(dir, rec.opcode, opName(dir, rec.opcode))
+            }
+            opProof.observed++
             if (dir == "c2s" && rec.xteaBody) {
                 encrypted++
                 continue
@@ -420,20 +501,126 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
             val body = rec.body
             if (body == null) {
                 // Decoder exists but the body was elided (oversized blob missing) — cannot assert.
+                roundTripUnsupported++
+                opProof.roundTripUnsupported++
                 continue
             }
-            val decoded = if (dir == "s2c") {
-                CapturePacketDecode.decodeServer(codec, rec.opcode, body)
+            val proof = if (dir == "s2c") {
+                CapturePacketDecode.roundTripServer(codec, rec.opcode, body)
             } else {
-                CapturePacketDecode.decodeClient(codec, rec.opcode, body)
+                CapturePacketDecode.roundTripClient(codec, rec.opcode, body)
             }
-            if (decoded != null) clean++ else {
+            if (proof.decodedOk) {
+                decodedPackets++
+                opProof.decoded++
+            } else {
                 failed++
+                roundTripFailed++
+                opProof.roundTripFailed++
+                failing[rec.opcode] = (failing[rec.opcode] ?: 0) + 1
+                continue
+            }
+            if (!proof.roundTripSupported) {
+                roundTripUnsupported++
+                opProof.roundTripUnsupported++
+                continue
+            }
+            roundTripSupported++
+            opProof.roundTripSupported++
+            if (proof.roundTrips) {
+                clean++
+                opProof.roundTripPassed++
+            } else {
+                failed++
+                roundTripFailed++
+                opProof.roundTripFailed++
                 failing[rec.opcode] = (failing[rec.opcode] ?: 0) + 1
             }
         }
-        val rate = if (decodable == 0) 100.0 else clean.toDouble() / decodable.toDouble() * 100.0
-        return DecodeStat(conn, dir, decodable, clean, failed, encrypted, rate, failing.toSortedMap())
+        val rate = if (roundTripSupported == 0) 100.0 else clean.toDouble() / roundTripSupported.toDouble() * 100.0
+        return DecodeStat(
+            conn = conn,
+            dir = dir,
+            decodable = decodable,
+            decoded = decodedPackets,
+            cleanDecoded = clean,
+            failed = failed,
+            encryptedSkipped = encrypted,
+            roundTripSupported = roundTripSupported,
+            roundTripPassed = clean,
+            roundTripFailed = roundTripFailed,
+            roundTripUnsupported = roundTripUnsupported,
+            cleanRatePct = rate,
+            roundTripRatePct = rate,
+            failingOpcodes = failing.toSortedMap(),
+        )
+    }
+
+    private fun buildOpcodeTrust(
+        opcodeProofs: Map<Pair<String, Int>, MutableOpcodeProof>,
+        clientCross: ClientStateCrossCheck.CrossCheck,
+    ): List<OpcodeTrust> {
+        val clientVerified = if (clientCross.available) {
+            clientCross.opcodeWriteChecks
+                .asSequence()
+                .filter { it.opcode in ClientStateCrossCheck.CLIENT_VERIFIED_OPCODES }
+                .groupBy { it.opcode }
+                .filterValues { checks ->
+                    checks.sumOf { it.matches } > 0 && checks.sumOf { it.mismatches } == 0
+                }
+                .keys
+        } else {
+            emptySet()
+        }
+        return opcodeProofs.values
+            .sortedWith(compareBy<MutableOpcodeProof> { it.dir }.thenBy { it.opcode })
+            .map { p ->
+                val isClientVerified = p.dir == "s2c" && p.opcode in clientVerified
+                val captureObserved = p.roundTripSupported > 0 && p.roundTripFailed == 0
+                val binaryProven = isBinaryProven(p.dir, p.opcode, p.name)
+                OpcodeTrust(
+                    dir = p.dir,
+                    opcode = p.opcode,
+                    name = p.name,
+                    observedPackets = p.observed,
+                    decodedPackets = p.decoded,
+                    roundTripSupported = p.roundTripSupported,
+                    roundTripPassed = p.roundTripPassed,
+                    roundTripFailed = p.roundTripFailed,
+                    roundTripUnsupported = p.roundTripUnsupported,
+                    confidence = ConfidenceAssigner.assign(isClientVerified, binaryProven, captureObserved),
+                )
+            }
+    }
+
+    private fun buildClientVerifiedBreadth(opcodeTrust: List<OpcodeTrust>): List<ClientVerifiedBreadth> =
+        listOf("s2c", "c2s").map { dir ->
+            val rows = opcodeTrust.filter { it.dir == dir }
+            ClientVerifiedBreadth(
+                dir = dir,
+                clientVerifiedOpcodes = rows.count { it.confidence == Confidence.CLIENT_VERIFIED },
+                observedOpcodes = rows.size,
+            )
+        }
+
+    private fun buildClientVerifiedCoverage(opcodeTrust: List<OpcodeTrust>): List<ClientVerifiedCoverage> =
+        listOf("s2c", "c2s").map { dir ->
+            val rows = opcodeTrust.filter { it.dir == dir }
+            ClientVerifiedCoverage(
+                dir = dir,
+                clientVerifiedPackets = rows.filter { it.confidence == Confidence.CLIENT_VERIFIED }.sumOf { it.observedPackets },
+                observedPackets = rows.sumOf { it.observedPackets },
+            )
+        }
+
+    private fun isBinaryProven(dir: String, opcode: Int, name: String): Boolean {
+        if (name.startsWith("UNKNOWN_")) return false
+        return if (dir == "s2c") {
+            codec.serverProts.values.any { it.opcode == opcode && it.encoder != null } ||
+                codec.serverDecodersByOpcode.containsKey(opcode)
+        } else {
+            codec.clientProtsByOpcode.containsKey(opcode)
+        }
     }
 
     // ---- 3. sanity vs documented production ----------------------------------------------------
@@ -520,6 +707,16 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
 
     private fun opName(dir: String, opcode: Int): String =
         if (dir == "s2c") codec.serverProtName(opcode) else codec.clientProtName(opcode)
+
+    private fun inventoryItemDisplay(itemId: Int, count: Long): String =
+        if (itemId == -1) "empty" else "${gamevals.objDisplay(itemId)}×$count"
+
+    private fun appearanceValueDisplay(kitId: Int, itemId: Int): String =
+        when {
+            itemId >= 0 -> gamevals.objDisplay(itemId)
+            kitId >= 0 -> "kit$kitId"
+            else -> "empty"
+        }
 
     /** A count deviates when it differs from the reference by > [SANITY_TOLERANCE_PCT] AND by > 5. */
     private fun deviates(actual: Int, expected: Int): Boolean {
@@ -610,12 +807,34 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
             if (clientCross.varpMismatches.isNotEmpty()) {
                 bits += "${clientCross.varpMismatches.size} varp MISMATCH " +
                     clientCross.varpMismatches.take(6).joinToString(prefix = "[", postfix = "]") {
-                        "var${it.varId} ours=${it.ourValue}≠client=${it.clientValue}"
+                        "${gamevals.varpDisplay(it.varId)} ours=${it.ourValue}≠client=${it.clientValue}"
                     }
             }
             if (clientCross.varpMissed.isNotEmpty()) {
                 bits += "${clientCross.varpMissed.size} varp MISSED (client committed it, we never decoded it → dropped packet) " +
-                    clientCross.varpMissed.take(8).joinToString(prefix = "[", postfix = "]") { "var$it" }
+                    clientCross.varpMissed.take(8).joinToString(prefix = "[", postfix = "]") { gamevals.varpDisplay(it) }
+            }
+            if (clientCross.varcMismatches.isNotEmpty()) {
+                bits += "${clientCross.varcMismatches.size} varc MISMATCH " +
+                    clientCross.varcMismatches.take(6).joinToString(prefix = "[", postfix = "]") {
+                        "ours=${gamevals.display(it.key, it.ourValueKind, it.ourNumberValue, it.ourStringValue)}" +
+                            "≠client=${gamevals.display(it.key, it.clientValueKind, it.clientNumberValue, it.clientStringValue)}"
+                    }
+            }
+            if (clientCross.varcMissed.isNotEmpty()) {
+                bits += "${clientCross.varcMissed.size} varc MISSED (client committed it, we never decoded it → dropped packet) " +
+                    clientCross.varcMissed.take(8).joinToString(prefix = "[", postfix = "]") { gamevals.display(it) }
+            }
+            if (clientCross.varcStringMismatches.isNotEmpty()) {
+                bits += "${clientCross.varcStringMismatches.size} varcstring MISMATCH " +
+                    clientCross.varcStringMismatches.take(6).joinToString(prefix = "[", postfix = "]") {
+                        "ours=${gamevals.display(it.key, it.ourValueKind, it.ourNumberValue, it.ourStringValue)}" +
+                            "≠client=${gamevals.display(it.key, it.clientValueKind, it.clientNumberValue, it.clientStringValue)}"
+                    }
+            }
+            if (clientCross.varcStringMissed.isNotEmpty()) {
+                bits += "${clientCross.varcStringMissed.size} varcstring MISSED (client committed it, we never decoded it → dropped packet) " +
+                    clientCross.varcStringMissed.take(8).joinToString(prefix = "[", postfix = "]") { gamevals.display(it) }
             }
             if (clientCross.skillMismatches.isNotEmpty()) {
                 bits += "${clientCross.skillMismatches.size} skill MISMATCH " +
@@ -624,12 +843,63 @@ class SessionTrustVerifier(private val codec: Codec, private val known: KnownOpc
                     }
             }
             if (clientCross.skillMissed.isNotEmpty()) bits += "${clientCross.skillMissed.size} skill MISSED"
+            if (clientCross.inventoryMismatches.isNotEmpty()) {
+                bits += "${clientCross.inventoryMismatches.size} inventory MISMATCH " +
+                    clientCross.inventoryMismatches.take(6).joinToString(prefix = "[", postfix = "]") {
+                        "inv${it.invId}[${it.slot}] ours=${inventoryItemDisplay(it.ourItemId, it.ourCount)}" +
+                            "≠client=${inventoryItemDisplay(it.clientItemId, it.clientCount)}"
+                    }
+            }
+            if (clientCross.inventoryMissed.isNotEmpty()) {
+                bits += "${clientCross.inventoryMissed.size} inventory MISSED (client committed it, we never decoded it → dropped packet) " +
+                    clientCross.inventoryMissed.take(8).joinToString(prefix = "[", postfix = "]") {
+                        "inv${it.invId}[${it.slot}]=${inventoryItemDisplay(it.itemId, it.count)}"
+                    }
+            }
+            if (clientCross.appearanceMismatches.isNotEmpty()) {
+                bits += "${clientCross.appearanceMismatches.size} appearance MISMATCH " +
+                    clientCross.appearanceMismatches.take(8).joinToString(prefix = "[", postfix = "]") {
+                        "slot${it.slot} ours=${appearanceValueDisplay(it.ourKitId, it.ourItemId)}" +
+                            "≠client=${appearanceValueDisplay(it.clientKitId, it.clientItemId)}"
+                    }
+            }
+            if (clientCross.appearanceMissed.isNotEmpty()) {
+                bits += "${clientCross.appearanceMissed.size} appearance MISSED (client committed it, we never decoded it → dropped packet) " +
+                    clientCross.appearanceMissed.take(8).joinToString(prefix = "[", postfix = "]") {
+                        "slot${it.slot}=${appearanceValueDisplay(it.kitId, it.itemId)}"
+                    }
+            }
+            if (clientCross.scenePlayerPresenceMismatches.isNotEmpty()) {
+                bits += "${clientCross.scenePlayerPresenceMismatches.size} scene-player presence MISMATCH " +
+                    clientCross.scenePlayerPresenceMismatches.take(8).joinToString(prefix = "[", postfix = "]") {
+                        "player${it.idx} expected=${it.expectedPresent} client=${it.clientPresent}"
+                    }
+            }
+            if (clientCross.sceneNpcPresenceMismatches.isNotEmpty()) {
+                bits += "${clientCross.sceneNpcPresenceMismatches.size} scene-npc presence MISMATCH " +
+                    clientCross.sceneNpcPresenceMismatches.take(8).joinToString(prefix = "[", postfix = "]") {
+                        "npc${it.idx} expected=${it.expectedPresent} client=${it.clientPresent}"
+                    }
+            }
             if (clientCross.scalarMismatches.isNotEmpty()) {
                 bits += clientCross.scalarMismatches.joinToString { "${it.field} ours=${it.ourValue}≠client=${it.clientValue}" }
             }
             fail("client-is-king: our decoded state does NOT reproduce the client's committed state (client is ground truth) — ${bits.joinToString("; ")}")
         } else {
-            info("client-is-king: every decoded value matches the client's own final state (${clientCross.varpMatches} varps, ${clientCross.skillMatches} skills verified)")
+            val unverifiedVarcs = clientCross.varcUnverified.size + clientCross.varcStringUnverified.size
+            val unverifiedAppearance = clientCross.appearanceUnverified.size
+            val advisoryVarps = clientCross.varpAdvisory.size
+            if (unverifiedVarcs > 0 || unverifiedAppearance > 0 || advisoryVarps > 0) {
+                val advisoryDetail = if (advisoryVarps > 0) {
+                    "; $advisoryVarps client-dynamic varp advisory " +
+                        clientCross.varpAdvisory.take(6).joinToString(prefix = "[", postfix = "]") {
+                            "${gamevals.varpDisplay(it.varId)} ours=${it.ourValue}≠client=${it.clientValue}; ${it.evidence}"
+                        }
+                } else ""
+                info("client-is-king: matched decoded values verify against the client's own final state (${clientCross.varpMatches} varps, ${clientCross.varcMatches} numeric varcs, ${clientCross.varcStringMatches} string varcs, ${clientCross.skillMatches} skills, ${clientCross.inventoryMatches} inventory slots, ${clientCross.appearanceMatches} appearance slots); $unverifiedVarcs folded varc write(s) and $unverifiedAppearance appearance slot(s) lack oracle ground truth$advisoryDetail")
+            } else {
+                info("client-is-king: every decoded value matches the client's own final state (${clientCross.varpMatches} varps, ${clientCross.varcMatches} numeric varcs, ${clientCross.varcStringMatches} string varcs, ${clientCross.skillMatches} skills, ${clientCross.inventoryMatches} inventory slots, ${clientCross.appearanceMatches} appearance slots verified)")
+            }
         }
 
         // A framing-coherence desync flags that a captured length disagrees with the codec's size

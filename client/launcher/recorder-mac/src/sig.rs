@@ -91,8 +91,7 @@ pub fn readable_regions(image: &MainImage) -> Vec<Region> {
     if hdr.magic != MH_MAGIC_64 {
         return regions;
     }
-    let mut cmd_ptr =
-        unsafe { (header as *const u8).add(std::mem::size_of::<MachHeader64>()) };
+    let mut cmd_ptr = unsafe { (header as *const u8).add(std::mem::size_of::<MachHeader64>()) };
     for _ in 0..hdr.ncmds {
         let lc = unsafe { &*(cmd_ptr as *const LoadCommand) };
         if lc.cmdsize == 0 {
@@ -155,8 +154,7 @@ pub fn resolve_main_image() -> Option<MainImage> {
     };
 
     let mut regions = Vec::new();
-    let mut cmd_ptr =
-        unsafe { (header as *const u8).add(std::mem::size_of::<MachHeader64>()) };
+    let mut cmd_ptr = unsafe { (header as *const u8).add(std::mem::size_of::<MachHeader64>()) };
     for _ in 0..hdr.ncmds {
         let lc = unsafe { &*(cmd_ptr as *const LoadCommand) };
         if lc.cmdsize == 0 {

@@ -13,11 +13,13 @@ import world.gregs.voidps.buffer.write.BufferWriter
  * [PlayerExtInfoEncoder].
  *
  * **Current behavior (preserved EXACTLY):** every live high-res update is the stationary form
- * `movementType=0`. No-update slots are run-length-encoded by the orchestrator's skip-run
+ * `movementType=0` (the local first-tick add uses this same form with INLINE APPEARANCE ext-info —
+ * the prod local form). No-update slots are run-length-encoded by the orchestrator's skip-run
  * ([PlayerInfoEncoder] — the single owner of the skip-count tail, the inverse of the decode's
- * `readPlayerSkipCount`). The teleport / absolute-tile form ([encodeAbsoluteTile]) is used ONLY by
- * the first-tick init path ([PlayerInfoEncoder.buildInit]); the live world-entry / per-tick path
- * never reaches it. None of these emit real walk/run motion.
+ * `readPlayerSkipCount`). The teleport / absolute-tile form ([encodeAbsoluteTile]) is NOT used by any
+ * current build path — it was REVERTED from [PlayerInfoEncoder.buildInit] (prod never sends mvt=3 for
+ * the local slot and it regressed the render plane). It is retained as the increment-2 real-teleport
+ * seam only. None of these emit real walk/run motion.
  *
  * Wire references (relocated verbatim with their code — do not delete):
  *  * High-res form — `docs/net/serverprot/player-info-947-3.md` §4B `GetHighResolutionPlayerPosition`.
@@ -26,8 +28,9 @@ import world.gregs.voidps.buffer.write.BufferWriter
  *    `GetHighResolutionPlayerPosition @0x00154d30`.
  *
  * Phase 1.2b: real walk/run/teleport movement plugs in HERE. The extension seam is
- * [encodeHighResPosition] (today hardcoded `movementType=0`) and the skip-run gating in
- * [PlayerInfoEncoder]; [encodeAbsoluteTile] is the teleport primitive that path will consume.
+ * [encodeHighResPosition] (today `movementType=0`/walk) and the skip-run gating in
+ * [PlayerInfoEncoder]; [encodeAbsoluteTile] is the teleport primitive a real-teleport path will
+ * consume (it is NOT on any current build path).
  */
 object PlayerMovementEncoder {
 
@@ -37,21 +40,22 @@ object PlayerMovementEncoder {
     /** Walk form: a single one-tile step — `movementType=1` then `[3-bit dir][1-bit hasFollowup]`. */
     private const val MOVEMENT_TYPE_WALK = 1
 
-    /** Teleport / jump form: read an absolute 30-bit tile next. Used by the first-tick init path. */
+    /** Teleport / jump form: read an absolute 30-bit tile next. Increment-2 real-teleport seam (NOT on any current build path). */
     private const val MOVEMENT_TYPE_TELEPORT = 3
 
     /**
-     * Local-player first-transmission high-res init (absolute-tile / teleport path), per
-     * `docs/protocol/world-bootstrap-948.md` §4.3 and `GetHighResolutionPlayerPosition`:
+     * Local-player absolute-tile / teleport high-res form, per `docs/protocol/world-bootstrap-948.md`
+     * §4.3 and `GetHighResolutionPlayerPosition`:
      *   gBit(1)=1 hasUpdate ; gBit(1) hasExtInfo ; gBit(2)=3 movementType(teleport) ; gBit(30) tile.
      *
-     * The 30-bit tile is `(plane<<28)|(x<<14)|y` ([world.gregs.voidps.type.Tile.id]) — this MUST equal
-     * the op81 coord-header centre zone's tile (the coherence constraint that stops the quit).
-     * `hasExtInfo` is set only when a real appearance blob exists (we do not fabricate the
-     * undocumented appearance payload); when set, [local]'s index is appended to [flaggedForExtInfo]
-     * so the orchestrator emits the ext-info block afterwards.
+     * **NOT on any current build path.** This was the first-tick local form but was REVERTED from
+     * [PlayerInfoEncoder.buildInit] — prod never sends mvt=3 for the local slot (its first-tick op22 is
+     * the stationary `c0 …` mvt=0 inline-appearance form, capture-verified) and the longer teleport
+     * bit-block regressed the render plane. Kept as the increment-2 real-teleport primitive.
      *
-     * Relocated unchanged from `PlayerInfoBuilder.encodeLocalPlayerInit` — byte output is identical.
+     * The 30-bit tile is `(plane<<28)|(x<<14)|y` ([world.gregs.voidps.type.Tile.id]). `hasExtInfo` is
+     * set only when a real appearance blob exists; when set, [local]'s index is appended to
+     * [flaggedForExtInfo] so the orchestrator emits the ext-info block afterwards.
      */
     fun encodeAbsoluteTile(
         out: BufferWriter,

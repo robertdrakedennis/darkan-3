@@ -98,7 +98,9 @@ fn run_ctor() {
     ) {
         Ok(s) => s,
         Err(e) => {
-            log(&format!("failed to create session dir: {e} — recording disabled"));
+            log(&format!(
+                "failed to create session dir: {e} — recording disabled"
+            ));
             return;
         }
     };
@@ -310,7 +312,9 @@ fn config_uri_is_local() -> bool {
 }
 
 fn env_set_nonempty(name: &str) -> bool {
-    env::var(name).map(|v| !v.trim().is_empty()).unwrap_or(false)
+    env::var(name)
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
 }
 
 // -- atexit -------------------------------------------------------------------

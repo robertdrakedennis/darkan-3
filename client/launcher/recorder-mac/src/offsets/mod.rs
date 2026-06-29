@@ -62,9 +62,104 @@ mod gen {
 // from `#[cfg(test)]` code (e.g. `isaac`), so allow unused re-exports.
 #[allow(unused_imports)]
 pub use gen::{
-    client, client_oracle, client_stream, isaac, login_state_machine, packet, queue_node,
-    server_connection,
+    client, client_stream, isaac, login_state_machine, packet, queue_node, server_connection,
 };
+
+// ---------------------------------------------------------------------------
+// Client-state oracle fields.
+//
+// The generated `gen::client_oracle` owns the currently migrated varp/player/stat
+// fields. The VARC record-tree anchors are already present in
+// `re-resources/updater/anchor_registry_mac.json`, but the migrator artifact does
+// not yet emit them, so expose them here under the same public module until the
+// generated `offsets_<rev>.rs` catches up.
+pub mod client_oracle {
+    pub use super::gen::client_oracle::*;
+
+    /// `Client + 0x196D8` is a pointer to the client-var domain (`vt-varc`).
+    pub const VARC_DOMAIN: usize = 0x196D8;
+    pub const VARC_RECORD_TREE_HEADER: usize = 0x1E120;
+    pub const VARC_RECORD_TREE_ROOT: usize = 0x1E130;
+    pub const VARC_RECORD_TREE_COUNT: usize = 0x1E140;
+    pub const VARC_ACTIVE_TREE_HEADER: usize = 0x20;
+    pub const VARC_ACTIVE_TREE_ROOT: usize = 0x30;
+    pub const VARC_ACTIVE_TREE_COUNT: usize = 0x40;
+    pub const VARC_NODE_LEFT: usize = 0x00;
+    pub const VARC_NODE_RIGHT: usize = 0x08;
+    pub const VARC_NODE_PARENT: usize = 0x10;
+    pub const VARC_NODE_COLOR: usize = 0x18;
+    pub const VARC_NODE_RECORD_KIND: usize = 0x20;
+    pub const VARC_NODE_VAR_ID: usize = 0x24;
+    pub const VARC_NODE_RECORD_PAYLOAD: usize = 0x28;
+    pub const VARC_ACTIVE_NODE_RECORD: usize = 0x20;
+    pub const VARC_RECORD_KIND: usize = 0x00;
+    pub const VARC_RECORD_VAR_ID: usize = 0x04;
+    pub const VARC_RECORD_VALUE: usize = 0x20;
+    pub const VARC_RECORD_VALUE_KIND: usize = 0x38;
+    pub const VARC_RECORD_STRING_INLINE_TAG: usize = 0x37;
+    pub const VARC_RECORD_STRING_LENGTH: usize = 0x28;
+    pub const VARC_RECORD_STRING_CAP_TAG: usize = 0x30;
+    pub const VARC_NODE_VALUE: usize = 0x48;
+    pub const VARC_NODE_VALUE_KIND: usize = 0x60;
+    pub const VARC_STRING_INLINE_LIMIT: usize = 0x18;
+    pub const VARC_STRING_INLINE_TAG: usize = 0x5F;
+    pub const VARC_STRING_LENGTH: usize = 0x50;
+    pub const VARC_STRING_CAP_TAG: usize = 0x58;
+
+    /// `Client + 0x197D8` is a pointer to the persistent item-container store.
+    pub const ITEM_CONTAINER_STORE: usize = 0x197D8;
+    pub const ITEM_CONTAINER_ENTRY_BEGIN: usize = 0x08;
+    pub const ITEM_CONTAINER_ENTRY_END: usize = 0x10;
+    pub const ITEM_CONTAINER_ENTRY_CAP: usize = 0x18;
+    pub const ITEM_CONTAINER_ENTRY_STRIDE: usize = 0x48;
+    pub const ITEM_CONTAINER_ENTRY_KEY: usize = 0x00;
+    pub const ITEM_CONTAINER_ENTRY_PAYLOAD: usize = 0x08;
+    pub const ITEM_CONTAINER_INVENTORY_ID: usize = 0x08;
+    pub const ITEM_CONTAINER_SLOT_BEGIN: usize = 0x10;
+    pub const ITEM_CONTAINER_SLOT_END: usize = 0x18;
+    pub const ITEM_CONTAINER_SLOT_CAP: usize = 0x20;
+    pub const ITEM_CONTAINER_SLOT_STRIDE: usize = 0x08;
+    pub const ITEM_CONTAINER_SLOT_ITEM_ID: usize = 0x00;
+    pub const ITEM_CONTAINER_SLOT_QUANTITY: usize = 0x04;
+    pub const ITEM_CONTAINER_DIRTY_MANAGER: usize = 0x197A8;
+
+    /// Scene-entity oracle STAGE 1 (players/NPCs; positions only).
+    pub const NPC_MANAGER: usize = 0x19740;
+    pub const PM_PLAYER_LIST_CAPACITY: usize = 0x800;
+    pub const PM_RENDER_LIST_BEGIN: usize = 0x4038;
+    pub const PM_RENDER_LIST_END: usize = 0x4040;
+    pub const PM_RENDER_LIST_CAP: usize = 0x4048;
+    pub const PM_PENDING_LIST_BEGIN: usize = 0x6060;
+    pub const PM_PENDING_LIST_END: usize = 0x6068;
+    pub const PM_PENDING_LIST_CAP: usize = 0x6070;
+    pub const PM_EXTINFO_LIST_BEGIN: usize = 0xA0D0;
+    pub const PM_EXTINFO_LIST_END: usize = 0xA0D8;
+    pub const PM_EXTINFO_LIST_CAP: usize = 0xA0E0;
+    pub const NPC_BUCKETS: usize = 0x10;
+    pub const NPC_BUCKET_COUNT: usize = 0x18;
+    pub const NPC_MAP_COUNT: usize = 0x20;
+    pub const NPC_ACTIVE_INDICES: usize = 0xA0A0;
+    pub const NPC_ACTIVE_COUNT: usize = 0xB0A0;
+    pub const NPC_COORD_BITS: usize = 0xC0E8;
+    pub const NPC_EXTINFO_LIST_BEGIN: usize = 0xC0F0;
+    pub const NPC_EXTINFO_LIST_END: usize = 0xC0F8;
+    pub const NPC_EXTINFO_LIST_CAP: usize = 0xC100;
+    pub const NPC_NODE_KEY: usize = 0x00;
+    pub const NPC_NODE_ENTITY: usize = 0x10;
+    pub const NPC_NODE_NEXT: usize = 0x18;
+    pub const NPC_ENTITY_TYPE_ID: usize = 0x1060;
+
+    /// Local-avatar appearance oracle STAGE 2 (committed appearance identity).
+    pub const AVATAR_APPEARANCE_PENDING: usize = 0x1298;
+    pub const AVATAR_APPEARANCE_APPLIED: usize = 0x12A0;
+    pub const AVATAR_APPEARANCE_NEXT: usize = 0x12A8;
+    pub const APPEARANCE_EQUIP_CONTEXT: usize = 0x98;
+    pub const EQUIP_CTX_SLOT_COUNT: usize = 0x30;
+    pub const EQUIP_CTX_SLOT_PAIRS: usize = 0x38;
+    pub const EQUIP_CTX_SLOT_STRIDE: usize = 0x08;
+    pub const EQUIP_CTX_SLOT_KIT_ID: usize = 0x00;
+    pub const EQUIP_CTX_SLOT_ITEM_ID: usize = 0x04;
+}
 
 // ---------------------------------------------------------------------------
 // ConnectionManager field offsets.
@@ -534,6 +629,76 @@ mod tests {
         assert_eq!(o::PVD_VALUES_BUCKET_COUNT, 0x30);
         assert_eq!(o::PVD_NODE_VALUE, 0x08);
         assert_eq!(o::PVD_NODE_NEXT, 0x28);
+        // VARC record tree: Client+0x196D8 is a pointer, not embedded; values live
+        // in InterfaceManager record-tree nodes keyed by (recordKind,varId).
+        assert_eq!(o::VARC_DOMAIN, 0x196D8);
+        assert_eq!(o::VARC_RECORD_TREE_HEADER, 0x1E120);
+        assert_eq!(o::VARC_RECORD_TREE_ROOT, 0x1E130);
+        assert_eq!(o::VARC_RECORD_TREE_COUNT, 0x1E140);
+        assert_eq!(o::VARC_NODE_LEFT, 0x00);
+        assert_eq!(o::VARC_NODE_RIGHT, 0x08);
+        assert_eq!(o::VARC_NODE_PARENT, 0x10);
+        assert_eq!(o::VARC_NODE_COLOR, 0x18);
+        assert_eq!(o::VARC_NODE_RECORD_KIND, 0x20);
+        assert_eq!(o::VARC_NODE_VAR_ID, 0x24);
+        assert_eq!(o::VARC_NODE_VALUE, 0x48);
+        assert_eq!(o::VARC_NODE_VALUE_KIND, 0x60);
+        assert_eq!(o::VARC_STRING_INLINE_LIMIT, 0x18);
+        assert_eq!(o::VARC_STRING_INLINE_TAG, 0x5F);
+        assert_eq!(o::VARC_STRING_LENGTH, 0x50);
+        assert_eq!(o::VARC_STRING_CAP_TAG, 0x58);
+        // Item-container store: Client+0x197D8 is a pointer to a persistent
+        // sorted vector keyed by inventoryId*2+(flags&1), with inline u64 slots.
+        assert_eq!(o::ITEM_CONTAINER_STORE, 0x197D8);
+        assert_eq!(o::ITEM_CONTAINER_ENTRY_BEGIN, 0x08);
+        assert_eq!(o::ITEM_CONTAINER_ENTRY_END, 0x10);
+        assert_eq!(o::ITEM_CONTAINER_ENTRY_CAP, 0x18);
+        assert_eq!(o::ITEM_CONTAINER_ENTRY_STRIDE, 0x48);
+        assert_eq!(o::ITEM_CONTAINER_ENTRY_KEY, 0x00);
+        assert_eq!(o::ITEM_CONTAINER_ENTRY_PAYLOAD, 0x08);
+        assert_eq!(o::ITEM_CONTAINER_INVENTORY_ID, 0x08);
+        assert_eq!(o::ITEM_CONTAINER_SLOT_BEGIN, 0x10);
+        assert_eq!(o::ITEM_CONTAINER_SLOT_END, 0x18);
+        assert_eq!(o::ITEM_CONTAINER_SLOT_CAP, 0x20);
+        assert_eq!(o::ITEM_CONTAINER_SLOT_STRIDE, 0x08);
+        assert_eq!(o::ITEM_CONTAINER_SLOT_ITEM_ID, 0x00);
+        assert_eq!(o::ITEM_CONTAINER_SLOT_QUANTITY, 0x04);
+        assert_eq!(o::ITEM_CONTAINER_DIRTY_MANAGER, 0x197A8);
+        // Scene entity oracle STAGE 1: all player/NPC positions.
+        assert_eq!(o::NPC_MANAGER, 0x19740);
+        assert_eq!(o::PM_PLAYER_LIST_CAPACITY, 0x800);
+        assert_eq!(o::PM_RENDER_LIST_BEGIN, 0x4038);
+        assert_eq!(o::PM_RENDER_LIST_END, 0x4040);
+        assert_eq!(o::PM_RENDER_LIST_CAP, 0x4048);
+        assert_eq!(o::PM_PENDING_LIST_BEGIN, 0x6060);
+        assert_eq!(o::PM_PENDING_LIST_END, 0x6068);
+        assert_eq!(o::PM_PENDING_LIST_CAP, 0x6070);
+        assert_eq!(o::PM_EXTINFO_LIST_BEGIN, 0xA0D0);
+        assert_eq!(o::PM_EXTINFO_LIST_END, 0xA0D8);
+        assert_eq!(o::PM_EXTINFO_LIST_CAP, 0xA0E0);
+        assert_eq!(o::NPC_BUCKETS, 0x10);
+        assert_eq!(o::NPC_BUCKET_COUNT, 0x18);
+        assert_eq!(o::NPC_MAP_COUNT, 0x20);
+        assert_eq!(o::NPC_ACTIVE_INDICES, 0xA0A0);
+        assert_eq!(o::NPC_ACTIVE_COUNT, 0xB0A0);
+        assert_eq!(o::NPC_COORD_BITS, 0xC0E8);
+        assert_eq!(o::NPC_EXTINFO_LIST_BEGIN, 0xC0F0);
+        assert_eq!(o::NPC_EXTINFO_LIST_END, 0xC0F8);
+        assert_eq!(o::NPC_EXTINFO_LIST_CAP, 0xC100);
+        assert_eq!(o::NPC_NODE_KEY, 0x00);
+        assert_eq!(o::NPC_NODE_ENTITY, 0x10);
+        assert_eq!(o::NPC_NODE_NEXT, 0x18);
+        assert_eq!(o::NPC_ENTITY_TYPE_ID, 0x1060);
+        // Local-avatar appearance oracle STAGE 2: committed kit/item slot pairs.
+        assert_eq!(o::AVATAR_APPEARANCE_PENDING, 0x1298);
+        assert_eq!(o::AVATAR_APPEARANCE_APPLIED, 0x12A0);
+        assert_eq!(o::AVATAR_APPEARANCE_NEXT, 0x12A8);
+        assert_eq!(o::APPEARANCE_EQUIP_CONTEXT, 0x98);
+        assert_eq!(o::EQUIP_CTX_SLOT_COUNT, 0x30);
+        assert_eq!(o::EQUIP_CTX_SLOT_PAIRS, 0x38);
+        assert_eq!(o::EQUIP_CTX_SLOT_STRIDE, 0x08);
+        assert_eq!(o::EQUIP_CTX_SLOT_KIT_ID, 0x00);
+        assert_eq!(o::EQUIP_CTX_SLOT_ITEM_ID, 0x04);
         // Tile chain inner offsets (MATCH Linux).
         assert_eq!(o::LIP_SERVER_INDEX, 0x48);
         assert_eq!(o::PM_PLAYER_LIST, 0x10);
@@ -640,7 +805,10 @@ mod tests {
         // The PRIMARY coherent s2c hook is the inline dispatch site at file
         // 0x6d8ea (RE §3a) — distinct from the ReadPacket entry (0x6c920 backstop).
         assert_eq!(SIG_S2C_DISPATCH.expected_file, 0x6d8ea);
-        assert_ne!(SIG_S2C_DISPATCH.expected_file, SIG_READ_PACKET.expected_file);
+        assert_ne!(
+            SIG_S2C_DISPATCH.expected_file,
+            SIG_READ_PACKET.expected_file
+        );
         // Sanity: the inline pattern parses (no malformed tokens → no all-wildcard).
         // The first three bytes are MOV RAX,[R15+0x30] = 49 8B 47.
         let toks: Vec<&str> = SIG_S2C_DISPATCH.text.split_whitespace().collect();

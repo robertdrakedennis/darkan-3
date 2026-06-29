@@ -90,7 +90,10 @@ fn detour_installs_and_trampoline_runs_original() {
     assert_eq!(SIDE.load(Ordering::SeqCst), 1);
 
     let d = unsafe {
-        detour::install(target_add as *const () as usize, detour_add as *const () as usize)
+        detour::install(
+            target_add as *const () as usize,
+            detour_add as *const () as usize,
+        )
     }
     .expect("install detour");
     TRAMP.store(d.trampoline() as usize as u64, Ordering::SeqCst);
@@ -200,7 +203,10 @@ fn inline_observer_taps_registers_and_preserves_state() {
 
     // (1) The original computation is byte-identical — proving every GPR + FLAGS
     //     the observer touched was restored verbatim before the body resumed.
-    assert_eq!(got, expected, "inline observer corrupted the original result");
+    assert_eq!(
+        got, expected,
+        "inline observer corrupted the original result"
+    );
 
     // (2) The observer fired exactly once and saw a non-null frame.
     assert_eq!(
@@ -208,11 +214,22 @@ fn inline_observer_taps_registers_and_preserves_state() {
         hits_before + 1,
         "observer did not fire exactly once"
     );
-    assert!(!OBS_SAW_NULL.load(Ordering::SeqCst), "observer got a null frame");
+    assert!(
+        !OBS_SAW_NULL.load(Ordering::SeqCst),
+        "observer got a null frame"
+    );
 
     // (3) The observer read the live argument registers (RDI=a, RSI=b at entry).
-    assert_eq!(OBS_RDI.load(Ordering::SeqCst), a, "observer misread RDI (arg0)");
-    assert_eq!(OBS_RSI.load(Ordering::SeqCst), b, "observer misread RSI (arg1)");
+    assert_eq!(
+        OBS_RDI.load(Ordering::SeqCst),
+        a,
+        "observer misread RDI (arg0)"
+    );
+    assert_eq!(
+        OBS_RSI.load(Ordering::SeqCst),
+        b,
+        "observer misread RSI (arg1)"
+    );
 
     drop(d);
 }

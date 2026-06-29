@@ -144,6 +144,40 @@ class Rev948ClientCodecTest {
     }
 
     @Test
+    fun `move gameclick op74 decodes captured absolute destination tiles`() {
+        val entry = codec.clientProtsByOpcode[74] ?: error("missing op74")
+
+        assertEquals(5, codec.clientProtSize(74))
+        assertEquals(MoveGameClick::class, entry.protClass)
+        assertEquals("MoveGameClick", codec.clientProtName(74))
+
+        // The 3 client-confirmed walk-capture bodies (decoded-c2s.md op74). Each body is the 5-byte
+        // wire form [modifier][destZ hi][destZ lo +0x80][destX lo][destX hi]; the decode must recover
+        // the documented absolute (destX, destZ).
+        val cases = listOf(
+            "00 0c 13 9b 0c" to MoveGameClick(destX = 3227, destZ = 3219, modifier = 0),
+            "00 0c 1a b2 0c" to MoveGameClick(destX = 3250, destZ = 3226, modifier = 0),
+            "00 0c 1a ab 0c" to MoveGameClick(destX = 3243, destZ = 3226, modifier = 0),
+        )
+        for ((hex, expected) in cases) {
+            val payload = Buffer().apply { write(hexBytes(hex)) }
+            val decoded = runBlocking { entry.decoder?.invoke(payload, 74) }
+            assertEquals(expected, decoded, "op74 body [$hex]")
+        }
+    }
+
+    @Test
+    fun `move gameclick op74 extracts the modifier bit and ignores the rest`() {
+        val entry = codec.clientProtsByOpcode[74] ?: error("missing op74")
+
+        // modifier byte = 0x05 (bit0 set, plus a high bit the server must mask off → modifier == 1).
+        // destZ low byte is the +0x80 transform: 0x80 - 128 == 0 → destZ == (0x0c<<8) == 3072.
+        val payload = Buffer().apply { write(hexBytes("05 0c 80 9b 0c")) }
+        val decoded = runBlocking { entry.decoder?.invoke(payload, 74) }
+        assertEquals(MoveGameClick(destX = 3227, destZ = 3072, modifier = 1), decoded)
+    }
+
+    @Test
     fun `client profile block op12 preserves captured byte vector`() {
         val entry = codec.clientProtsByOpcode[12] ?: error("missing op12")
         val payload = Buffer().apply {

@@ -8,6 +8,7 @@ import org.darkan.core.net.prot.FriendListDel
 import org.darkan.core.net.prot.IgnoreListAdd
 import org.darkan.core.net.prot.MapBuildComplete
 import org.darkan.core.net.prot.MessagePrivateSend
+import org.darkan.core.net.prot.MoveGameClick
 import org.darkan.core.net.prot.Ping
 import org.darkan.core.net.prot.SceneGraphReport
 import org.darkan.core.net.prot.handler.PacketHandlers
@@ -38,6 +39,7 @@ fun registerWorldPacketHandlers() {
     PacketHandlers.register(IgnoreListAdd::class, IgnoreListAddHandler())
     PacketHandlers.register(ClanChannelKickUser::class, ClanChannelKickUserHandler())
     PacketHandlers.register(MessagePrivateSend::class, MessagePrivateSendHandler())
+    PacketHandlers.register(MoveGameClick::class, MoveGameClickHandler())
 
-    Logger.log("WorldPacketHandlers", "World packet handlers registered (9 handlers)")
+    Logger.log("WorldPacketHandlers", "World packet handlers registered (10 handlers)")
 }

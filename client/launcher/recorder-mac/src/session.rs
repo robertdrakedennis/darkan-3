@@ -156,7 +156,10 @@ fn encode_local_player(lp: &crate::oracle::LocalPlayer) -> serde_json::Value {
         o.insert("scene_bucket_graph_node".into(), ptr(p));
     }
     if let Some((x, y, plane)) = lp.render_tile {
-        o.insert("render_tile".into(), json!({ "x": x, "y": y, "plane": plane }));
+        o.insert(
+            "render_tile".into(),
+            json!({ "x": x, "y": y, "plane": plane }),
+        );
     }
     if let Some((x, y)) = lp.render_scene_fine {
         o.insert("render_scene_fine".into(), json!({ "x": x, "y": y }));
@@ -379,15 +382,7 @@ impl Session {
 
     /// Emit one framed-plane line. `dir` = "s2c"/"c2s".
     #[allow(clippy::too_many_arguments)]
-    pub fn framed(
-        &self,
-        dir: &str,
-        conn: &str,
-        state: i32,
-        op: i32,
-        body: &[u8],
-        xtea_body: bool,
-    ) {
+    pub fn framed(&self, dir: &str, conn: &str, state: i32, op: i32, body: &[u8], xtea_body: bool) {
         let (body_key, body_val) = self.encode_body(body);
         let mut obj = json!({
             "ts": wall_iso_now(),
@@ -547,11 +542,12 @@ impl Session {
     /// against ("client is king"). Every field is emitted ONLY when the client had
     /// it readable: `main_state` is omitted pre-login; `varps` is an object
     /// `{ "<id>": value }` emitted whenever the varp table was reachable (it can
-    /// be read in the lobby); `player`/`skills`/`run_energy`/`run_weight` appear
-    /// once in-world. `tick` is the recorder's monotonically-increasing snapshot
-    /// sequence number (the client exposes no stable tick counter at a documented
-    /// offset; the sequence lets the verifier order snapshots and identify the
-    /// final/at-exit one as the highest tick).
+    /// be read in the lobby); `varcs`/`varcstrings` are arrays emitted whenever
+    /// the varc record tree was reachable; `player`/`skills`/`run_energy`/
+    /// `run_weight` appear once in-world. `tick` is the recorder's
+    /// monotonically-increasing snapshot sequence number (the client exposes no
+    /// stable tick counter at a documented offset; the sequence lets the verifier
+    /// order snapshots and identify the final/at-exit one as the highest tick).
     pub fn state_snapshot(&self, tick: u64, snap: &crate::oracle::Snapshot) {
         let mut obj = json!({
             "ts": wall_iso_now(),
@@ -574,8 +570,91 @@ impl Session {
             }
             obj["varps"] = serde_json::Value::Object(varps);
         }
+        // varcs/varcstrings: emit arrays whenever the VARC record tree was
+        // reachable, even if empty. The tree key is `(recordKind,varId)`, so
+        // every row carries both `kind` and `id`; `value_kind` mirrors the
+        // client's discriminator (0=int32, 1=int64, 2=string).
+        if snap.varcs_readable {
+            let varcs: Vec<_> = snap
+                .varcs
+                .iter()
+                .map(|v| {
+                    json!({
+                        "kind": v.kind,
+                        "id": v.id,
+                        "value_kind": v.value_kind,
+                        "val": v.val,
+                    })
+                })
+                .collect();
+            let varcstrings: Vec<_> = snap
+                .varcstrings
+                .iter()
+                .map(|v| {
+                    json!({
+                        "kind": v.kind,
+                        "id": v.id,
+                        "value_kind": v.value_kind,
+                        "str": v.str_val,
+                    })
+                })
+                .collect();
+            obj["varcs"] = json!(varcs);
+            obj["varcstrings"] = json!(varcstrings);
+        }
+        // inventories: emit whenever the item-container store vector was
+        // reachable, even if no occupied slots exist. Every entry carries the
+        // raw key plus derived inventory id/domain bit; each slot is occupied
+        // only (`item != -1`) with the inline slot-word quantity.
+        if snap.inventories_readable {
+            let inventories: Vec<_> = snap
+                .inventories
+                .iter()
+                .map(|inv| {
+                    let slots: Vec<_> = inv
+                        .slots
+                        .iter()
+                        .map(|s| json!({ "slot": s.slot, "item": s.item, "count": s.count }))
+                        .collect();
+                    json!({
+                        "key": inv.key,
+                        "invId": inv.inv_id,
+                        "domainBit": inv.domain_bit,
+                        "slots": slots,
+                    })
+                })
+                .collect();
+            obj["inventories"] = json!(inventories);
+        }
         if let Some((x, y, plane)) = snap.player {
             obj["player"] = json!({ "x": x, "y": y, "plane": plane });
+        }
+        // scene entities: emit arrays whenever each manager/list was reachable,
+        // even if empty. The local-player `player` singleton above remains for
+        // backward compatibility; `players` is the full PlayerManager slot walk.
+        if snap.players_readable {
+            let players: Vec<_> = snap
+                .players
+                .iter()
+                .map(|p| json!({ "idx": p.idx, "x": p.x, "y": p.y, "plane": p.plane }))
+                .collect();
+            obj["players"] = json!(players);
+        }
+        if snap.npcs_readable {
+            let npcs: Vec<_> = snap
+                .npcs
+                .iter()
+                .map(|n| {
+                    json!({
+                        "idx": n.idx,
+                        "type": n.type_id,
+                        "x": n.x,
+                        "y": n.y,
+                        "plane": n.plane,
+                    })
+                })
+                .collect();
+            obj["npcs"] = json!(npcs);
         }
         if !snap.skills.is_empty() {
             let skills: Vec<_> = snap
@@ -590,6 +669,14 @@ impl Session {
         }
         if let Some(w) = snap.run_weight {
             obj["run_weight"] = json!(w);
+        }
+        if snap.appearance_readable {
+            let appearance: Vec<_> = snap
+                .appearance
+                .iter()
+                .map(|slot| json!({ "kitId": slot.kit_id, "itemId": slot.item_id }))
+                .collect();
+            obj["appearance"] = json!(appearance);
         }
         // local_player: the AVATAR render state. Emit the object whenever the
         // client base is known (main_state present) so a pre-avatar "lip null"
@@ -763,7 +850,10 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oracle::{SkillEntry, Snapshot};
+    use crate::oracle::{
+        AppearanceSlotEntry, InventoryEntry, InventorySlotEntry, SceneNpcEntry, ScenePlayerEntry,
+        SkillEntry, Snapshot, VarcNumberEntry, VarcStringEntry,
+    };
 
     fn temp_session() -> (Session, PathBuf) {
         let mut base = std::env::temp_dir();
@@ -772,8 +862,15 @@ mod tests {
             std::process::id(),
             mono_now_ns()
         ));
-        let s = Session::create(&base, Proc::Rs2client, "local", "RS2Engine-948-NXT-5", "local", None)
-            .expect("create session");
+        let s = Session::create(
+            &base,
+            Proc::Rs2client,
+            "local",
+            "RS2Engine-948-NXT-5",
+            "local",
+            None,
+        )
+        .expect("create session");
         let dir = s.dir().to_path_buf();
         (s, dir)
     }
@@ -795,10 +892,73 @@ mod tests {
             main_state: Some(30),
             varps: vec![(173, 1), (1021, 7)],
             varps_readable: true,
+            varcs: vec![
+                VarcNumberEntry {
+                    kind: 1,
+                    id: 28,
+                    value_kind: 0,
+                    val: 123,
+                },
+                VarcNumberEntry {
+                    kind: 1,
+                    id: 61,
+                    value_kind: 1,
+                    val: 9_876_543_210,
+                },
+            ],
+            varcstrings: vec![VarcStringEntry {
+                kind: 2,
+                id: 147,
+                value_kind: 2,
+                str_val: "hello varc".to_string(),
+            }],
+            varcs_readable: true,
+            inventories: vec![InventoryEntry {
+                key: 186,
+                inv_id: 93,
+                domain_bit: 0,
+                slots: vec![InventorySlotEntry {
+                    slot: 0,
+                    item: 315,
+                    count: 1,
+                }],
+            }],
+            inventories_readable: true,
             player: Some((3200, 3200, 0)),
-            skills: vec![SkillEntry { id: 0, level: 10, base: 10, xp: 1154 }],
+            players: vec![ScenePlayerEntry {
+                idx: 1302,
+                x: 3222,
+                y: 3222,
+                plane: 0,
+            }],
+            players_readable: true,
+            npcs: vec![SceneNpcEntry {
+                idx: 11684,
+                type_id: 11,
+                x: 3219,
+                y: 3218,
+                plane: 0,
+            }],
+            npcs_readable: true,
+            skills: vec![SkillEntry {
+                id: 0,
+                level: 10,
+                base: 10,
+                xp: 1154,
+            }],
             run_energy: Some(200),
             run_weight: Some(-5),
+            appearance: vec![
+                AppearanceSlotEntry {
+                    kit_id: 8,
+                    item_id: -1,
+                },
+                AppearanceSlotEntry {
+                    kit_id: -1,
+                    item_id: 1205,
+                },
+            ],
+            appearance_readable: true,
             ..Default::default()
         };
         s.state_snapshot(42, &snap);
@@ -813,10 +973,42 @@ mod tests {
         // varps is an OBJECT keyed by stringified varId.
         assert_eq!(o["varps"]["173"], 1);
         assert_eq!(o["varps"]["1021"], 7);
+        // varcs/varcstrings are arrays keyed by (kind,id), not varId alone.
+        assert_eq!(o["varcs"][0]["kind"], 1);
+        assert_eq!(o["varcs"][0]["id"], 28);
+        assert_eq!(o["varcs"][0]["value_kind"], 0);
+        assert_eq!(o["varcs"][0]["val"], 123);
+        assert_eq!(o["varcs"][1]["kind"], 1);
+        assert_eq!(o["varcs"][1]["id"], 61);
+        assert_eq!(o["varcs"][1]["value_kind"], 1);
+        assert_eq!(o["varcs"][1]["val"], 9_876_543_210i64);
+        assert_eq!(o["varcstrings"][0]["kind"], 2);
+        assert_eq!(o["varcstrings"][0]["id"], 147);
+        assert_eq!(o["varcstrings"][0]["value_kind"], 2);
+        assert_eq!(o["varcstrings"][0]["str"], "hello varc");
+        // inventories are arrays keyed by raw key plus derived invId/domainBit;
+        // slots contain occupied slots only.
+        assert_eq!(o["inventories"][0]["key"], 186);
+        assert_eq!(o["inventories"][0]["invId"], 93);
+        assert_eq!(o["inventories"][0]["domainBit"], 0);
+        assert_eq!(o["inventories"][0]["slots"][0]["slot"], 0);
+        assert_eq!(o["inventories"][0]["slots"][0]["item"], 315);
+        assert_eq!(o["inventories"][0]["slots"][0]["count"], 1);
         // player tile object.
         assert_eq!(o["player"]["x"], 3200);
         assert_eq!(o["player"]["y"], 3200);
         assert_eq!(o["player"]["plane"], 0);
+        // scene entity arrays: player rows are {idx,x,y,plane}; NPC rows include
+        // raw NPC type id for gameval naming.
+        assert_eq!(o["players"][0]["idx"], 1302);
+        assert_eq!(o["players"][0]["x"], 3222);
+        assert_eq!(o["players"][0]["y"], 3222);
+        assert_eq!(o["players"][0]["plane"], 0);
+        assert_eq!(o["npcs"][0]["idx"], 11684);
+        assert_eq!(o["npcs"][0]["type"], 11);
+        assert_eq!(o["npcs"][0]["x"], 3219);
+        assert_eq!(o["npcs"][0]["y"], 3218);
+        assert_eq!(o["npcs"][0]["plane"], 0);
         // skills array of {id,level,base,xp}.
         assert_eq!(o["skills"][0]["id"], 0);
         assert_eq!(o["skills"][0]["level"], 10);
@@ -824,6 +1016,10 @@ mod tests {
         assert_eq!(o["skills"][0]["xp"], 1154);
         assert_eq!(o["run_energy"], 200);
         assert_eq!(o["run_weight"], -5);
+        assert_eq!(o["appearance"][0]["kitId"], 8);
+        assert_eq!(o["appearance"][0]["itemId"], -1);
+        assert_eq!(o["appearance"][1]["kitId"], -1);
+        assert_eq!(o["appearance"][1]["itemId"], 1205);
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -838,6 +1034,15 @@ mod tests {
             main_state: Some(20),
             varps: vec![],
             varps_readable: true,
+            varcs: vec![],
+            varcstrings: vec![],
+            varcs_readable: true,
+            inventories: vec![],
+            inventories_readable: true,
+            players: vec![],
+            players_readable: true,
+            npcs: vec![],
+            npcs_readable: true,
             ..Default::default()
         };
         s.state_snapshot(0, &snap);
@@ -847,6 +1052,16 @@ mod tests {
         // varps present but empty (table reachable, nothing set yet).
         assert!(o["varps"].is_object());
         assert_eq!(o["varps"].as_object().unwrap().len(), 0);
+        assert!(o["varcs"].is_array());
+        assert_eq!(o["varcs"].as_array().unwrap().len(), 0);
+        assert!(o["varcstrings"].is_array());
+        assert_eq!(o["varcstrings"].as_array().unwrap().len(), 0);
+        assert!(o["inventories"].is_array());
+        assert_eq!(o["inventories"].as_array().unwrap().len(), 0);
+        assert!(o["players"].is_array());
+        assert_eq!(o["players"].as_array().unwrap().len(), 0);
+        assert!(o["npcs"].is_array());
+        assert_eq!(o["npcs"].as_array().unwrap().len(), 0);
         // in-world fields absent entirely.
         assert!(o.get("player").is_none());
         assert!(o.get("skills").is_none());
@@ -859,6 +1074,11 @@ mod tests {
         let lines = read_jsonl(&dir, "state-snapshots.jsonl");
         let o2 = &lines[1];
         assert!(o2.get("varps").is_none());
+        assert!(o2.get("varcs").is_none());
+        assert!(o2.get("varcstrings").is_none());
+        assert!(o2.get("inventories").is_none());
+        assert!(o2.get("players").is_none());
+        assert!(o2.get("npcs").is_none());
         assert!(o2.get("main_state").is_none());
         assert_eq!(o2["kind"], "state_snapshot");
         assert_eq!(o2["tick"], 1);

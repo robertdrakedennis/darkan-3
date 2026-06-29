@@ -122,6 +122,20 @@ data class IfButton(val buttonId: Int, val interfaceHash: Int, val slotId: Int, 
 
 data class MacOsLobbyHandoff(val button: IfButton?) : ClientProt
 
+/**
+ * op74 CLICK-TO-WALK / move-to-tile (948: op 74, fixed 5B). The client sends a SINGLE absolute
+ * destination tile when the player left-clicks the ground; there is no waypoint list or step count —
+ * the server pathfinds from the player's current tile to ([destX], [destZ]) and drains the resulting
+ * steps one-per-tick.
+ *
+ * Coordinates are ABSOLUTE world tiles (the client reconstructs the centre-of-tile fine coord
+ * `tile*512+256` for its scene marker). [modifier] is the run / ctrl-click gate bit (`body[0] & 1`);
+ * it is irrelevant to plain walking and is decoded only for completeness. Wire layout + transforms:
+ * `destX = (body[4]<<8)|body[3]`, `destZ = (body[1]<<8)|((body[2]-128)&0xff)`, `modifier = body[0]&1`.
+ * See `re-resources/docs/kb/glossary/packets-c2s.md` (op74) + `ghidra-packet-bindings.md`.
+ */
+data class MoveGameClick(val destX: Int, val destZ: Int, val modifier: Int) : ClientProt
+
 /** RESUME_P_NAMEDIALOG (opcode 84, varByte) — typed display name from name dialog. */
 data class ResumePNameDialog(val name: String) : ClientProt
 

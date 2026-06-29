@@ -15,11 +15,14 @@ import java.util.ArrayDeque
  * client reads back: the op22 high-res WALK form emits this index verbatim as `gBit(3)` (the inverse
  * of the decode's `decodeKnownPlayerUpdate` mvt=1 branch, `ClientStateCrossCheck.kt:1260-1266`).
  *
- * ## Increment scope (1.2b increment 2a — LOCAL-PLAYER WALK)
+ * ## Scope
  *
- * This increment only ever enqueues a SCRIPTED debug path (see [DARKAN_DEBUG_WALK_PATH][org.darkan.core.EnvVars.debugWalkPath]).
- * Client-input-driven enqueue (a C2S move handler feeding real player clicks) and run/teleport are
- * later increments — this queue holds nothing but single walk steps.
+ * Enqueued by STAGE 2.1 click-to-walk: the op74 handler
+ * ([org.darkan.world.server.packet.MoveGameClickHandler]) feeds real player clicks (path generated behind
+ * the [StepProvider] seam — naive straight-line now, a collision routefinder in STAGE 2.2). The original
+ * scripted-walk seeder (`DARKAN_DEBUG_WALK_PATH`) used the same enqueue path and is now retired to a test
+ * fixture. Run (2 steps/tick) and teleport are later increments — this queue holds nothing but single walk
+ * steps.
  */
 class MovementQueue {
 

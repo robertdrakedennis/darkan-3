@@ -205,6 +205,27 @@ internal fun Codec.registerRev948ClientProts() {
         MacOsLobbyHandoff(readByteArray(MAC_OS_LOBBY_HANDOFF_SIZE).findEmbeddedPlayNowClick())
     }
 
+    // MOVE_GAMECLICK (op74, fixed 5) — CLICK-TO-WALK, the single absolute DESTINATION tile from a
+    // left-click on the ground. Shared sender jag::ClientProtSenders::SendTargetedMovementAction_OP74_OP78
+    // @ 0x10007c200, descriptor 0x100f130e0; coordinate proof via jag::ClientState::SetSceneClickFeedbackTarget
+    // @ 0x1000639d0. Body (5 bytes, in wire order): [modifier][destZ hi][destZ lo +0x80][destX lo][destX hi].
+    //   destX = (body[4]<<8)|body[3];  destZ = (body[1]<<8)|((body[2]-128)&0xff);  modifier = body[0]&1
+    // Coordinates are ABSOLUTE world tiles (single destination → the server pathfinds; the client never
+    // sends intermediate steps). The op78 sibling (fixed 18) prepends this same 5B header + 13B entity
+    // metadata and is deferred to a later increment. See packets-c2s.md / ghidra-packet-bindings.md (op74).
+    clientProt<MoveGameClick>(opcode = 74, size = 5) {
+        val modifierByte = readByte().toInt() and 0xFF
+        val destZHi = readByte().toInt() and 0xFF
+        val destZLo = (readByte().toInt() - 128) and 0xFF
+        val destXLo = readByte().toInt() and 0xFF
+        val destXHi = readByte().toInt() and 0xFF
+        MoveGameClick(
+            destX = (destXHi shl 8) or destXLo,
+            destZ = (destZHi shl 8) or destZLo,
+            modifier = modifierByte and 0x1,
+        )
+    }
+
     // MESSAGE_PUBLIC
     clientProt<MessagePublicSend>(
         opcodes = intArrayOf(124),

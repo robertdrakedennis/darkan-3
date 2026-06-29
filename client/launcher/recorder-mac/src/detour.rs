@@ -29,7 +29,9 @@
 //! (Verified against all 6 targets in `tests/prologue_reloc.rs`: every prologue
 //! steals >=14 whole bytes and re-encodes cleanly within +/-2GB.)
 
-use iced_x86::{BlockEncoder, BlockEncoderOptions, Decoder, DecoderOptions, Instruction, InstructionBlock};
+use iced_x86::{
+    BlockEncoder, BlockEncoderOptions, Decoder, DecoderOptions, Instruction, InstructionBlock,
+};
 use std::os::raw::c_void;
 
 const ABS_JMP_LEN: usize = 14; // FF 25 00000000  +  imm64
@@ -295,7 +297,11 @@ pub unsafe fn install(target: usize, detour: usize) -> Result<Detour, DetourErro
         return Err(DetourError::Encode("trampoline overflow".into()));
     }
 
-    std::ptr::copy_nonoverlapping(tramp_bytes.as_ptr(), tramp_addr as *mut u8, tramp_bytes.len());
+    std::ptr::copy_nonoverlapping(
+        tramp_bytes.as_ptr(),
+        tramp_addr as *mut u8,
+        tramp_bytes.len(),
+    );
     if libc::mprotect(raw, tramp_cap, libc::PROT_READ | libc::PROT_EXEC) != 0 {
         libc::munmap(raw, tramp_cap);
         return Err(DetourError::Protect);
@@ -372,7 +378,7 @@ pub type InlineObserver = unsafe extern "C" fn(regs: *const Regs);
 fn emit_save_frame() -> Vec<u8> {
     let mut b = Vec::new();
     b.push(0x9C); // pushfq
-    // push r15..r8  (REX.B + 0x50+reg)
+                  // push r15..r8  (REX.B + 0x50+reg)
     for r in [0x57u8, 0x56, 0x55, 0x54, 0x53, 0x52, 0x51, 0x50] {
         b.push(0x41); // REX.B
         b.push(r);
@@ -447,10 +453,10 @@ pub unsafe fn install_inline(site: usize, observer: InlineObserver) -> Result<De
     // Trampoline budget: save frame + observer call + restore frame (all fixed,
     // small) + relocated stolen prologue (×4 for any branch widening) + the
     // 14-byte tail jump, page-rounded. Generous so we never overflow.
-    let fixed = emit_save_frame().len() + emit_observer_call(observer as usize).len()
+    let fixed = emit_save_frame().len()
+        + emit_observer_call(observer as usize).len()
         + emit_restore_frame().len();
-    let tramp_cap =
-        (fixed + (stolen * 4) + ABS_JMP_LEN + PAGE_SIZE) & !(PAGE_SIZE - 1);
+    let tramp_cap = (fixed + (stolen * 4) + ABS_JMP_LEN + PAGE_SIZE) & !(PAGE_SIZE - 1);
     let (raw, tramp_cap) = match reserve_near(site, tramp_cap) {
         Some(v) => v,
         None => return Err(DetourError::Alloc),
@@ -481,7 +487,11 @@ pub unsafe fn install_inline(site: usize, observer: InlineObserver) -> Result<De
         return Err(DetourError::Encode("inline trampoline overflow".into()));
     }
 
-    std::ptr::copy_nonoverlapping(tramp_bytes.as_ptr(), tramp_addr as *mut u8, tramp_bytes.len());
+    std::ptr::copy_nonoverlapping(
+        tramp_bytes.as_ptr(),
+        tramp_addr as *mut u8,
+        tramp_bytes.len(),
+    );
     if libc::mprotect(raw, tramp_cap, libc::PROT_READ | libc::PROT_EXEC) != 0 {
         libc::munmap(raw, tramp_cap);
         return Err(DetourError::Protect);
