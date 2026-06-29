@@ -19,7 +19,7 @@ import java.util.ArrayDeque
  *
  * Enqueued by STAGE 2.1 click-to-walk: the op74 handler
  * ([org.darkan.world.server.packet.MoveGameClickHandler]) feeds real player clicks (path generated behind
- * the [StepProvider] seam — naive straight-line now, a collision routefinder in STAGE 2.2). The original
+ * the [StepProvider] seam — collision-aware routefinder in STAGE 2.2). The original
  * scripted-walk seeder (`DARKAN_DEBUG_WALK_PATH`) used the same enqueue path and is now retired to a test
  * fixture. Run (2 steps/tick) and teleport are later increments — this queue holds nothing but single walk
  * steps.

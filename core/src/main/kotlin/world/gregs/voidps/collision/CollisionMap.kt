@@ -270,6 +270,34 @@ class CollisionMap {
         }
     }
 
+    operator fun get(x: Int, y: Int, plane: Int): Int = getFlags(x, y, plane)
+
+    operator fun set(x: Int, y: Int, plane: Int, flag: Int) {
+        setFlags(Tile(x, y, plane), flag)
+    }
+
+    fun add(x: Int, y: Int, plane: Int, flag: Int) {
+        addFlag(Tile(x, y, plane), flag)
+    }
+
+    fun remove(x: Int, y: Int, plane: Int, flag: Int) {
+        removeFlag(Tile(x, y, plane), flag)
+    }
+
+    fun allocateIfAbsent(x: Int, y: Int, plane: Int): IntArray {
+        synchronized(lock) {
+            val chunkId = ((x shr 3) shl 11) or (y shr 3) or (plane shl 22)
+            return allFlags[chunkId] ?: IntArray(64).also { allFlags[chunkId] = it }
+        }
+    }
+
+    fun isChunkAllocated(x: Int, y: Int, plane: Int): Boolean {
+        synchronized(lock) {
+            val chunkId = ((x shr 3) shl 11) or (y shr 3) or (plane shl 22)
+            return allFlags[chunkId] != null
+        }
+    }
+
     fun addFlag(tile: Tile, flag: Int) {
         synchronized(lock) {
             val chunkId = tile.chunkId

@@ -6,30 +6,29 @@ import org.darkan.core.net.prot.MoveGameClick
 import org.darkan.core.net.prot.handler.PacketHandler
 import org.darkan.core.net.session.GameSession
 import org.darkan.world.entity.Direction8
-import org.darkan.world.entity.NaiveStraightLineStepProvider
 import org.darkan.world.entity.Player
+import org.darkan.world.entity.RoutefinderStepProvider
 import org.darkan.world.entity.StepProvider
 import org.darkan.world.world.Players
 import world.gregs.voidps.type.Tile
 
 /**
- * op74 CLICK-TO-WALK handler (STAGE 2.1). The client sends a single absolute destination tile when the
+ * op74 CLICK-TO-WALK handler (STAGE 2.2). The client sends a single absolute destination tile when the
  * player clicks the ground; this handler resolves the destination to a step sequence and enqueues it onto
  * the player's [org.darkan.world.entity.MovementQueue], which [org.darkan.world.server.WorldTick] drains
  * one tile/tick and the verified op22 GPI WALK encoder delivers to the client.
  *
  * ## Pluggable path generation (the stage 2.1 → 2.2 seam)
  *
- * The actual start→dest routing is delegated to a [StepProvider]. STAGE 2.1 uses the collision-free
- * [NaiveStraightLineStepProvider] (works in the open spawn courtyard — the pipeline proof). STAGE 2.2 swaps
- * in a collision-aware routefinder by constructing this handler with a different provider; nothing else in
- * the handler, the op74 decoder, or the GPI encoder changes. The provider is the entire swap point.
+ * The actual start→dest routing is delegated to a [StepProvider]. STAGE 2.2 uses the collision-aware
+ * [RoutefinderStepProvider]. Nothing else in the handler, the op74 decoder, or the GPI encoder changes.
+ * The provider is the entire swap point.
  *
  * The modifier bit ([MoveGameClick.modifier]) gates run / ctrl-click on the client and is irrelevant to
  * plain walking, so it is logged but otherwise ignored here.
  */
 class MoveGameClickHandler(
-    private val stepProvider: StepProvider = NaiveStraightLineStepProvider,
+    private val stepProvider: StepProvider = RoutefinderStepProvider(),
 ) : PacketHandler<GameSession, MoveGameClick> {
 
     override suspend fun handle(player: GameSession, packet: MoveGameClick) {

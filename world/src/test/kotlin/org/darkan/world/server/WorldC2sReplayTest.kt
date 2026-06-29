@@ -16,6 +16,7 @@ import org.darkan.core.net.prot.UnhandledClientProt
 import org.darkan.core.net.prot.revision.rev948.register948
 import org.darkan.core.net.session.GameSession
 import org.darkan.world.entity.Direction8
+import org.darkan.world.entity.NaiveStraightLineStepProvider
 import org.darkan.world.entity.Player
 import org.darkan.world.server.packet.MoveGameClickHandler
 import org.darkan.world.world.Players
@@ -172,7 +173,7 @@ class WorldC2sReplayTest {
         )
 
         // (5) FULL CHAIN: drive each decoded op74 through the real handler and assert the player's
-        // MovementQueue holds the expected naive straight-line path to the clicked tile. This proves
+        // MovementQueue holds the injected naive straight-line path to the clicked tile. This proves
         // op74 decode -> MoveGameClickHandler -> MovementQueue end-to-end, offline.
         assertOp74DrivesMovementQueue(moveClicks)
     }
@@ -196,7 +197,7 @@ class WorldC2sReplayTest {
         val allocatedIndex = Players.allocate(player) { idx -> player.index = idx }
         try {
             player.tile = spawn
-            MoveGameClickHandler().handle(session, click)
+            MoveGameClickHandler(stepProvider = NaiveStraightLineStepProvider).handle(session, click)
 
             assertTrue(player.movementQueue.hasPendingStep(), "op74 enqueued a walk path")
             // Drain the queue, applying each 3-bit direction to the player's tile; the final tile MUST be

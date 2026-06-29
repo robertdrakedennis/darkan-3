@@ -11,10 +11,10 @@ import kotlin.math.sign
  *
  * ## Why an interface (the stage 2.1 → 2.2 swap point)
  *
- * STAGE 2.1 ships [NaiveStraightLineStepProvider] — a collision-FREE greedy walk that proves the
- * decode → queue → encode pipeline end-to-end in open areas. STAGE 2.2 swaps in a real collision-aware
- * routefinder by providing a different [StepProvider] to [org.darkan.world.server.packet.MoveGameClickHandler]
- * with NO change to the handler, the decoder, or the encoder — this interface is the entire seam.
+ * STAGE 2.1 shipped [NaiveStraightLineStepProvider] — a collision-free greedy walk that proved the
+ * decode → queue → encode pipeline end-to-end in open areas. STAGE 2.2's production provider is
+ * [RoutefinderStepProvider], which keeps the same handler, decoder, and encoder contract while respecting
+ * cache-derived collision.
  *
  * Implementations MUST:
  *  - return steps that each move exactly one tile (a cardinal or diagonal [Direction8] index),

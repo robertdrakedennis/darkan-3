@@ -8,6 +8,7 @@ import org.darkan.core.net.prot.MoveGameClick
 import org.darkan.core.net.prot.revision.rev948.register948
 import org.darkan.core.net.session.GameSession
 import org.darkan.world.entity.Direction8
+import org.darkan.world.entity.NaiveStraightLineStepProvider
 import org.darkan.world.entity.Player
 import org.darkan.world.world.Players
 import world.gregs.voidps.type.Tile
@@ -64,7 +65,7 @@ class MoveGameClickHandlerTest {
     @Test
     fun `op74 enqueues a straight-line path from the player tile to the clicked destination`() {
         val player = newPlayer(Tile(3227, 3219, 0))
-        val handler = MoveGameClickHandler()
+        val handler = MoveGameClickHandler(stepProvider = NaiveStraightLineStepProvider)
 
         // Click 5 east, 2 north of the spawn (the open-courtyard pipeline-proof shape).
         runBlocking { handler.handle(player.session, MoveGameClick(destX = 3232, destZ = 3221, modifier = 0)) }
@@ -78,7 +79,7 @@ class MoveGameClickHandlerTest {
     @Test
     fun `a new op74 click supersedes the in-progress path`() {
         val player = newPlayer(Tile(3200, 3200, 0))
-        val handler = MoveGameClickHandler()
+        val handler = MoveGameClickHandler(stepProvider = NaiveStraightLineStepProvider)
 
         // First click: a long east walk.
         runBlocking { handler.handle(player.session, MoveGameClick(destX = 3220, destZ = 3200, modifier = 0)) }
@@ -93,7 +94,7 @@ class MoveGameClickHandlerTest {
     @Test
     fun `clicking the player's own tile enqueues nothing`() {
         val player = newPlayer(Tile(3227, 3219, 0))
-        val handler = MoveGameClickHandler()
+        val handler = MoveGameClickHandler(stepProvider = NaiveStraightLineStepProvider)
 
         runBlocking { handler.handle(player.session, MoveGameClick(destX = 3227, destZ = 3219, modifier = 0)) }
 
