@@ -1,0 +1,63 @@
+core/src/test/kotlin/world/gregs/voidps/collision/CacheCollisionFlagMapBuilderTest.kt
+  s_9411ee6d21b0fa::t_1dfb6541797496 1-5,7-25,30,35-53
+  s_9411ee6d21b0fa::t_8806ebe8defcda 6,26-29,31-34
+core/src/main/kotlin/world/gregs/voidps/collision/CollisionFlagMap.kt
+  s_9411ee6d21b0fa::t_f406047b6ecb0a 1-9
+core/src/main/kotlin/world/gregs/voidps/routefinder/RouteCoordinates.kt
+  s_9411ee6d21b0fa::t_f406047b6ecb0a 1-11
+world/src/main/kotlin/org/darkan/world/entity/StepProvider.kt
+  s_9411ee6d21b0fa::t_42f966892b00e4 14-17
+core/src/main/kotlin/world/gregs/voidps/routefinder/RouteFinding.kt
+  s_9411ee6d21b0fa::t_f406047b6ecb0a 1-322
+world/src/main/kotlin/org/darkan/world/entity/RoutefinderStepProvider.kt
+  s_9411ee6d21b0fa::t_4c1f678e590a01 1-53
+world/src/test/kotlin/org/darkan/world/server/packet/MoveGameClickHandlerTest.kt
+  s_9411ee6d21b0fa::t_8b495db157ab3a 11,68,82,97
+world/src/main/kotlin/org/darkan/world/entity/MovementQueue.kt
+  s_9411ee6d21b0fa::t_42f966892b00e4 22
+world/src/test/kotlin/org/darkan/world/server/WorldC2sReplayTest.kt
+  s_9411ee6d21b0fa::t_42f966892b00e4 19,176,200
+world/src/test/kotlin/org/darkan/world/entity/RoutefinderStepProviderTest.kt
+  s_9411ee6d21b0fa::t_b81b383360502b 19
+  s_9411ee6d21b0fa::t_8b495db157ab3a 1-18,20-58
+world/src/main/kotlin/org/darkan/world/server/packet/MoveGameClickHandler.kt
+  s_9411ee6d21b0fa::t_4c1f678e590a01 10,31
+  s_9411ee6d21b0fa::t_e00ce09f4f9013 16,23-25
+core/src/main/kotlin/world/gregs/voidps/routefinder/Route.kt
+  s_9411ee6d21b0fa::t_f406047b6ecb0a 1-13
+core/src/main/kotlin/world/gregs/voidps/collision/CollisionMap.kt
+  s_9411ee6d21b0fa::t_f406047b6ecb0a 273-300
+core/src/main/kotlin/world/gregs/voidps/collision/CacheCollisionFlagMapBuilder.kt
+  s_9411ee6d21b0fa::t_f406047b6ecb0a 1-7,9-17,20-66,71-73,89-110,112-119,146-147
+  s_9411ee6d21b0fa::t_f9f1be75147f0e 18-19
+  s_9411ee6d21b0fa::t_a8be578e29b772 67-70,74-88,120-145,148-151
+  s_9411ee6d21b0fa::t_4c1f678e590a01 8,111
+world/src/main/kotlin/org/darkan/world/entity/WorldCollisionFlagMap.kt
+  s_9411ee6d21b0fa::t_4c1f678e590a01 1-42
+re-resources
+  s_1823696b35ea73::t_ef61a5509c25fe 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "03ec2989e47152e14bfe8284f9e67c52518948bf",
+  "prompts": {},
+  "sessions": {
+    "s_1823696b35ea73": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5308ab37-6005-4048-a97c-21d44a37fd4b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    },
+    "s_9411ee6d21b0fa": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0fbc-101d-73e1-a058-909c2c3189d0",
+        "model": "gpt-5.5"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
