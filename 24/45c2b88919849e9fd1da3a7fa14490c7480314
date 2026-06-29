@@ -1,0 +1,30 @@
+core/src/main/kotlin/org/darkan/core/net/Session.kt
+  s_f8acc34803d486::t_684f80e95f71a4 165-172
+world/src/main/kotlin/org/darkan/world/server/WorldServer.kt
+  s_f8acc34803d486::t_ecd9b5cd2dd755 415-436
+  s_f8acc34803d486::t_4656c98208a470 463-483
+  s_f8acc34803d486::t_b27c49af9d54f2 462,675-683
+world/src/test/kotlin/org/darkan/world/server/WorldC2sReplayTest.kt
+  s_f8acc34803d486::t_04b68e5a71ad84 351-359
+  s_f8acc34803d486::t_0c5050d29ad99e 1-11,14-119,127-129,131,133,136-147,149-293,302,306,315-350,360-361
+  s_f8acc34803d486::t_6e40a99bd04642 148
+  s_f8acc34803d486::t_f0081a676ab480 12-13
+  s_f8acc34803d486::t_a9ce3db55564fb 120-126,130,132,134-135
+  s_f8acc34803d486::t_878373d4adc865 294-301,303-305,307-314
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "2445c2b88919849e9fd1da3a7fa14490c7480314",
+  "prompts": {},
+  "sessions": {
+    "s_f8acc34803d486": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98aa8e04-8dbd-4899-9598-7451f6a1a83b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
