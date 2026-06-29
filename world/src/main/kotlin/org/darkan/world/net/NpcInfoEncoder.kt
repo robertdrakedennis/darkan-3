@@ -10,7 +10,7 @@ import world.gregs.voidps.buffer.write.BufferWriter
  * existing, Phase 2 add new, Phase 3 ext-info) over the viewer's visible-NPC cohort and assemble the
  * [NpcInfo] DTO, delegating the per-NPC bytes to [NpcMovementEncoder] (position / movement) and
  * [NpcExtInfoEncoder] (the ext-info block + `hasExtInfo` gating). Per
- * `docs/net/serverprot/npc-info-947-3.md` §"Packet structure overview":
+ * `docs/kb/glossary/player-npc-info.md` §"s2c op52 — NpcInfo framing":
  *  1. Phase 1 — update existing NPCs: 8-bit count + per-NPC 1-bit hasUpdate + movement bits.
  *  2. Phase 2 — add new NPCs: 16-bit serverIndex loop terminated by the `0xFFFF` sentinel.
  *  3. Phase 3 — extended info: per-flagged NPC byte-packed block.
@@ -31,7 +31,7 @@ object NpcInfoEncoder {
      * loop terminator is the 16-bit sentinel `0xFFFF` — so the absolute minimum-content packet is
      * `[8-bit 0] + [16-bit 0xFFFF]` = 3 bytes + bit-padding to a byte boundary. Ext-info is empty.
      *
-     * Relocated unchanged from `NpcInfoBuilder.buildInit` — byte output is identical.
+     * Relocated unchanged from the old monolithic builder — byte output is identical.
      */
     fun buildInit(@Suppress("UNUSED_PARAMETER") player: Player): NpcInfo {
         val bitOut = BufferWriter(8)
@@ -47,7 +47,7 @@ object NpcInfoEncoder {
      * update bits for known NPCs (Phase 1), then add-records for newly-visible NPCs (Phase 2), then
      * ext-info blocks for any NPC flagged hasExtInfo (Phase 3).
      *
-     * Relocated unchanged from `NpcInfoBuilder.build` — byte output is identical.
+     * Relocated unchanged from the old monolithic builder — byte output is identical.
      */
     fun build(player: Player): NpcInfo {
         val viewport = player.viewport

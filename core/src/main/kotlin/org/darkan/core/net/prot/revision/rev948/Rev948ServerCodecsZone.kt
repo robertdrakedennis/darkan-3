@@ -1,9 +1,12 @@
 package org.darkan.core.net.prot.revision.rev948
 
 import io.ktor.utils.io.*
+import kotlinx.io.Buffer
+import kotlinx.io.readByteArray
 import org.darkan.core.Logger.logWarn
 import org.darkan.core.net.prot.*
 import world.gregs.voidps.buffer.*
+import kotlin.reflect.KClass
 
 /**
  * Rev948 server encoders for zone updates.
@@ -225,14 +228,60 @@ internal fun Codec.registerRev948ServerCodecsZone() {
 }
 
 private suspend fun ByteWriteChannel.writeEnclosedZoneSubPacket(packet: ServerProt): Boolean =
-    when (packet) {
-        is LocAnim -> {
-            writeByte(13)
-            writeLocAnimBody(packet)
+    when (val subPacket = VERIFIED_ENCLOSED_ZONE_SUBPACKETS[packet::class]) {
+        null -> false
+        else -> {
+            val payload = subPacket.encode(packet)
+            writeByte(subPacket.subOpcode)
+            when (val size = subPacket.size) {
+                ProtSize.VarByte -> writeByte(payload.size)
+                ProtSize.VarShort -> writeShort(payload.size)
+                is ProtSize.Fixed -> require(payload.size == size.length) {
+                    "UPDATE_ZONE_PARTIAL_ENCLOSED sub-op ${subPacket.subOpcode} ${subPacket.name} " +
+                        "encoded ${payload.size} bytes, expected ${size.length}"
+                }
+            }
+            writeFully(payload)
             true
         }
-        else -> false
     }
+
+private data class EnclosedZoneSubPacket(
+    val subOpcode: Int,
+    val name: String,
+    val size: ProtSize,
+    val writeBody: suspend ByteWriteChannel.(ServerProt) -> Unit,
+) {
+    suspend fun encode(packet: ServerProt): ByteArray {
+        val payload = Buffer()
+        val channel = payload.asByteWriteChannel()
+        writeBody.invoke(channel, packet)
+        channel.flush()
+        return payload.readByteArray()
+    }
+}
+
+private val VERIFIED_ENCLOSED_ZONE_SUBPACKETS: Map<KClass<out ServerProt>, EnclosedZoneSubPacket> = mapOf(
+    // VERIFIED: docs/kb/glossary/decoded-rebuild-zone.md has 14 captured op76 subop-13 packets
+    // and RE-4 descriptor pairing names the 11-byte body LOC_ANIM.
+    LocAnim::class to EnclosedZoneSubPacket(
+        subOpcode = 13,
+        name = "LOC_ANIM",
+        size = ProtSize.Fixed(11),
+    ) { packet ->
+        writeLocAnimBody(packet as LocAnim)
+    },
+)
+
+/*
+ * HYPOTHESIS/TODO rows from our current docs. They are deliberately NOT registered above until the
+ * opcode-identity adjudication work confirms them beyond binary descriptor pairing:
+ *   0 LocAdd varByte, 1 ProjAnimSpecificHalt 29, 2 LocDel 2, 3 ObjReveal 7,
+ *   4 unresolved docs conflict: decoded-rebuild-zone says SoundArea varByte; 948-opcode-tables says
+ *     LOC_MERGE varByte, 5 ObjDel 3, 6 MapAnimSpecific 14, 7 MapProjAnim 20, 8 ObjCount 7,
+ *   9 ObjAdd 5, 10 LocCustomise varByte, 11 LocPrefetch 7, 12 LocMerge 5, 14 MapAnim 11,
+ *   15 ProjAnimSpecific 21, 16 LocAnimSpecific 10, 17 MapProjAnimHalt 28.
+ */
 
 private suspend fun ByteWriteChannel.writeLocAnimBody(packet: LocAnim) {
     writeByte(packet.packedCoord)

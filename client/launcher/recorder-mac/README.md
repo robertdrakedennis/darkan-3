@@ -77,10 +77,11 @@ At load time (`#[ctor]`, before the host's `main()`):
    for x86_64-darwin). Code is patched with `mach_vm_protect(VM_PROT_COPY)` —
    the only primitive that can make the main image's `__text` writable under
    **Rosetta 2** (the x86_64 client runs translated on Apple Silicon).
-5. **libc interpose** — `connect()`/`close()` are interposed via the
-   `__DATA,__interpose` table for connect/disconnect events and per-fd peer
-   tracking. (The interposers are pure passthroughs until the ctor finishes
-   arming them, so libSystem's own bootstrap `close()` calls are never touched.)
+5. **libc interpose** — `connect()`/`close()`/`send()`/`recv()` are interposed via
+   the `__DATA,__interpose` table for connect/disconnect events, per-fd peer
+   tracking, and lower-level payload capture. (The interposers are pure
+   passthroughs until the ctor finishes arming them, so libSystem's own
+   bootstrap `close()` calls are never touched.)
 
 ## Capture points
 
@@ -92,6 +93,7 @@ At load time (`#[ctor]`, before the host's `main()`):
 | `event: state_change` | `Client::SetMainState` | game-state transitions (enum 0/10/20/23/30/35/37/40) |
 | `event: login_cipher_ready` | `ConnectionManager::SetupLoginCiphers` | the login s2c Phase A→B (plaintext→ISAAC) boundary + the Phase-A byte offset |
 | `event: connect/disconnect` | libc `connect`/`close` | peer `ip:port` per connection |
+| `socket source=libc` | libc `send`/`recv` | raw fd-level payloads for every connection, including HTTP JS5/content/CDN |
 | `state_snapshot` | `ClientStream::Fill` (periodic) + `Client::SetMainState` + at-exit | the client's OWN decoded varps / tile / skills / run energy+weight (the "client is king" oracle) |
 | (login anchor) | `LoginStateMachine::OpenLoginStream` | publishes the Client base + login `ClientStream` at socket-creation time so the EARLIEST login s2c is tagged `login` (not `js5`) |
 | `prot-table.json` | `g_serverProtTable` direct read (triggered at ctor + the `SetMainState` / s2c-dispatch hooks) | the client's OWN live ServerProt opcode table (opcode → sizeClass + handler fingerprint), dumped once per session for rev-agnostic framing/naming |
@@ -100,8 +102,10 @@ Connections are tagged `login` / `game` by comparing the live `ServerConnection*
 against `ConnectionManager+0x18` (game) / `+0x28` (login); the login stream is
 ALSO recognised via the `LoginStateMachine` early anchor (RE §8a) so the first
 login recv is tagged correctly before `ConnMgr+0x28` resolves. JS5 is HTTP and has
-no `ServerConnection` slot, so it appears only on the socket plane (tagged `js5`,
-length-only) / as connect events, never as a framed `conn`.
+no `ServerConnection` slot, so it never appears as a framed `conn`. The old
+ClientStream fallback may still emit `conn=js5` length-only rows, while the
+lower-level libc fd rows (`source=libc`, `conn=fd-http`) carry the actual HTTP
+request/response payloads for local `:8829` and any CDN escape.
 
 ## On-disk format
 
@@ -114,7 +118,7 @@ session-<UTC yyyyMMdd-HHmmss>-<pid>-<mode>/
 ├── prot-table.json       the client's OWN live opcode table, dumped once at session start (rev-agnostic framing/naming)
 ├── framed-s2c.jsonl      one flat JSON object per S→C framed packet
 ├── framed-c2s.jsonl      one flat JSON object per C→S framed packet
-├── socket.jsonl          raw ClientStream Read/Write/Fill bytes
+├── socket.jsonl          raw ClientStream bytes plus additive libc send/recv fd payloads
 ├── events.jsonl          state_change / login_cipher_ready / connect / disconnect / process
 ├── state-snapshots.jsonl client-state ORACLE snapshots (varps/tile/skills/energy) — the "client is king" cross-check
 ├── blobs/<sha256-prefix>.bin   bodies larger than 8192 bytes
@@ -234,6 +238,14 @@ One flat JSON object per line, stable keys:
 
 Same `body` / `body_ref` rule. This is the ground-truth wire (pre-prot,
 ciphertext, and the RSA login block) — the data the decoded planes never see.
+Rows without `source` are the original ClientStream contract used by protocol
+validators. Rows with `"source":"libc"` are additive fd-level payloads and carry
+`fd`, `peer`, `port`, and `conn:"fd-http"` / `"fd-other"` so JS5/content/CDN
+traffic is visible without being mistaken for the game/login protocol stream:
+
+```json
+{"ts":"...","mono_us":2345,"proc":"rs2client","plane":"socket","source":"libc","dir":"s2c","conn":"fd-http","fd":31,"peer":"127.0.0.1:8829","port":8829,"len":1031,"body":"<base64>"}
+```
 
 ### `events.jsonl`
 

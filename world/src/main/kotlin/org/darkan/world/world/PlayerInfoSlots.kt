@@ -23,9 +23,9 @@ import world.gregs.voidps.type.Tile
  *  * [seedFromGpiPrefix] ↔ `resetFromGpiPrefix` (`ClientStateCrossCheck.kt:1047`): the op81 GPI
  *    prefix the client parsed at world entry seeds BOTH sides identically — local slot
  *    `active=false, present=true` into [renderList]; every other slot `active=((word>>18)&3)==0`,
- *    `present=false` into [pendingList]. For a solo spawn the prefix writes word `0` for every other
- *    slot ([org.darkan.world.net.Op81GpiPrefix]), so `(0>>18)&3==0` ⇒ every other slot seeds
- *    **`active=true`** and lands in [pendingList].
+ *    `present=false` into [pendingList]. The prefix seeds empty slots with the local player's map
+ *    square and occupied slots with the occupant's map square, so low-res anchors never default to
+ *    map square (0,0).
  *  * [rebuildAfterPasses] ↔ `rebuildActivityFlagsAndLists` (`ClientStateCrossCheck.kt:1259`): after
  *    the 4th pass, `active = nextActive` and `present` re-buckets each slot into [renderList] /
  *    [pendingList].
@@ -87,10 +87,9 @@ class PlayerInfoSlots(private val capacity: Int = SLOT_COUNT) {
      * `resetFromGpiPrefix` (`ClientStateCrossCheck.kt:1047`).
      *
      * The local slot is `active=false, present=true` (into [renderList]); every other slot is
-     * `present=false` (into [pendingList]) with `active` derived from its 20-bit prefix word's active
-     * field `((word>>18)&3)==0`. For a solo spawn the prefix writes word `0` everywhere
-     * ([org.darkan.world.net.Op81GpiPrefix]) so every other slot is `active=true` with coord
-     * `{plane 0, region (0,0)}`.
+     * `present=false` (into [pendingList]) with `active=true`. The coord mirrors the 20-bit prefix
+     * word: occupied slots get that player's map square; empty slots get the local player's map
+     * square rather than `(0,0)`.
      *
      * @param localTile the local player's spawn tile — its region (`tile >> 6`) anchors the local
      *                  slot's [LowResCoord], matching the 30-bit packed tile the prefix wrote.
@@ -113,14 +112,21 @@ class PlayerInfoSlots(private val capacity: Int = SLOT_COUNT) {
         )
         renderList += localIndex
 
-        // Every other slot mirrors `resetFromGpiPrefix`'s 20-bit-word seeding. The solo prefix word is
-        // 0 for all of them, so active=((0>>18)&3)==0)=true, coord={0,0,0}, present=false → pendingList.
+        val defaultCoord = LowResCoord(localTile.level, localTile.x ushr 6, localTile.y ushr 6)
+
+        // Every other slot mirrors Op81GpiPrefix's 20-bit-word seeding.
         for (idx in 1 until capacity) {
             if (idx == localIndex) continue
+            val occupantTile = Players.get(idx)?.tile
+            val coord = if (occupantTile != null) {
+                LowResCoord(occupantTile.level, occupantTile.x ushr 6, occupantTile.y ushr 6)
+            } else {
+                defaultCoord
+            }
             slots[idx] = GpiSlot(
                 active = true,
                 present = false,
-                coord = LowResCoord(0, 0, 0),
+                coord = coord,
             )
             pendingList += idx
         }

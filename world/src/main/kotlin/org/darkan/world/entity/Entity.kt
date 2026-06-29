@@ -24,7 +24,7 @@ abstract class Entity {
     /** Facing direction (0-7 cardinal). Encoded into PLAYER_INFO / NPC_INFO appearance + face blocks. */
     var direction: Int = 0
 
-    /** Per-tick update mask collector; consumed by PlayerInfoBuilder / NpcInfoBuilder in B6. */
+    /** Per-tick update mask collector; consumed by PlayerInfoEncoder / NpcInfoEncoder. */
     val pendingUpdates: PendingUpdates = PendingUpdates()
 
     /**

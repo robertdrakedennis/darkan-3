@@ -16,4 +16,8 @@ class CacheFileProvider(private val cache: Cache) : FileProvider {
             return cache.versionTable
         return cache.sector(index, archive)
     }
+
+    override fun version(index: Int, archive: Int): Int {
+        return cache.sectorVersion(index, archive)
+    }
 }

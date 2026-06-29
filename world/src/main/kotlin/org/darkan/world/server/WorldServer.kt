@@ -14,6 +14,7 @@ import org.darkan.core.Logger.logError
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logTrace
 import org.darkan.core.Logger.logWarn
+import org.darkan.core.formatForDisplay
 import org.darkan.core.formatForProtocol
 import org.darkan.core.net.*
 import org.darkan.core.net.login.LoginToken
@@ -290,6 +291,9 @@ object WorldServer {
             if (playersByUsername.containsKey(username)) {
                 return output.finish(ResponseOpcode.ACCOUNT_ONLINE)
             }
+            if (account.displayName.isBlank()) {
+                account.displayName = account.username.formatForDisplay()
+            }
 
             // Step 8: Verify the world login proof. Launcher/session-token paths carry a compact
             // lobby token; direct username/password login carries the password again in the same
@@ -332,6 +336,7 @@ object WorldServer {
             // match the allocated slot — otherwise the high-res cohort would point at slot
             // 0, which is the protocol "no player" sentinel.
             val player = Player(index = 0, account = account, session = session)
+            session.attachment = player
             val playerIndex = Players.allocate(player) { idx -> player.index = idx }
             // Build the spawn avatar (default identitykits only — a fresh character). The worn
             // container (94) is still sent for the equipment UI, but equipped items are NOT rendered
@@ -388,31 +393,7 @@ object WorldServer {
                 writeWorldLoginResponse(output, details)
                 output.flush()
 
-                // Step 14: Build the world-entry scene/UI burst (op81 scene build + UI baseline +
-                // GPI/NPC sync + op78 zone stream + inventories + HUD transition + first-light tail).
-                // Extracted verbatim into [WorldEntry] (NETWORKING_AUDIT.md §4.3, Phase 1.3) so it can
-                // be re-driven on teleport / respawn / re-entry. The emitted ServerProt sequence — order
-                // and bytes — is identical to the former inline block; see [WorldEntry.enter].
-                WorldEntry.enter(session, player)
-
-                // Step 16: Register player and notify lobby
-                player.readyForTick = true
-                playersByUsername[username] = session
-
-                CoroutineScope(dispatcher).launch {
-                    try {
-                        socialClient.sendPlayerOnline(
-                            username = account.username,
-                            displayName = account.displayName,
-                            rightsCrown = account.rights,
-                            privateStatus = account.social.status,
-                        )
-                    } catch (e: Exception) {
-                        logError("Failed to notify lobby of player online: ${account.username}", e)
-                    }
-                }
-
-                // Step 16.5: Consume the world client's pre-ISAAC login-confirm opcode.
+                // Step 14: Consume the world client's pre-ISAAC login-confirm opcode.
                 //
                 // After parsing the world-login response, the NXT world client sends ONE bare,
                 // *un-ciphered* byte on the c2s channel before it starts the ISAAC-enciphered game
@@ -434,9 +415,44 @@ object WorldServer {
                 // WorldC2sReplayTest.
                 consumeWorldLoginConfirm(input, ip)
 
-                // Step 17: Session loop
+                // Mark the account online before the gate so a duplicate login cannot slip in while
+                // we wait for the client's first ISAAC-framed in-game packet. Ticks stay disabled
+                // until [WorldEntry.enter] finishes and flips [Player.readyForTick].
+                playersByUsername[username] = session
+
+                // Step 15: Session loop. The world-entry burst (op81/GPI prefix, op22, zones, HUD)
+                // is gated until the client proves it has entered the ISAAC game stream. Upstream
+                // commit 3efa3f6 waited for raw op98; this fork decodes op98 as ClientInputEventBatch
+                // and recorder fixtures show op52 DisplayMetrics as the first in-game packet. The
+                // invariant is the stream boundary, not a single opcode number.
                 coroutineScope {
                     launch { session.readPackets(input) }
+
+                    awaitWorldEntryGate(session)
+
+                    // Step 16: Build the world-entry scene/UI burst (op81 scene build + UI baseline +
+                    // GPI/NPC sync + op78 zone stream + inventories + HUD transition + first-light tail).
+                    // Extracted verbatim into [WorldEntry] (NETWORKING_AUDIT.md §4.3, Phase 1.3) so it can
+                    // be re-driven on teleport / respawn / re-entry. The emitted ServerProt sequence —
+                    // order and bytes — is identical to the former inline block; see [WorldEntry.enter].
+                    WorldEntry.enter(session, player)
+
+                    // Step 17: Enable ticks and notify lobby.
+                    player.readyForTick = true
+
+                    CoroutineScope(dispatcher).launch {
+                        try {
+                            socialClient.sendPlayerOnline(
+                                username = account.username,
+                                displayName = account.displayName,
+                                rightsCrown = account.rights,
+                                privateStatus = account.social.status,
+                            )
+                        } catch (e: Exception) {
+                            logError("Failed to notify lobby of player online: ${account.username}", e)
+                        }
+                    }
+
                     worldSessionLoop(session)
                 }
             } finally {
@@ -479,6 +495,36 @@ object WorldServer {
         } else {
             logTrace("World login-confirm op$WORLD_LOGIN_CONFIRM_OPCODE consumed from $ip; ISAAC c2s reader aligned to first in-game opcode")
         }
+    }
+
+    /**
+     * Drain and dispatch early in-game c2s packets until the client proves it has crossed from the
+     * login state machine into the ISAAC-framed game stream. The scene rebuild is sent only after this
+     * gate, so op81's GPI prefix lands in a client-built world view instead of racing the transition.
+     */
+    private suspend fun awaitWorldEntryGate(session: GameSession) {
+        val opened = withTimeoutOrNull(WORLD_ENTRY_GATE_TIMEOUT_MS) {
+            while (!session.disconnected) {
+                val packet = session.readChannel.receive()
+                PacketHandlers.handle<GameSession>(session, packet)
+                if (isWorldEntryGatePacket(packet)) {
+                    logTrace("World entry gate opened by ${packet::class.simpleName} from ${session.username}@${session.ip}")
+                    return@withTimeoutOrNull true
+                }
+            }
+            false
+        } ?: false
+
+        if (!opened && !session.disconnected) {
+            logWarn("World entry gate timed out after ${WORLD_ENTRY_GATE_TIMEOUT_MS}ms for ${session.username}@${session.ip}; sending world entry anyway")
+        }
+    }
+
+    private fun isWorldEntryGatePacket(packet: ClientProt): Boolean = when (packet) {
+        is DisplayMetrics -> true
+        is ClientInputEventBatch -> true
+        is UnhandledClientProt -> packet.opcode == 98
+        else -> false
     }
 
     /**
@@ -680,6 +726,12 @@ object WorldServer {
      * world session consumes it (see [consumeWorldLoginConfirm]) so the ISAAC opcode reader aligns.
      */
     private const val WORLD_LOGIN_CONFIRM_OPCODE = 26
+
+    /**
+     * Fallback cap for the world-entry gate. The client normally sends DisplayMetrics immediately
+     * after the login confirm; timeout preserves the old behavior if a capture/client variant omits it.
+     */
+    private const val WORLD_ENTRY_GATE_TIMEOUT_MS = 8_000L
 
     /** Rolling window for the inbound packet-rate check. */
     private const val PACKET_RATE_WINDOW_MS = 10_000L

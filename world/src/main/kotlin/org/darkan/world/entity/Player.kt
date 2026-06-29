@@ -2,7 +2,14 @@ package org.darkan.world.entity
 
 import org.darkan.core.model.Account
 import org.darkan.core.net.session.GameSession
+import org.darkan.world.interfaces.InterfaceManager
 import org.darkan.world.world.Viewport
+
+val GameSession.player: Player?
+    get() = attachment as? Player
+
+val GameSession.interfaceManager: InterfaceManager
+    get() = (player ?: error("GameSession has no Player attached")).interfaceManager
 
 /**
  * World-side player entity. Wraps an authenticated [Account] and its live [GameSession]
@@ -27,6 +34,8 @@ class Player(
         internal set
     /** Pre-built appearance block; encoder reads [Appearance.cachedBytes] and falls back to rebuild on null. */
     val appearance: Appearance = Appearance(account)
+
+    val interfaceManager: InterfaceManager = InterfaceManager(this)
 
     /** Per-player visibility state — high-res / low-res index lists, cached appearance hashes, build area center. */
     val viewport: Viewport = Viewport(this)

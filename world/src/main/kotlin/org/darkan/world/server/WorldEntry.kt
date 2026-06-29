@@ -3,6 +3,7 @@ package org.darkan.world.server
 import org.darkan.core.EnvVars
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logTrace
+import org.darkan.core.Logger.logWarn
 import org.darkan.core.net.prot.*
 import org.darkan.core.net.session.GameSession
 import org.darkan.world.entity.Player
@@ -123,6 +124,13 @@ object WorldEntry {
         val spawn = player.tile
         val buildArea = player.viewport.loadFirstLightBuildArea(spawn)
         val centreZone = spawn.zone                      // render-scene centre (positioned inside the grid)
+        val sceneRootId = Cache.worldAreaTypeAt(spawn.x, spawn.y) ?: run {
+            logWarn(
+                "No WorldAreaType covers spawn (${spawn.x},${spawn.y}) for ${player.account.username}; " +
+                    "using WORLD_SCENE_ROOT_ID=${EnvVars.worldSceneRootId}"
+            )
+            EnvVars.worldSceneRootId
+        }
         // GPI prefix: local player's 30-bit tile == this same spawn tile; the skipped slot is the
         // player's allocated index (== WorldLoginDetails.playerIndex == viewport.highResIndices[0]).
         val gpiPrefix = Op81GpiPrefix.build(spawnTile = spawn, localPlayerIndex = player.index)
@@ -145,8 +153,8 @@ object WorldEntry {
                 zoneZ = centreZone.y,                    // +1/+2 = centreZoneZ (north-south) — matches prod (402)
                 packedCoordA = buildArea.packedCoordA,   // +10 SW corner {minRegionX, minRegionZ}
                 packedCoordB = buildArea.packedCoordB,   // +14 NE corner {maxRegionX, maxRegionZ}
-                cameraRotation = 7,                      // harmless (§5): op81's camera anchor is a map-config flag, not this byte. Production ships 7. Kept so the wire matches; not the render lever.
-                sceneRootId = EnvVars.worldSceneRootId,
+                npcInfoCoordBitWidth = NPC_INFO_COORD_BIT_WIDTH,
+                sceneRootId = sceneRootId,
                 rebuildPrefix = gpiPrefix,               // Shape B: 5119-byte GPI init; body = 5119 + 18 = 5137
             )
         )
@@ -324,6 +332,7 @@ object WorldEntry {
 
     private const val INITIAL_DISPLAY_INT = -1381430710
     private val INITIAL_MIDI_SONG = byteArrayOf(0x7E, 0x8C.toByte(), 0xE3.toByte(), 0x00, 0x00)
+    private const val NPC_INFO_COORD_BIT_WIDTH = 7
 
     /** Top-level interface ID for the main in-game HUD. */
     private const val GAME_HUD_INTERFACE = 1477

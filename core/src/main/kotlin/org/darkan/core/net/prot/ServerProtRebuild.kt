@@ -13,9 +13,9 @@ package org.darkan.core.net.prot
  *      +2  u8   centreZoneZ high            (Z is LE u16: lo then hi; may exceed 255)
  *      +3  u8   magic = 0x85
  *      +4  u16  centreZoneX (BE)
- *      +6  u8   cameraRotation, writeByteAdd (wire = (value + 0x80) & 0xFF)
+ *      +6  u8   npcInfoCoordBitWidth, writeByteAdd (wire = (value + 0x80) & 0xFF)
  *      +7  u8   ignored filler (send 0)
- *      +8  u16  sceneRootId (BE)            scene root selector consumed before BuildArea install
+ *      +8  u16  sceneRootId (BE)            WorldAreaType scene root selector
  *      +10 u32  packedCoordA (BE)           build-area SW corner
  *      +14 u32  packedCoordB (BE)           build-area NE corner
  *
@@ -37,9 +37,9 @@ data class RebuildNormalSimple(
     val zoneZ: Int,
     val packedCoordA: Int,
     val packedCoordB: Int,
-    /** 948 camera rotation byte (written +0x80). Default 0. */
-    val cameraRotation: Int = 0,
-    /** 948 scene root selector (+8 BE u16). Production first-light uses 474. */
+    /** NPC_INFO new-NPC coordinate bit width. Rev948 official login uses 7. */
+    val npcInfoCoordBitWidth: Int = 7,
+    /** 948 WorldAreaType scene root selector (+8 BE u16). Production first-light uses 474. */
     val sceneRootId: Int = 0,
     /** Legacy encoder field. Ignored by the rev948 encoder. */
     val forceRefresh: Boolean = true,
@@ -58,7 +58,7 @@ data class RebuildNormalSimple(
             zoneZ == other.zoneZ &&
             packedCoordA == other.packedCoordA &&
             packedCoordB == other.packedCoordB &&
-            cameraRotation == other.cameraRotation &&
+            npcInfoCoordBitWidth == other.npcInfoCoordBitWidth &&
             sceneRootId == other.sceneRootId &&
             forceRefresh == other.forceRefresh &&
             regionLow == other.regionLow &&
@@ -69,7 +69,7 @@ data class RebuildNormalSimple(
         result = 31 * result + zoneZ
         result = 31 * result + packedCoordA
         result = 31 * result + packedCoordB
-        result = 31 * result + cameraRotation
+        result = 31 * result + npcInfoCoordBitWidth
         result = 31 * result + sceneRootId
         result = 31 * result + forceRefresh.hashCode()
         result = 31 * result + regionLow

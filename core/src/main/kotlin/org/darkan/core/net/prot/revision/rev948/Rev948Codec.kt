@@ -18,7 +18,7 @@ import org.darkan.core.net.prot.update.ActiveMaskKeys
  * order 4): the block reads a scrambled length byte + a mode-buffer payload and queues it via
  * `PathingEntity::QueueExtendedInfoPacket`. The earlier "Phase 1 walk" missed it because the
  * mask test is the bare `if ((mask & 8) != 0)` (no `0x` prefix). The 948 APPEARANCE key and
- * encoder are now live, so `PlayerInfoBuilder`'s synth-on-first-tick path works under 948.
+ * encoder are now live, so `PlayerInfoEncoder`'s synth-on-first-tick path works under 948.
  */
 fun register948() = Codec.register(948) {
     // Register real encoders/decoders first (these populate protInfo via the registration methods)

@@ -15,6 +15,9 @@ class GameSession(
     /** Protocol username of the logged-in player. Set after login. */
     var username: String = "",
 ) : Session(write, isaacIn, isaacOut, ip, codec) {
+    /** Optional owner object for module-specific session state, e.g. the world player. */
+    var attachment: Any? = null
+
     var pendingAntiCheatChallenge: AntiCheatChallenge? = null
         private set
     var lobbyWorldSwitchSent: Boolean = false

@@ -8,6 +8,7 @@ import world.gregs.voidps.cache.config.data.IDKDefinition
 import world.gregs.voidps.cache.config.data.InventoryDefinition
 import world.gregs.voidps.cache.config.data.ParamDefinition
 import world.gregs.voidps.cache.config.data.QuestDefinition
+import world.gregs.voidps.cache.config.data.WorldAreaDefinition
 import world.gregs.voidps.cache.config.decoder.CursorDecoder
 import world.gregs.voidps.cache.config.decoder.HeadbarDecoder
 import world.gregs.voidps.cache.config.decoder.HitmarkDecoder
@@ -15,6 +16,7 @@ import world.gregs.voidps.cache.config.decoder.IDKDecoder
 import world.gregs.voidps.cache.config.decoder.InventoryDecoder
 import world.gregs.voidps.cache.config.decoder.ParamDecoder
 import world.gregs.voidps.cache.config.decoder.QuestDecoder
+import world.gregs.voidps.cache.config.decoder.WorldAreaDecoder
 import world.gregs.voidps.cache.definition.data.*
 import world.gregs.voidps.cache.definition.decoder.*
 import world.gregs.voidps.cache.secure.Huffman
@@ -198,6 +200,10 @@ interface Cache {
             QuestDecoder().load(get())
         }
 
+        @JvmStatic val worldAreas: Array<WorldAreaDefinition> by lazy {
+            WorldAreaDecoder().load(get())
+        }
+
         // --- Lazy memoized per-id accessors (engine hot path) ---
         //
         // These decode a single id on demand instead of forcing the eager arrays
@@ -274,5 +280,28 @@ interface Cache {
         private val mapDecoder by lazy { MapDecoder() }
 
         @JvmStatic fun region(regionId: Int): RegionDefinition? = mapDecoder.decode(get(), regionId)
+
+        /**
+         * Returns the WorldAreaType id whose decoded map-square bounds contain [tileX], [tileY].
+         * When multiple areas match, the smallest bounding box is treated as the most specific.
+         */
+        @JvmStatic
+        fun worldAreaTypeAt(tileX: Int, tileY: Int): Int? {
+            val mapSquareX = tileX ushr 6
+            val mapSquareY = tileY ushr 6
+            var bestId: Int? = null
+            var bestSize = Int.MAX_VALUE
+            for (area in worldAreas) {
+                if (!area.containsMapSquare(mapSquareX, mapSquareY)) {
+                    continue
+                }
+                val size = area.mapSquareBoundsSize
+                if (size < bestSize) {
+                    bestSize = size
+                    bestId = area.id
+                }
+            }
+            return bestId
+        }
     }
 }

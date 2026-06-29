@@ -1,4 +1,4 @@
-//! World-server connect() port redirect — macOS `__DATA,__interpose` tap.
+//! World-server + HTTP content connect() redirects — macOS `__DATA,__interpose` tap.
 //!
 //! ## Why this exists
 //!
@@ -13,8 +13,12 @@
 //! `::1:443`, gets connection-refused, and the lobby shows "Unexpected server
 //! response." It never tries 43597.
 //!
-//! This tap rewrites the destination port of the WORLD connect from 443 to
-//! `DARKAN_WORLD_PORT` so the client reaches our local world server.
+//! This tap rewrites:
+//!   * the WORLD connect from loopback:443 to `DARKAN_WORLD_PORT`, so the client
+//!     reaches our local world server; and
+//!   * external HTTP content connects from `<content-cdn>:80` to
+//!     `127.0.0.1:DARKAN_HTTP_PORT`, so 948-5 cache groups come from the local
+//!     cache server instead of the live CloudFront CDN.
 //!
 //! ## Why connect() interpose (approach A), not a memory patch
 //!
@@ -35,9 +39,11 @@
 //!     default 443).
 //!
 //! The client's many legitimate `<external-jagex-ip>:443` HTTPS connections are
-//! left completely untouched (non-loopback), as are loopback connects to the
-//! lobby (43596) and HTTP JS5 (8829) ports. We mutate a private copy of the
-//! sockaddr — never the caller's buffer — and only the 2-byte port field.
+//! left completely untouched, as are loopback connects to the lobby (43596) and
+//! HTTP JS5 (8829) ports. We mutate a private copy of the sockaddr — never the
+//! caller's buffer. The world redirect rewrites only the 2-byte port field; the
+//! HTTP-content redirect rewrites external IPv4/IPv6 `:80` to loopback plus the
+//! local content port.
 //!
 //! ## Bootstrap safety
 //!
@@ -66,12 +72,23 @@ static FROM_PORT: AtomicU16 = AtomicU16::new(DEFAULT_WORLD_FROM_PORT);
 /// Local world-server port we rewrite the loopback world connect TO.
 static TO_PORT: AtomicU16 = AtomicU16::new(0);
 
+/// Local config/content-server port we rewrite external HTTP content connects TO.
+static HTTP_CONTENT_TO_PORT: AtomicU16 = AtomicU16::new(0);
+
 /// Arm the redirect: loopback `from_port` connects are rewritten to `to_port`.
 /// Called from the ctor once `DARKAN_WORLD_PORT` is parsed. No-op-safe if
 /// `to_port == 0` or `to_port == from_port` (nothing to rewrite).
 pub fn arm(from_port: u16, to_port: u16) {
     FROM_PORT.store(from_port, Ordering::SeqCst);
     TO_PORT.store(to_port, Ordering::SeqCst);
+    ARMED.store(true, Ordering::SeqCst);
+}
+
+/// Arm the HTTP content redirect: external `:80` connects are rewritten to the
+/// local config/content server. Kept separate from [arm] because world redirect
+/// and content redirect are independently configured.
+pub fn arm_http_content(to_port: u16) {
+    HTTP_CONTENT_TO_PORT.store(to_port, Ordering::SeqCst);
     ARMED.store(true, Ordering::SeqCst);
 }
 
@@ -110,14 +127,25 @@ unsafe fn is_loopback(addr: *const libc::sockaddr) -> bool {
 unsafe fn dest_port(addr: *const libc::sockaddr) -> Option<u16> {
     match (*addr).sa_family as c_int {
         libc::AF_INET => Some(u16::from_be((*(addr as *const libc::sockaddr_in)).sin_port)),
-        libc::AF_INET6 => Some(u16::from_be((*(addr as *const libc::sockaddr_in6)).sin6_port)),
+        libc::AF_INET6 => Some(u16::from_be(
+            (*(addr as *const libc::sockaddr_in6)).sin6_port,
+        )),
         _ => None,
     }
 }
 
+/// True when this connect is an external HTTP content candidate. We deliberately
+/// do NOT match external :443 here: that path is TLS, and redirecting it to the
+/// plain local Ktor HTTP listener would convert a CDN escape into a TLS failure.
+#[inline]
+unsafe fn should_redirect_http_content(addr: *const libc::sockaddr) -> bool {
+    dest_port(addr) == Some(80) && !is_loopback(addr)
+}
+
 /// Interposed `connect()`. Rewrites a loopback `from_port` destination to
-/// `to_port` on a PRIVATE copy of the sockaddr before the real connect();
-/// everything else passes straight through unmodified.
+/// `to_port`, or an external HTTP content destination to the local HTTP server,
+/// on a PRIVATE copy of the sockaddr before the real connect(); everything else
+/// passes straight through unmodified.
 ///
 /// # Safety
 /// `address`/`len` are the caller's `connect()` args; we only read them and,
@@ -136,6 +164,35 @@ pub unsafe extern "C" fn darkan_world_connect(
 
     let to_port = TO_PORT.load(Ordering::Relaxed);
     let from_port = FROM_PORT.load(Ordering::Relaxed);
+    let http_content_to_port = HTTP_CONTENT_TO_PORT.load(Ordering::Relaxed);
+
+    if http_content_to_port != 0 && should_redirect_http_content(address) {
+        let family = (*address).sa_family as c_int;
+        let to_be = http_content_to_port.to_be();
+        match family {
+            libc::AF_INET if (len as usize) >= std::mem::size_of::<libc::sockaddr_in>() => {
+                let mut sa: libc::sockaddr_in = *(address as *const libc::sockaddr_in);
+                sa.sin_port = to_be;
+                sa.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::new(127, 0, 0, 1)).to_be();
+                return connect(
+                    socket,
+                    &sa as *const libc::sockaddr_in as *const libc::sockaddr,
+                    len,
+                );
+            }
+            libc::AF_INET6 if (len as usize) >= std::mem::size_of::<libc::sockaddr_in6>() => {
+                let mut sa: libc::sockaddr_in6 = *(address as *const libc::sockaddr_in6);
+                sa.sin6_port = to_be;
+                sa.sin6_addr.s6_addr = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+                return connect(
+                    socket,
+                    &sa as *const libc::sockaddr_in6 as *const libc::sockaddr,
+                    len,
+                );
+            }
+            _ => {}
+        }
+    }
 
     // Only act when there is a real rewrite to do and the destination matches
     // loopback:from_port exactly. `dest_port`/`is_loopback` are pure reads.
@@ -145,14 +202,11 @@ pub unsafe extern "C" fn darkan_world_connect(
                 let family = (*address).sa_family as c_int;
                 let to_be = to_port.to_be();
                 match family {
-                    libc::AF_INET
-                        if (len as usize) >= std::mem::size_of::<libc::sockaddr_in>() =>
-                    {
+                    libc::AF_INET if (len as usize) >= std::mem::size_of::<libc::sockaddr_in>() => {
                         // Copy the caller's sockaddr, rewrite only the port on
                         // the copy, and connect() to the copy. The caller's
                         // buffer is never mutated.
-                        let mut sa: libc::sockaddr_in =
-                            *(address as *const libc::sockaddr_in);
+                        let mut sa: libc::sockaddr_in = *(address as *const libc::sockaddr_in);
                         sa.sin_port = to_be;
                         return connect(
                             socket,
@@ -163,8 +217,7 @@ pub unsafe extern "C" fn darkan_world_connect(
                     libc::AF_INET6
                         if (len as usize) >= std::mem::size_of::<libc::sockaddr_in6>() =>
                     {
-                        let mut sa: libc::sockaddr_in6 =
-                            *(address as *const libc::sockaddr_in6);
+                        let mut sa: libc::sockaddr_in6 = *(address as *const libc::sockaddr_in6);
                         sa.sin6_port = to_be;
                         return connect(
                             socket,
@@ -235,6 +288,16 @@ mod tests {
         sa
     }
 
+    fn v6_external(port: u16) -> libc::sockaddr_in6 {
+        let mut sa: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
+        sa.sin6_family = libc::AF_INET6 as libc::sa_family_t;
+        sa.sin6_port = port.to_be();
+        sa.sin6_addr.s6_addr = [
+            0x26, 0x00, 0x90, 0x00, 0x53, 0x01, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 1,
+        ];
+        sa
+    }
+
     #[test]
     fn loopback_v4_443_is_matched() {
         let sa = v4_loopback(443);
@@ -283,6 +346,46 @@ mod tests {
     }
 
     #[test]
+    fn external_http_80_is_content_redirect_candidate() {
+        let sa = v4_external(52, 84, 147, 140, 80);
+        unsafe {
+            let p = &sa as *const _ as *const libc::sockaddr;
+            assert!(should_redirect_http_content(p));
+        }
+    }
+
+    #[test]
+    fn loopback_http_80_is_not_content_redirect_candidate() {
+        let sa = v4_loopback(80);
+        unsafe {
+            let p = &sa as *const _ as *const libc::sockaddr;
+            assert!(!should_redirect_http_content(p));
+        }
+    }
+
+    #[test]
+    fn external_https_443_is_not_content_redirect_candidate() {
+        for sa in [
+            v4_external(52, 84, 147, 140, 443),
+            v4_external(52, 208, 25, 158, 443),
+        ] {
+            unsafe {
+                let p = &sa as *const _ as *const libc::sockaddr;
+                assert!(!should_redirect_http_content(p));
+            }
+        }
+    }
+
+    #[test]
+    fn external_ipv6_http_80_is_content_redirect_candidate() {
+        let sa = v6_external(80);
+        unsafe {
+            let p = &sa as *const _ as *const libc::sockaddr;
+            assert!(should_redirect_http_content(p));
+        }
+    }
+
+    #[test]
     fn rewrite_only_matched_v4_in_place_copy() {
         // Simulate the rewrite logic against a private copy (no real connect()):
         // matched loopback:443 -> 43597; everything else unchanged.
@@ -319,5 +422,12 @@ mod tests {
         assert!(armed());
         assert_eq!(FROM_PORT.load(Ordering::Relaxed), 443);
         assert_eq!(TO_PORT.load(Ordering::Relaxed), 43597);
+    }
+
+    #[test]
+    fn arm_http_content_sets_local_content_port() {
+        arm_http_content(8829);
+        assert!(armed());
+        assert_eq!(HTTP_CONTENT_TO_PORT.load(Ordering::Relaxed), 8829);
     }
 }

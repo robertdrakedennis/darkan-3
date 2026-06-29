@@ -38,15 +38,20 @@
 //!    every known JS5 prefix and patches each one present (so the wrapper process
 //!    patches `a49962fc...`, the rs2client process patches `a6400fbc...`).
 //!
-//! 3. **rs2client HTTP JS5 content port** — hardcoded port 80 (0x50) inside the
+//! 3. **rs2client HTTP JS5 content path** — hardcoded port 80 (0x50) inside the
 //!    inlined `jag::WorldLobbyData::GetHTTPURL`. RESOLVED by the RE agent
 //!    (`docs/binary/patch-targets-macos.md` §P3): clang emits port 80 as a
 //!    **16-bit** immediate (`66`-prefixed MOV), in two shapes spread across 3
 //!    inlined copies. The old `b8 50 00 00 00 eb` (32-bit) pattern is a FALSE
 //!    POSITIVE (switch-table arms). We scan both documented patterns
 //!    (`HTTP_PORT_PATTERNS`), expect exactly 3 sites total, and write the new
-//!    port as a 2-byte LE16 at +2 in each. Present only in rs2client (the
-//!    wrapper has no GetHTTPURL → 0 matches there is expected).
+//!    port as a 2-byte LE16 at +2 in each. That patch covers the documented
+//!    param-driven URL-builder copies; local captures also proved post-world
+//!    HTTP content can still dial the binary's external CDN host. In local mode
+//!    we therefore additionally interpose connect() and rewrite external `:80`
+//!    HTTP content connects to `127.0.0.1:DARKAN_HTTP_PORT`. External `:443` is
+//!    left alone because it is TLS and cannot be served by the plain local Ktor
+//!    content listener.
 //!
 //! Patches that do NOT apply to the Mach-O rs2client (verified absent in the
 //! binary — they are rs3linux-launcher-only): codebase URL regex, LZMA flag.
@@ -253,11 +258,15 @@ struct Region {
 
 #[ctor::ctor]
 fn patch_rsa() {
-    let modulus_hex = env::var("DARKAN_RSA_MODULUS").ok().filter(|v| !v.is_empty());
+    let modulus_hex = env::var("DARKAN_RSA_MODULUS")
+        .ok()
+        .filter(|v| !v.is_empty());
     let js5_modulus_hex = env::var("DARKAN_JS5_RSA_MODULUS")
         .ok()
         .filter(|v| !v.is_empty());
-    let proxy_mode = env::var("DARKAN_PROXY_MODE").map(|v| v == "1").unwrap_or(false);
+    let proxy_mode = env::var("DARKAN_PROXY_MODE")
+        .map(|v| v == "1")
+        .unwrap_or(false);
 
     // Same semantics as the Linux patcher: presence without configuration is a
     // no-op so the dylib is safe to leave inserted in live mode. (No rs3linux
@@ -386,7 +395,9 @@ fn patch_rsa() {
                     );
                 }
             }
-            _ => eprintln!("[darkan-patcher-mac] WARNING: DARKAN_JS5_RSA_MODULUS is invalid or too long"),
+            _ => eprintln!(
+                "[darkan-patcher-mac] WARNING: DARKAN_JS5_RSA_MODULUS is invalid or too long"
+            ),
         }
     } else {
         eprintln!("[darkan-patcher-mac] DARKAN_JS5_RSA_MODULUS not set — skipping JS5 patch");
@@ -403,67 +414,77 @@ fn patch_rsa() {
         eprintln!("[darkan-patcher-mac] Proxy mode: skipping HTTP port patch");
     } else if let Ok(port_str) = env::var("DARKAN_HTTP_PORT") {
         if let Ok(port) = port_str.parse::<u16>() {
-            let port_le = port.to_le_bytes(); // 2-byte LE16
-
-            // Collect matches for every pattern first so we can validate the
-            // total before writing anything (abort-on-drift, per the RE doc).
-            let mut per_pattern: Vec<(usize, Vec<usize>)> = Vec::new();
-            let mut total = 0usize;
-            for (i, p) in HTTP_PORT_PATTERNS.iter().enumerate() {
-                let finder = Finder::new(p.pattern);
-                let matches = find_all(&regions, &finder);
-                total += matches.len();
-                per_pattern.push((i, matches));
-            }
-
-            if total == 0 {
-                // Expected in the wrapper image (no GetHTTPURL); a real warning
-                // only in rs2client. We can't cheaply tell which image we're in,
-                // so log at WARNING and move on.
-                eprintln!(
-                    "[darkan-patcher-mac] HTTP port: 0 sites in this image (expected for the \
-                     RuneScape.app wrapper; in rs2client this means requests still hit port 80)"
-                );
-            } else if total != HTTP_PORT_EXPECTED_TOTAL {
-                // Drift guard: the RE doc pins exactly 3 sites. Any other non-zero
-                // count means the binary changed — refuse rather than mis-patch.
-                eprintln!(
-                    "[darkan-patcher-mac] WARNING: HTTP port matched {} sites, expected {} \
-                     (binary drift?) — refusing to patch. Re-run the RE agent on the Mach-O.",
-                    total, HTTP_PORT_EXPECTED_TOTAL
-                );
+            if port == 0 {
+                eprintln!("[darkan-patcher-mac] WARNING: DARKAN_HTTP_PORT is 0 — skipping HTTP port/content patches");
             } else {
-                let mut patched = 0usize;
-                for (i, matches) in &per_pattern {
-                    let p = &HTTP_PORT_PATTERNS[*i];
-                    if matches.len() != p.expected {
-                        eprintln!(
-                            "[darkan-patcher-mac] NOTE: HTTP port pattern[{}] matched {} sites (expected {})",
-                            i,
-                            matches.len(),
-                            p.expected
-                        );
-                    }
-                    for site in matches {
-                        let addr = site + p.port_offset;
-                        if patch_memory(addr, &port_le) {
-                            patched += 1;
+                let port_le = port.to_le_bytes(); // 2-byte LE16
+                world_redirect::arm_http_content(port);
+                eprintln!(
+                    "[darkan-patcher-mac] HTTP content redirect ARMED: external :80 -> 127.0.0.1:{} \
+                     (external :443 TLS left untouched)",
+                    port
+                );
+
+                // Collect matches for every pattern first so we can validate the
+                // total before writing anything (abort-on-drift, per the RE doc).
+                let mut per_pattern: Vec<(usize, Vec<usize>)> = Vec::new();
+                let mut total = 0usize;
+                for (i, p) in HTTP_PORT_PATTERNS.iter().enumerate() {
+                    let finder = Finder::new(p.pattern);
+                    let matches = find_all(&regions, &finder);
+                    total += matches.len();
+                    per_pattern.push((i, matches));
+                }
+
+                if total == 0 {
+                    // Expected in the wrapper image (no GetHTTPURL); a real warning
+                    // only in rs2client. We can't cheaply tell which image we're in,
+                    // so log at WARNING and move on.
+                    eprintln!(
+                        "[darkan-patcher-mac] HTTP port: 0 sites in this image (expected for the \
+                         RuneScape.app wrapper; in rs2client this means requests still hit port 80)"
+                    );
+                } else if total != HTTP_PORT_EXPECTED_TOTAL {
+                    // Drift guard: the RE doc pins exactly 3 sites. Any other non-zero
+                    // count means the binary changed — refuse rather than mis-patch.
+                    eprintln!(
+                        "[darkan-patcher-mac] WARNING: HTTP port matched {} sites, expected {} \
+                         (binary drift?) — refusing to patch. Re-run the RE agent on the Mach-O.",
+                        total, HTTP_PORT_EXPECTED_TOTAL
+                    );
+                } else {
+                    let mut patched = 0usize;
+                    for (i, matches) in &per_pattern {
+                        let p = &HTTP_PORT_PATTERNS[*i];
+                        if matches.len() != p.expected {
                             eprintln!(
-                                "[darkan-patcher-mac] Patched HTTP content port at 0x{:x} (80 -> {})",
-                                site, port
-                            );
-                        } else {
-                            eprintln!(
-                                "[darkan-patcher-mac] ERROR: failed to patch HTTP port at 0x{:x}",
-                                site
+                                "[darkan-patcher-mac] NOTE: HTTP port pattern[{}] matched {} sites (expected {})",
+                                i,
+                                matches.len(),
+                                p.expected
                             );
                         }
+                        for site in matches {
+                            let addr = site + p.port_offset;
+                            if patch_memory(addr, &port_le) {
+                                patched += 1;
+                                eprintln!(
+                                    "[darkan-patcher-mac] Patched HTTP content port at 0x{:x} (80 -> {})",
+                                    site, port
+                                );
+                            } else {
+                                eprintln!(
+                                    "[darkan-patcher-mac] ERROR: failed to patch HTTP port at 0x{:x}",
+                                    site
+                                );
+                            }
+                        }
                     }
+                    eprintln!(
+                        "[darkan-patcher-mac] HTTP port: patched {}/{} sites (80 -> {})",
+                        patched, HTTP_PORT_EXPECTED_TOTAL, port
+                    );
                 }
-                eprintln!(
-                    "[darkan-patcher-mac] HTTP port: patched {}/{} sites (80 -> {})",
-                    patched, HTTP_PORT_EXPECTED_TOTAL, port
-                );
             }
         } else {
             eprintln!("[darkan-patcher-mac] WARNING: DARKAN_HTTP_PORT is not a valid u16 — skipping HTTP port patch");
@@ -770,7 +791,10 @@ mod tests {
     #[test]
     fn test_hex_to_bytes() {
         assert_eq!(hex_to_bytes("deadbeef"), Some(vec![0xde, 0xad, 0xbe, 0xef]));
-        assert_eq!(hex_to_bytes("0xDEADBEEF"), Some(vec![0xde, 0xad, 0xbe, 0xef]));
+        assert_eq!(
+            hex_to_bytes("0xDEADBEEF"),
+            Some(vec![0xde, 0xad, 0xbe, 0xef])
+        );
         assert_eq!(hex_to_bytes(""), Some(vec![]));
         assert_eq!(hex_to_bytes("abc"), None);
         assert_eq!(hex_to_bytes("zz"), None);
@@ -787,7 +811,10 @@ mod tests {
         // The RuneScape.app wrapper's 4096-bit launcher key (== rs3linux's key).
         // Must be byte-identical to the Linux patcher's RS3LINUX_MODULUS_PREFIX.
         assert_eq!(RUNESCAPE_WRAPPER_JS5_MODULUS_PREFIX.len(), 32);
-        assert_eq!(RUNESCAPE_WRAPPER_JS5_MODULUS_PREFIX, b"a49962fc0737fddcd94c0daf84e5d214");
+        assert_eq!(
+            RUNESCAPE_WRAPPER_JS5_MODULUS_PREFIX,
+            b"a49962fc0737fddcd94c0daf84e5d214"
+        );
         // Both JS5 prefixes are tried; each is a 32-char hex prefix.
         assert_eq!(JS5_MODULUS_PREFIXES.len(), 2);
         assert!(JS5_MODULUS_PREFIXES.contains(&RS2CLIENT_JS5_MODULUS_PREFIX));

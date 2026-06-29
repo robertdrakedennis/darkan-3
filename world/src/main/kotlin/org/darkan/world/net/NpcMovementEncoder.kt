@@ -10,8 +10,8 @@ import world.gregs.voidps.buffer.write.BufferWriter
  * and delegates the bytes here, with ext-info gating delegated to [NpcExtInfoEncoder].
  *
  * Wire references (relocated verbatim with their code — do not delete):
- *  * Phase 1 update — `docs/net/serverprot/npc-info-947-3.md` §"Phase 1".
- *  * Phase 2 add — §"Phase 2 — Add new NPCs".
+ *  * Phase 1 update — `docs/kb/glossary/player-npc-info.md` §"s2c op52 — NpcInfo bit-loop semantics".
+ *  * Phase 2 add — `docs/kb/glossary/player-npc-info.md` §"s2c op52 — NpcInfo framing".
  *
  * **Current behavior (preserved EXACTLY):** Phase 1 emits `movementType=0` for every updated NPC
  * (no walk). No real NPC motion is produced.
@@ -35,7 +35,7 @@ object NpcMovementEncoder {
      * ext-info side-effect is undecoded; the orchestrator appends to the flagged list if ext-info
      * exists, accepting a harmless 1-tick ext-info on a possibly-removed NPC).
      *
-     * Relocated unchanged from the `NpcInfoBuilder.build` Phase-1 body — byte output is identical.
+     * Relocated unchanged from the old monolithic builder's Phase-1 body — byte output is identical.
      */
     fun encodePhase1Update(out: BufferWriter) {
         out.writeBits(2, MOVEMENT_TYPE_NONE)
@@ -57,7 +57,7 @@ object NpcMovementEncoder {
      * 0xFFFF sentinel are reserved). [hasExtInfo] is computed by the orchestrator via
      * [NpcExtInfoEncoder] and passed in so the flagged-list bookkeeping stays in one place.
      *
-     * Relocated unchanged from the `NpcInfoBuilder.build` Phase-2 body — byte output is identical.
+     * Relocated unchanged from the old monolithic builder's Phase-2 body — byte output is identical.
      */
     fun encodePhase2Add(
         out: BufferWriter,

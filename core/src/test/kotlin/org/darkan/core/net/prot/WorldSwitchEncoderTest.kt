@@ -99,7 +99,7 @@ class WorldSwitchEncoderTest {
         // Verified field-by-field against rs2client.948-5 handler @ 0x001daa70.
         val zoneX = 400        // 0x0190
         val zoneZ = 401        // 0x0191 — distinct from X, and high byte non-zero to prove LE order
-        val cameraRotation = 3
+        val npcInfoCoordBitWidth = 3
         val sceneRootId = 0
         val packedA = 0x01234567
         val packedB = 0x089ABCDE
@@ -110,7 +110,7 @@ class WorldSwitchEncoderTest {
                 zoneZ = zoneZ,
                 packedCoordA = packedA,
                 packedCoordB = packedB,
-                cameraRotation = cameraRotation,
+                npcInfoCoordBitWidth = npcInfoCoordBitWidth,
                 sceneRootId = sceneRootId,
             )
         )
@@ -121,7 +121,7 @@ class WorldSwitchEncoderTest {
             ((zoneZ ushr 8) and 0xFF).toByte(),     // +2 Z high = 0x01
             0x85.toByte(),                          // +3 magic
             (zoneX ushr 8).toByte(), zoneX.toByte(),// +4 X BE = 01 90
-            ((cameraRotation + 0x80) and 0xFF).toByte(), // +6 camera (writeByteAdd)
+            ((npcInfoCoordBitWidth + 0x80) and 0xFF).toByte(), // +6 NPC coord bit width (writeByteAdd)
             0x00,                                   // +7 filler
             (sceneRootId ushr 8).toByte(), sceneRootId.toByte(), // +8 sceneRootId BE
             // +10 packedA BE
@@ -156,7 +156,7 @@ class WorldSwitchEncoderTest {
                 zoneZ = 400,
                 packedCoordA = RebuildNormalSimple.packRegionCoord(regionX = 48, regionZ = 48),
                 packedCoordB = RebuildNormalSimple.packRegionCoord(regionX = 52, regionZ = 52),
-                cameraRotation = 0,
+                npcInfoCoordBitWidth = 0,
                 sceneRootId = 300,
                 // no rebuildPrefix — defaults to ByteArray(0) → bare 18-byte header
             )
@@ -182,7 +182,7 @@ class WorldSwitchEncoderTest {
                 zoneZ = 404,
                 packedCoordA = RebuildNormalSimple.packRegionCoord(regionX = 48, regionZ = 48),
                 packedCoordB = RebuildNormalSimple.packRegionCoord(regionX = 52, regionZ = 52),
-                cameraRotation = 7,
+                npcInfoCoordBitWidth = 7,
                 sceneRootId = 474,
                 rebuildPrefix = prefix,
             )

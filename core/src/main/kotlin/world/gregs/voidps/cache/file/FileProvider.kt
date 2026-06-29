@@ -28,6 +28,8 @@ interface FileProvider {
 
     fun data(index: Int, archive: Int): ByteArray?
 
+    fun version(index: Int, archive: Int): Int? = null
+
     /**
      * Serves a single JS5 response with correct per-response block framing.
      *

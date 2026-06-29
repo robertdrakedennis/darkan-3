@@ -6,7 +6,7 @@
 //!     session.json        summary (rewritten on start + at stop)
 //!     framed-s2c.jsonl     one flat JSON object per S->C framed packet
 //!     framed-c2s.jsonl     one flat JSON object per C->S framed packet
-//!     socket.jsonl         raw ClientStream Read/Write bytes (ciphertext + RSA)
+//!     socket.jsonl         raw ClientStream bytes + additive libc send/recv fd bytes
 //!     events.jsonl         state_change / connect / disconnect / process
 //!     blobs/<sha256-prefix>.bin   bodies > 8192 bytes (referenced by body_ref)
 //!     raw-<role>-s2c.bin / raw-<role>-c2s.bin   optional cross-validation
@@ -149,6 +149,15 @@ fn encode_local_player(lp: &crate::oracle::LocalPlayer) -> serde_json::Value {
     if let Some(p) = lp.render_model {
         o.insert("render_model".into(), ptr(p));
     }
+    if let Some(v) = lp.last_movespeed {
+        o.insert("last_movespeed".into(), json!(v));
+    }
+    if let Some(v) = lp.animation_id {
+        o.insert("animation_id".into(), json!(v));
+    }
+    if let Some(v) = lp.animation_frame {
+        o.insert("animation_frame".into(), json!(v));
+    }
     if let Some(p) = lp.render_graph_node {
         o.insert("render_graph_node".into(), ptr(p));
     }
@@ -200,21 +209,22 @@ fn encode_local_player(lp: &crate::oracle::LocalPlayer) -> serde_json::Value {
     if let Some(p) = lp.current_appearance {
         o.insert("current_appearance".into(), ptr(p));
     }
-    if let Some(v) = lp.pending_needs_async_load {
-        o.insert("pending_needs_async_load".into(), json!(v));
+    if let Some(v) = lp.applied_bas {
+        o.insert("applied_bas".into(), json!(v));
     }
+    o.insert(
+        "pending_needs_async_load".into(),
+        json!(lp.pending_needs_async_load),
+    );
     if let Some(v) = lp.pending_0x89 {
         o.insert("pending_0x89".into(), json!(v));
     }
-    if let Some(v) = lp.pending_composed_flag {
-        o.insert("pending_composed_flag".into(), json!(v));
-    }
-    if let Some(v) = lp.pending_res_7c {
-        o.insert("pending_res_7c".into(), json!(v));
-    }
-    if let Some(v) = lp.pending_res_80 {
-        o.insert("pending_res_80".into(), json!(v));
-    }
+    o.insert(
+        "pending_composed_flag".into(),
+        json!(lp.pending_composed_flag),
+    );
+    o.insert("pending_res_7c".into(), json!(lp.pending_res_7c));
+    o.insert("pending_res_80".into(), json!(lp.pending_res_80));
     if let Some(v) = lp.pending_0x84 {
         o.insert("pending_0x84".into(), json!(v));
     }
@@ -442,6 +452,30 @@ impl Session {
             "len": len,
             "len_only": true,
         });
+        let mut files = self.files.lock();
+        Self::write_line(&mut files.socket, &obj);
+    }
+
+    /// Emit one lower-level libc socket line. These rows are additive
+    /// observability for non-ClientStream transports (HTTP JS5/content/CDN) and
+    /// are tagged with `source=libc` plus fd/peer metadata so protocol validators
+    /// can keep using the existing ClientStream rows as their game/login oracle.
+    pub fn socket_fd(&self, dir: &str, conn: &str, fd: i32, peer: &str, port: u16, body: &[u8]) {
+        let (body_key, body_val) = self.encode_body(body);
+        let mut obj = json!({
+            "ts": wall_iso_now(),
+            "mono_us": self.mono_us() as u64,
+            "proc": self.proc.as_str(),
+            "plane": "socket",
+            "source": "libc",
+            "dir": dir,
+            "conn": conn,
+            "fd": fd,
+            "peer": peer,
+            "port": port,
+            "len": body.len(),
+        });
+        obj[body_key] = body_val;
         let mut files = self.files.lock();
         Self::write_line(&mut files.socket, &obj);
     }
@@ -883,6 +917,25 @@ mod tests {
             .collect()
     }
 
+    #[test]
+    fn socket_fd_emits_libc_source_and_peer_metadata() {
+        let (s, dir) = temp_session();
+        s.socket_fd("s2c", "fd-http", 31, "127.0.0.1:8829", 8829, &[1, 2, 3]);
+
+        let rows = read_jsonl(&dir, "socket.jsonl");
+        let row = &rows[0];
+        assert_eq!(row["plane"], "socket");
+        assert_eq!(row["source"], "libc");
+        assert_eq!(row["dir"], "s2c");
+        assert_eq!(row["conn"], "fd-http");
+        assert_eq!(row["fd"], 31);
+        assert_eq!(row["peer"], "127.0.0.1:8829");
+        assert_eq!(row["port"], 8829);
+        assert_eq!(row["len"], 3);
+        assert_eq!(row["body"], "AQID");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// The state-snapshots.jsonl contract: a full in-world snapshot emits every
     /// documented key with the right shapes.
     #[test]
@@ -1189,8 +1242,8 @@ mod tests {
 
     /// When the pending-appearance pointer is readable-but-null (`Some(0)`), the
     /// pointer field is still emitted as "0x0" (compose already ran / no pending),
-    /// while the gate bytes/keys — unreadable because there is no object — are ABSENT.
-    /// This is the "compose ran but produced null" signal, distinct from "blocked".
+    /// while the always-on gate keys are still visible as null. This is the
+    /// "compose ran but produced null" signal, distinct from "blocked".
     #[test]
     fn local_player_null_pending_emits_ptr_omits_gate() {
         use crate::oracle::LocalPlayer;
@@ -1212,8 +1265,8 @@ mod tests {
         assert_eq!(p["pending_appearance"], "0x0");
         // current_appearance "0x0" + pending "0x0" => the compose never ran for the avatar.
         assert_eq!(p["current_appearance"], "0x0");
-        assert!(p.get("pending_composed_flag").is_none());
-        assert!(p.get("pending_needs_async_load").is_none());
+        assert!(p["pending_composed_flag"].is_null());
+        assert!(p["pending_needs_async_load"].is_null());
         let _ = fs::remove_dir_all(&dir);
     }
 

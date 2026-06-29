@@ -18,7 +18,7 @@ import world.gregs.voidps.buffer.write.BufferWriter
  * orchestrator ([PlayerInfoEncoder]) and movement encoder ([PlayerMovementEncoder]) call into it.
  *
  * Wire reference (relocated verbatim — do not delete): ext-info layout is
- * `docs/net/serverprot/player-info-947-3.md` §4C — a 1..4 byte expansion-driven LE flag bitset
+ * `docs/net/serverprot/player-extinfo-948.md` — a 1..4 byte expansion-driven LE flag bitset
  * followed by per-flag blocks in ascending [PlayerUpdateMaskKey.order]; encoders dispatched via
  * [PlayerUpdateMaskEncoder] (registered in `Rev948ServerCodecsUpdateMasks.kt`).
  *
@@ -47,7 +47,7 @@ object PlayerExtInfoEncoder {
      * at startup. If null (no codec registered, or the revision doesn't model APPEARANCE) we skip the
      * synth and rely on explicit `setPlayer(rev.APPEARANCE, ...)` from game logic.
      *
-     * Relocated unchanged from `PlayerInfoBuilder.encodeExtendedInfoBlock` — byte output is identical.
+     * Relocated unchanged from the old monolithic builder's ext-info block encoder — byte output is identical.
      */
     fun encodeExtendedInfoBlock(target: Player): ByteArray {
         val extOut = BufferWriter(256)
@@ -120,7 +120,7 @@ object PlayerExtInfoEncoder {
      * **Side effect (preserved):** the first time a viewer sees the target's appearance this records
      * it into `viewer.viewport.cachedApprHashes[target.index]`, so the next tick returns false.
      *
-     * Relocated unchanged from `PlayerInfoBuilder.needsAnyUpdate` — behavior is identical.
+     * Relocated unchanged from the old monolithic builder's update gate — behavior is identical.
      */
     fun needsAnyUpdate(viewer: Player, target: Player): Boolean {
         if (target.pendingUpdates.hasPlayerUpdates()) return true
@@ -142,7 +142,7 @@ object PlayerExtInfoEncoder {
      * APPEARANCE block would emit non-empty bytes. Used to gate the `hasExtendedInfo` bit in
      * [PlayerMovementEncoder.encodeHighResPosition] / [PlayerMovementEncoder.encodeAbsoluteTile].
      *
-     * Relocated unchanged from `PlayerInfoBuilder.hasFlaggableExtendedInfo` — behavior is identical.
+     * Relocated unchanged from the old monolithic builder's ext-info gate — behavior is identical.
      */
     fun hasFlaggableExtendedInfo(target: Player): Boolean {
         val entries = target.pendingUpdates.playerMaskEntries()

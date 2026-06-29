@@ -9,16 +9,17 @@ import world.gregs.voidps.type.Tile
  * Per NPC_INFO (op 12) Phase 2, every newly spawned NPC must be transmitted with its
  * type id, coord-relative position bits, and a "spawned this tick" flag so the client
  * can allocate render slots. [spawned] is set true on construction and cleared by the
- * NpcInfoBuilder after the first tick's Phase 2 emission.
+ * NpcInfoEncoder after the first tick's Phase 2 emission.
  */
 class Npc(
     override val index: Int,
     val typeId: Int,
     /**
-     * Bit width of the per-zone coordinate field used for NPC_INFO Phase 2 add-entries.
-     * Read from `NpcList+0x1dc4` per A5 phase 2 — defaults to 14 (matches 947-3 capture).
+     * Bit width of the per-zone coordinate field used for NPC_INFO Phase 2 add-entries. The client
+     * takes this from op81's +6 byte; it must match the RebuildNormalSimple value or NPC adds desync.
+     * Rev948 official login uses 7 (947-3 used 14).
      */
-    val coordBitWidthZone: Int = 14,
+    val coordBitWidthZone: Int = 7,
     initialTile: Tile,
 ) : Entity() {
     init {

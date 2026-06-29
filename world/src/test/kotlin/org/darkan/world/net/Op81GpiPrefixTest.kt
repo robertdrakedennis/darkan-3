@@ -21,8 +21,8 @@ import kotlin.test.assertTrue
  *  - the generated prefix is **exactly 5119 bytes** (`30 + 2046×20 = 40950` bits, byte-aligned),
  *  - its **first 30 bits decode back to `spawnTile.id`** (the local player's absolute tile, read
  *    DIRECTLY by the client's prefix parser — no `[hasUpdate][hasExt][moveType]` header),
- *  - the other-slot words are **2046 all-zero** 20-bit words (absent slots; correct for a solo
- *    spawn) and the **local `playerIndex` is skipped**,
+ *  - the other-slot words seed empty slots with the local map square and the **local
+ *    `playerIndex` is skipped**,
  *  - threaded through the 948 op81 codec with the coord header, the **body is 5137 bytes** and the
  *    **magic byte `0x85` lands at body offset 5122** (= 5119 prefix + 3),
  *  - the prefix's local tile, the op81 centre zone, and the build area all derive from ONE tile —
@@ -75,21 +75,22 @@ class Op81GpiPrefixTest {
     }
 
     @Test
-    fun `the 2046 other-slot words are all zero and the local index is skipped`() {
+    fun `the 2046 empty other-slot words seed the local map square and the local index is skipped`() {
         val spawn = Tile(3235, 3234, 0)
         val localIndex = 1
         val prefix = Op81GpiPrefix.build(spawnTile = spawn, localPlayerIndex = localIndex)
+        val expectedSeed = ((spawn.level and 0x3) shl 16) or
+            (((spawn.x ushr 6) and 0xFF) shl 8) or
+            ((spawn.y ushr 6) and 0xFF)
 
         val r = BufferReader(prefix)
         r.startBitAccess()
         r.readBits(30) // skip the local player's absolute tile
-        var nonZero = 0
         repeat(Op81GpiPrefix.TOTAL_SLOTS - 2) { // 2046 other-slot words
-            if (r.readBits(Op81GpiPrefix.OTHER_SLOT_BITS) != 0) nonZero++
+            assertEquals(expectedSeed, r.readBits(Op81GpiPrefix.OTHER_SLOT_BITS))
         }
         r.stopBitAccess()
 
-        assertEquals(0, nonZero, "all 2046 other-slot words must be zero (absent) for a solo spawn")
         // Bit accounting proves the loop wrote exactly 2046 words (skipping one of 2047): if the
         // local index had NOT been skipped, the stream would be 20 bits longer and not byte-align
         // to 5119. The size assertion above + this full consume confirm the 2046 count.
@@ -107,7 +108,7 @@ class Op81GpiPrefixTest {
                 zoneZ = spawn.zone.y,
                 packedCoordA = buildArea.packedCoordA,
                 packedCoordB = buildArea.packedCoordB,
-                cameraRotation = 7,
+                npcInfoCoordBitWidth = 7,
                 sceneRootId = 474,
                 rebuildPrefix = prefix,
             )

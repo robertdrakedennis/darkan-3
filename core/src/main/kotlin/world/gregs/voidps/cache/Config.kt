@@ -28,4 +28,5 @@ object Config {
     const val HIT_BARS = 72
     const val ANIM_FLOW_CONTROL = 77
     const val VAR_GROUP = 80
+    const val WORLD_AREAS = 83
 }

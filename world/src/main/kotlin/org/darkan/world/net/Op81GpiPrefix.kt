@@ -1,5 +1,6 @@
 package org.darkan.world.net
 
+import org.darkan.world.world.Players
 import world.gregs.voidps.buffer.write.BufferWriter
 import world.gregs.voidps.type.Tile
 
@@ -22,15 +23,10 @@ import world.gregs.voidps.type.Tile
  *     parser that prefixed form would mis-decode the local tile (the header bits would be swallowed
  *     into the high bits of the "tile") — INCOMPATIBLE. Hence a distinct encoder.
  *   - **Other slots:** a loop `slot = 1..2047` that **skips the local `playerIndex`** ⇒ exactly
- *     **2046** iterations, each `gBit(20)` = a packed region-init word. NOTE (adversarial review
- *     2026-06-23): a zero word is **NOT** the "absent" sentinel — `DecodePackedCoord`'s absent
- *     sentinel is `0xFFFFFFFF` (unreachable from 20 bits), and the parser has no presence bit, so it
- *     `operator_new`s a low-res entry for EVERY non-local slot regardless. Zero decodes to a real
- *     coord {plane 0, region (0,0)}. This is HARMLESS for a solo spawn — the entry is an inert
- *     low-res position baseline (not rendered, not a map-load trigger; map squares come from the
- *     BuildArea grid, not player entries). But it is NOT "absent": when multiplayer GPI is built,
- *     each visible player's packed low-res region MUST be written into its slot from the viewport
- *     low-res cohort, not left zero.
+ *     **2046** iterations, each `gBit(20)` = a packed region-init word. NOTE: a zero word is **NOT**
+ *     an "absent" sentinel; the parser allocates a low-res entry for every non-local slot. Empty
+ *     slots are therefore seeded with the local player's map square instead of map square (0,0), and
+ *     occupied slots are seeded with that player's current map square.
  *
  * Total: `30 + 2046×20 = 40950 bits`, which byte-aligns to **5119 bytes** (the last byte carries
  * `40950 mod 8 = 6` used bits + 2 zero pad bits). The parser byte-aligns the cursor at its tail
@@ -80,7 +76,7 @@ object Op81GpiPrefix {
     const val PREFIX_BYTES: Int = 5119
 
     /**
-     * Builds the 5119-byte GPI-prefix for a solo world-login spawn.
+     * Builds the 5119-byte GPI-prefix for a world-login spawn.
      *
      * @param spawnTile      the local player's absolute spawn tile. Its [Tile.id]
      *                       (`(plane<<28)|(x<<14)|y`) is written as the leading 30-bit word and
@@ -105,11 +101,16 @@ object Op81GpiPrefix {
         // [hasUpdate][hasExt][moveType] header — that is the op22 per-tick shape, not this).
         out.writeBits(LOCAL_TILE_BITS, spawnTile.id)
 
-        // Other slots: loop 1..2047 skipping the local index ⇒ exactly 2046 × gBit(20)=0 (absent).
+        val defaultSeed = packLowResSeed(spawnTile)
+
+        // Other slots: loop 1..2047 skipping the local index. Each word is
+        // moveSpeed(2)|plane(2)|mapSquareX(8)|mapSquareY(8), seeded from the occupant if present,
+        // otherwise from the local player's map square.
         var written = 0
         for (slot in 1 until TOTAL_SLOTS) {
             if (slot == localPlayerIndex) continue
-            out.writeBits(OTHER_SLOT_BITS, 0)
+            val occupantTile = Players.get(slot)?.tile
+            out.writeBits(OTHER_SLOT_BITS, if (occupantTile != null) packLowResSeed(occupantTile) else defaultSeed)
             written++
         }
         check(written == TOTAL_SLOTS - 2) {
@@ -123,4 +124,9 @@ object Op81GpiPrefix {
         }
         return bytes
     }
+
+    private fun packLowResSeed(tile: Tile): Int =
+        ((tile.level and 0x3) shl 16) or
+            (((tile.x ushr 6) and 0xFF) shl 8) or
+            ((tile.y ushr 6) and 0xFF)
 }

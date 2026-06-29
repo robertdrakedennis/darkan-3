@@ -588,4 +588,7 @@ object OServerConnection {
 object OConnectionManager {
     const val GAME_CONNECTION = 0x18L    // ServerConnection* (active when LOGGED_IN / mainState 30)
     const val LOGIN_CONNECTION = 0x28L   // ServerConnection* (active during login states)
+    // ConnectionManager::TcpIn(connMgr, serverConnectionHandle) reads the live OServerConnection
+    // state being drained as *(serverConnectionHandle + 8).
+    const val HANDLE_STATE = 0x8L
 }

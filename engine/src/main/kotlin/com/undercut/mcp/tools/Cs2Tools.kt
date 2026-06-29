@@ -39,9 +39,9 @@ object Cs2Tools {
         val env = System.getenv("UNDERCUT_DUMPS_DIR")
         val candidates = mutableListOf<Path>()
         if (env != null) candidates.add(Paths.get(env, "cs2"))
-        candidates.add(Paths.get(System.getProperty("user.home"), "projects", "project-undercut", "rs3-cs2-dumps", "cs2"))
-        candidates.add(Paths.get(System.getProperty("user.dir"), "rs3-cs2-dumps", "cs2"))
-        Paths.get(System.getProperty("user.dir")).parent?.resolve("rs3-cs2-dumps/cs2")?.let { candidates.add(it) }
+        val cwd = Paths.get(System.getProperty("user.dir"))
+        candidates.add(cwd.resolve("re-resources/cs2-dumps/cs2"))
+        cwd.parent?.resolve("re-resources/cs2-dumps/cs2")?.let { candidates.add(it) }
         val found = candidates.firstOrNull { Files.isDirectory(it) }
         scriptDirCache = found
         return found
@@ -51,13 +51,13 @@ object Cs2Tools {
 
     private fun loadOpcodeMap(): Map<Int, OpcodeRow> {
         opcodeMapCache?.let { return it }
-        val candidates = listOf(
-            Paths.get(System.getProperty("user.dir"), "..", "cs2_opcode_handlers.txt").normalize(),
-            Paths.get(System.getProperty("user.dir"), "cs2_opcode_handlers.txt"),
-            Paths.get(System.getProperty("user.home"), "projects", "project-undercut", "cs2_opcode_handlers.txt"),
+        val cwd = Paths.get(System.getProperty("user.dir"))
+        val candidates = listOfNotNull(
+            cwd.resolve("re-resources/symbols/cs2_opcode_handlers.txt"),
+            cwd.parent?.resolve("re-resources/symbols/cs2_opcode_handlers.txt"),
         )
         val file = candidates.firstOrNull { Files.isRegularFile(it) }
-            ?: throw EngineState("cs2_opcode_handlers.txt not found in any of: $candidates")
+            ?: throw EngineState("re-resources/symbols/cs2_opcode_handlers.txt not found in any of: $candidates")
         val map = mutableMapOf<Int, OpcodeRow>()
         Files.lines(file).use { lines ->
             for (raw in lines) {
@@ -82,7 +82,7 @@ object Cs2Tools {
         server.addTool(
             name = "get_cs2_script",
             description = """
-                Purpose: Read the decompiled source of a single CS2 client script by id from the rs3-cs2-dumps/cs2/ folder. Returns the full source text plus metadata (line count, byte size, file path).
+                Purpose: Read the decompiled source of a single CS2 client script by id from the re-resources/cs2-dumps/cs2/ folder. Returns the full source text plus metadata (line count, byte size, file path).
                 || Returns: JSON envelope with: script_id, exists, path, lines, size_bytes, source (the file content; only included when line_range or full file requested).
                 || Inputs: `id` (required int). `line_range` (optional string "start-end", 1-indexed) — return only those lines. `head` (optional int) — return only the first N lines. `tail` (optional int) — return only the last N lines. If multiple slicing params are passed, head takes precedence.
                 || Use cases: "Show me the source of clientscript-75 to understand what it does", "Read the first 30 lines of a 2000-line script to find its signature", "Inspect the dialog continuation script".
@@ -114,7 +114,7 @@ object Cs2Tools {
             safeJsonCall("get_cs2_script") { _ ->
                 val args = request.arguments ?: throw BadRequest("missing arguments")
                 val id = args["id"]?.jsonPrimitive?.content?.toIntOrNull() ?: throw BadRequest("missing/invalid 'id'")
-                val path = scriptPathFor(id) ?: throw EngineState("rs3-cs2-dumps/cs2/ not found; set UNDERCUT_DUMPS_DIR")
+                val path = scriptPathFor(id) ?: throw EngineState("re-resources/cs2-dumps/cs2/ not found; set UNDERCUT_DUMPS_DIR")
 
                 put("script_id", id)
                 put("path", path.toAbsolutePath().toString())
@@ -152,7 +152,7 @@ object Cs2Tools {
         server.addTool(
             name = "search_cs2_scripts",
             description = """
-                Purpose: Search every clientscript-*.ts file in rs3-cs2-dumps/cs2/ for a query string or regex. Returns each hit with the script id, line number, matched line, and optional context lines.
+                Purpose: Search every clientscript-*.ts file in re-resources/cs2-dumps/cs2/ for a query string or regex. Returns each hit with the script id, line number, matched line, and optional context lines.
                 || Returns: JSON envelope with query, regex, count, total_files_scanned, items[]. Each item: script_id, line, text, context_before[], context_after[].
                 || Inputs: `query` (required string), `regex` (optional bool, default false), `case_sensitive` (optional bool, default false), `before` (optional int, default 0) lines of context above match, `after` (optional int, default 0), `limit` (optional int, default 50, hard max 500).
                 || Use cases: "Where is varbit_9159 referenced?", "Find every script calling gosub_with_params(75, ...)", "Look up uses of an opcode name".
@@ -198,7 +198,7 @@ object Cs2Tools {
                 val after = args["after"]?.jsonPrimitive?.content?.toIntOrNull()?.coerceAtLeast(0) ?: 0
                 val limit = (args["limit"]?.jsonPrimitive?.content?.toIntOrNull() ?: 50).coerceIn(1, 500)
 
-                val dir = locateScriptsDir() ?: throw EngineState("rs3-cs2-dumps/cs2/ not found")
+                val dir = locateScriptsDir() ?: throw EngineState("re-resources/cs2-dumps/cs2/ not found")
 
                 val pattern: Regex? = if (isRegex) {
                     val opts = if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
@@ -273,12 +273,12 @@ object Cs2Tools {
         server.addTool(
             name = "get_cs2_opcode_info",
             description = """
-                Purpose: Look up a CS2 opcode by id and return its native handler address (absolute hex) and Ghidra function name from the project-root cs2_opcode_handlers.txt table.
+                Purpose: Look up a CS2 opcode by id and return its native handler address (absolute hex) and Ghidra function name from the re-resources/symbols/cs2_opcode_handlers.txt table.
                 || Returns: JSON envelope with: opcode, hex, handler_addr (absolute hex string), handler_addr_rel (base-relative), ghidra_name. When the opcode is not in the table, returns exists=false.
                 || Inputs: `opcode` (optional int) — pass either this OR `hex` (optional hex string). One of the two is required.
                 || Use cases: "What native function implements opcode 0x1234?", "Get the handler address so I can read its bytes with read_memory", "Map an unknown opcode in a script back to a Ghidra function name".
                 || Related tools: read_memory (drill into handler bytes), find_cs2_callers (who calls this opcode), search_cs2_scripts (find scripts using opcode name).
-                || Pitfalls: The table at cs2_opcode_handlers.txt is generated offline from RegisterAllOpcodes; it can be stale if the binary version changed. Handler addrs are absolute in the loaded process image.
+                || Pitfalls: The table at re-resources/symbols/cs2_opcode_handlers.txt is generated offline from RegisterAllOpcodes; it can be stale if the binary version changed. Handler addrs are absolute in the loaded process image.
             """.trimIndent().replace("\n", " "),
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
@@ -356,7 +356,7 @@ object Cs2Tools {
                 put("target_id", id)
                 put("patterns", buildJsonArray { for (p in patterns) add(JsonPrimitive(p)) })
 
-                val dir = locateScriptsDir() ?: throw EngineState("rs3-cs2-dumps/cs2/ not found")
+                val dir = locateScriptsDir() ?: throw EngineState("re-resources/cs2-dumps/cs2/ not found")
                 val regexes = patterns.map { Regex(it) }
 
                 val hits = mutableListOf<Map<String, Any>>()

@@ -126,6 +126,15 @@ pub struct LocalPlayer {
     /// PathingEntity render-model pointer (`avatar+0xC58`). 0 => no model handle
     /// attached (model not loaded/built).
     pub render_model: Option<usize>,
+    /// OPathingEntity.LAST_MOVESPEED (`avatar+0x98`, normally a `UInt32*`):
+    /// resolved stand(0)/walk(1)/run(2). This is the client-side movement state
+    /// that selects the BAS walk/run sequence.
+    pub last_movespeed: Option<i32>,
+    /// OEntity.ANIMATION_ID (`avatar+0xA88`): the currently-playing seq id.
+    pub animation_id: Option<i32>,
+    /// OAnimation.CURRENT_FRAME (`animation+0x24`) via the null-guarded current
+    /// animation object pointer at OEntity.ANIMATION_SHARED_PTR (`avatar+0xAA0`).
+    pub animation_frame: Option<i32>,
     /// Render scene-graph GraphNode (`avatar+0x8`) — the node the integrator
     /// commits onto. 0 => avatar has no render node.
     pub render_graph_node: Option<usize>,
@@ -170,6 +179,10 @@ pub struct LocalPlayer {
     /// => compose ran but the model build failed; zero (with pending also 0) => the
     /// appearance was never applied (compose never ran for the local avatar).
     pub current_appearance: Option<usize>,
+    /// Applied BAS/render-animation-set id (`*(current_appearance+0x0C)`, u16).
+    /// Confirms whether the BAS we sent in op22 actually landed on the applied
+    /// appearance object.
+    pub applied_bas: Option<i32>,
     /// `pending+0x88` (byte): needsAsyncLoad — 1 for op22-delivered appearances,
     /// which makes the compose wait on `SceneLoadRegistry::IsResourceGroupReady`.
     pub pending_needs_async_load: Option<i32>,
@@ -233,6 +246,9 @@ impl Default for LocalPlayer {
             avatar_source: "none",
             visible_flag: None,
             render_model: None,
+            last_movespeed: None,
+            animation_id: None,
+            animation_frame: None,
             render_graph_node: None,
             scene_bucket_graph_node: None,
             render_tile: None,
@@ -246,6 +262,7 @@ impl Default for LocalPlayer {
             extra_models: None,
             pending_appearance: None,
             current_appearance: None,
+            applied_bas: None,
             pending_needs_async_load: None,
             pending_0x89: None,
             pending_composed_flag: None,
@@ -418,6 +435,12 @@ fn read_local_player(client_base: usize) -> LocalPlayer {
     // The render-bind gate + the model handle (the two prime "won't render" causes).
     lp.visible_flag = mem::read_i32(avatar, av::VISIBLE_FLAG).map(|v| v & 0xff);
     lp.render_model = mem::read_ptr(avatar, av::RENDER_MODEL);
+    lp.last_movespeed = read_last_movespeed(avatar);
+    lp.animation_id = mem::read_i32(avatar, av::ANIMATION_ID);
+    let animation = mem::read_ptr(avatar, av::ANIMATION_SHARED_PTR).unwrap_or(0);
+    if mem::is_plausible(animation) {
+        lp.animation_frame = mem::read_i32(animation, av::ANIMATION_CURRENT_FRAME);
+    }
     lp.render_graph_node = mem::read_ptr(avatar, av::RENDER_GRAPH_NODE);
     lp.scene_bucket_graph_node = mem::read_ptr(avatar, av::SCENE_BUCKET_GRAPH_NODE);
 
@@ -488,6 +511,9 @@ fn read_local_player(client_base: usize) -> LocalPlayer {
     // `Some(0)` — distinguishing "SetAppearance ran, model build failed" (non-zero) from
     // "appearance never applied / compose never ran" (zero, with pending also zero).
     lp.current_appearance = Some(mem::read_ptr(avatar, av::CURRENT_APPEARANCE).unwrap_or(0));
+    if let Some(appearance) = lp.current_appearance.filter(|p| mem::is_plausible(*p)) {
+        lp.applied_bas = read_u16(appearance, av::APPEARANCE_BAS).map(|v| v as i32);
+    }
     if mem::is_plausible(pending) {
         lp.pending_needs_async_load =
             mem::read_i32(pending, av::PENDING_NEEDS_ASYNC_LOAD).map(|v| v & 0xff);
@@ -1152,6 +1178,31 @@ fn read_run(client_base: usize) -> (Option<i32>, Option<i32>) {
 fn status_object(client_base: usize) -> Option<usize> {
     let mlm = mem::deref(client_base, o::MAIN_LOGIC_MANAGER)?;
     mem::deref(mlm, o::MLM_STAT_TABLE)
+}
+
+/// Resolve OPathingEntity.LAST_MOVESPEED. The engine offset source comments the
+/// slot as a `UInt32*`; generated datatype outputs agree. If the runtime value is
+/// a small canonical speed instead of a plausible pointer, keep that inline value
+/// so the capture still exposes stand(0)/walk(1)/run(2).
+#[inline]
+fn read_last_movespeed(avatar: usize) -> Option<i32> {
+    let raw = mem::read_ptr(avatar, av::LAST_MOVESPEED)?;
+    if mem::is_plausible(raw) {
+        return mem::read_i32(raw, 0);
+    }
+    (raw <= 2).then_some(raw as i32)
+}
+
+/// Read a `u16` at `base + off`, or `None` if `base` is implausible. Used for
+/// the applied appearance BAS (`Appearance+0x0C`) without widening the memory
+/// access to the neighboring fields.
+#[inline]
+fn read_u16(base: usize, off: usize) -> Option<u16> {
+    if !mem::is_plausible(base) {
+        return None;
+    }
+    let p = (base + off) as *const u16;
+    Some(unsafe { p.read_unaligned() })
 }
 
 /// Read an `f32` at `base + off`, or `None` if `base` is implausible. (Mirror of

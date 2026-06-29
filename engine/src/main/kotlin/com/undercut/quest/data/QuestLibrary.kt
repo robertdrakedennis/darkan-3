@@ -7,6 +7,7 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonSerializationContext
 import com.google.gson.JsonSerializer
+import io.github.classgraph.ClassGraph
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
@@ -23,16 +24,17 @@ object QuestLibrary {
             .create()
     }
 
+    /** Classpath location of the per-quest JSON files bundled into the injected jar. */
+    private const val QUEST_DIR_RESOURCE = "quest-data/quests"
+
     private val BUNDLE_CANDIDATES: List<String> = listOfNotNull(
         System.getenv("UNDERCUT_QUEST_DATA"),
-        System.getProperty("user.home") + "/projects/project-undercut/engine/src/main/resources/quest-data/quests.json",
         System.getProperty("user.dir") + "/engine/src/main/resources/quest-data/quests.json",
         System.getProperty("user.dir") + "/src/main/resources/quest-data/quests.json",
     )
 
     private val PER_QUEST_DIR_CANDIDATES: List<String> = listOfNotNull(
         System.getenv("UNDERCUT_QUEST_DIR"),
-        System.getProperty("user.home") + "/projects/project-undercut/engine/src/main/resources/quest-data/quests",
         System.getProperty("user.dir") + "/engine/src/main/resources/quest-data/quests",
         System.getProperty("user.dir") + "/src/main/resources/quest-data/quests",
         System.getProperty("user.home") + "/.undercut/quest-data/quests",
@@ -141,6 +143,12 @@ object QuestLibrary {
             }.onFailure { println("[QuestLibrary] Failed to load bundle from $bundleSource: ${it.message}") }
         }
 
+        // Bundled per-quest files from the classpath (the injected jar). This is the
+        // path-free baseline: it resolves wherever the engine runs, since user.dir is
+        // the host client's working directory — not this repo — when injected.
+        val classpathCount = loadClasspathQuests(combined)
+        if (classpathCount > 0) sources += "classpath:/$QUEST_DIR_RESOURCE ($classpathCount quests)"
+
         // Per-quest overlays — these override bundle entries by slug
         val perQuestDir = PER_QUEST_DIR_CANDIDATES.map { File(it) }.firstOrNull { it.isDirectory }
         if (perQuestDir != null) {
@@ -169,6 +177,22 @@ object QuestLibrary {
             if (f.isFile && f.canRead()) return FileInputStream(f) to path
         }
         return QuestLibrary::class.java.getResourceAsStream("/quest-data/quests.json") to "classpath"
+    }
+
+    private fun loadClasspathQuests(combined: MutableMap<String, Quest>): Int {
+        var count = 0
+        runCatching {
+            ClassGraph().acceptPaths(QUEST_DIR_RESOURCE).scan().use { scan ->
+                for (res in scan.getResourcesWithExtension("json")) {
+                    runCatching {
+                        val q: Quest = gson.fromJson(res.contentAsString, Quest::class.java)
+                        combined[q.slug] = q
+                        count++
+                    }.onFailure { println("[QuestLibrary] Skipped classpath quest ${res.path}: ${it.message}") }
+                }
+            }
+        }.onFailure { println("[QuestLibrary] classpath quest scan failed: ${it.message}") }
+        return count
     }
 }
 

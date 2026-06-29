@@ -271,6 +271,20 @@ pub mod avatar {
     /// handle attached to the avatar (model not loaded/built).
     pub const RENDER_MODEL: usize = 0xC58;
 
+    /// PathingEntity last move speed (OPathingEntity.LAST_MOVESPEED). The engine
+    /// source annotates this field as a `UInt32*`; the oracle resolves that pointer
+    /// to stand(0)/walk(1)/run(2), with an inline-small-value fallback for capture
+    /// diagnostics if a future layout stores it directly.
+    pub const LAST_MOVESPEED: usize = 0x98;
+
+    /// Current animation id (OEntity.ANIMATION_ID), stored inline on the entity.
+    pub const ANIMATION_ID: usize = 0xA88;
+    /// Current animation object shared-ptr payload (OEntity.ANIMATION_SHARED_PTR),
+    /// used to chase OAnimation.CURRENT_FRAME.
+    pub const ANIMATION_SHARED_PTR: usize = 0xAA0;
+    /// OAnimation.CURRENT_FRAME.
+    pub const ANIMATION_CURRENT_FRAME: usize = 0x24;
+
     /// Entity size (int; low byte is the tile footprint). OEntity.SIZE — same field
     /// the tile formula uses.
     pub const SIZE: usize = 0x184;
@@ -400,6 +414,9 @@ pub mod avatar {
     /// the appearance was NEVER applied (the compose never ran for the local avatar).
     /// Mirrors the engine's `Offsets.AVATAR.CURRENT_APPEARANCE = 0x12A0`.
     pub const CURRENT_APPEARANCE: usize = 0x12A0;
+    /// `Appearance + 0x0C` (u16): applied BAS/render-animation-set id. Anchored as
+    /// `client_oracle::APPEARANCE_BAS` in `anchor_registry_mac.json`.
+    pub const APPEARANCE_BAS: usize = 0x0C;
 
     /// `pending + 0x88` (byte): needsAsyncLoad. 1 for op22-ext-info appearances, which
     /// gates the compose on `SceneLoadRegistry::IsResourceGroupReady` keyed by
@@ -728,6 +745,10 @@ mod tests {
         assert_eq!(avatar::LIP_LOCAL_OVERRIDE, 0x58);
         assert_eq!(avatar::VISIBLE_FLAG, 0x1070);
         assert_eq!(avatar::RENDER_MODEL, 0xC58); // OEntity.RENDER_MODEL
+        assert_eq!(avatar::LAST_MOVESPEED, 0x98); // OPathingEntity.LAST_MOVESPEED
+        assert_eq!(avatar::ANIMATION_ID, 0xA88); // OEntity.ANIMATION_ID
+        assert_eq!(avatar::ANIMATION_SHARED_PTR, 0xAA0); // OEntity.ANIMATION_SHARED_PTR
+        assert_eq!(avatar::ANIMATION_CURRENT_FRAME, 0x24); // OAnimation.CURRENT_FRAME
         assert_eq!(avatar::SIZE, 0x184); // OEntity.SIZE — same as the oracle tile path
         assert_eq!(avatar::RENDER_GRAPH_NODE, 0x8); // param_1[1] == entity+0x8
         assert_eq!(avatar::SCENE_BUCKET_GRAPH_NODE, 0x268); // param_1[0x4d]
@@ -745,6 +766,7 @@ mod tests {
         assert_eq!(avatar::PENDING_APPEARANCE, 0x1298);
         // Applied/current appearance @ avatar+0x12A0 (Avatar::SetAppearance @0x100411a60).
         assert_eq!(avatar::CURRENT_APPEARANCE, 0x12A0);
+        assert_eq!(avatar::APPEARANCE_BAS, 0x0C); // client_oracle::APPEARANCE_BAS
         assert_eq!(avatar::PENDING_NEEDS_ASYNC_LOAD, 0x88);
         assert_eq!(avatar::PENDING_BYTE_0X89, 0x89);
         assert_eq!(avatar::PENDING_COMPOSED_FLAG, 0x8a);

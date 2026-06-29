@@ -12,6 +12,7 @@ import org.darkan.core.Logger.logError
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logWarn
 import org.darkan.core.net.prot.AntiCheatChallenge
+import org.darkan.core.net.prot.TriggerOnDialogAbort
 import org.darkan.world.net.NpcInfoEncoder
 import org.darkan.world.net.PlayerInfoEncoder
 import org.darkan.world.net.ZoneBundleBuilder
@@ -156,6 +157,16 @@ object WorldTick {
                 if (viewport.visibleNpcs.isNotEmpty()) {
                     player.session.queuePacket(NpcInfoEncoder.build(player))
                 }
+
+                // Per-tick scene-load-generation advance (op162). The NXT client's SceneLoadRegistry
+                // gates appearance/scene compose on its generation counter advancing each tick
+                // (handler @0x100084980 does `inc [registry+0xDBF0]`): a PlayerAppearancePending filed
+                // at world entry only composes once the generation moves PAST the one it was filed in.
+                // Prod emits this once per tick paired with PLAYER_INFO (op162 count == op22 count);
+                // without it the local avatar's appearance never composes — no body/animation rig
+                // (the walk-animation bug). The `TriggerOnDialogAbort` name reflects an incomplete RE;
+                // its real per-tick job is the scene-load tick (see docs/net/serverprot/scene-load-registry-948.md).
+                player.session.queuePacket(TriggerOnDialogAbort())
             } catch (e: Exception) {
                 logError("Per-player tick failed: ${player.account.username}", e)
             }

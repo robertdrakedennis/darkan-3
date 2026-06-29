@@ -32,7 +32,7 @@ internal fun Codec.registerRev948ServerCodecsRebuild() {
     // 40950 bits = 5119 bytes and advances the packet cursor, so the handler then reads the coord
     // header at `position == 5119` (magic 0x85 lands at body offset 5122). The prefix is generated
     // from local state by world's `Op81GpiPrefix` (local player's 30-bit tile == the coord-header
-    // centre-zone tile; the other 2046 slots all-zero = absent, fine for a solo spawn). Shipping
+    // centre-zone tile; the other 2046 slots carry low-res map-square seeds). Shipping
     // the bare 18-byte header (Shape A) is FATAL: the parser still runs (flag set), over-reads 5101
     // bytes of heap, places the player at a garbage tile, and reads the header out-of-bounds →
     // magic ≠ 0x85 → op81 aborts BEFORE the BuildArea alloc and BEFORE ProcessCameraReset → black
@@ -44,9 +44,11 @@ internal fun Codec.registerRev948ServerCodecsRebuild() {
     //   +2  u8   centreZoneZ high          ┘
     //   +3  u8   magic == 0x85             (CMP / ADD -0x7b; abort if != 0x85)
     //   +4  u16  centreZoneX               BE (MOVZX word then ROL 8)
-    //   +6  u8   cameraRotation            writeByteAdd: wire = (value + 0x80) & 0xFF
+    //   +6  u8   npcInfoCoordBitWidth      writeByteAdd: wire = (value + 0x80) & 0xFF.
+    //              The client stores this into the NPC manager and uses it as the gBit width for
+    //              NPC_INFO new-NPC local coords. It must match Npc.coordBitWidthZone.
     //   +7  u8   ignored filler            (second skipped byte the §13 table omitted)
-    //   +8  u16  sceneRootId               BE; passed to the scene-root lookup when scene mode == 4
+    //   +8  u16  sceneRootId               BE; WorldAreaType id used for the scene-root lookup
     //   +10 u32  packedCoordA              BE → DecodePackedCoord SW corner {minRegionX, minRegionZ}
     //   +14 u32  packedCoordB              BE → DecodePackedCoord NE corner {maxRegionX, maxRegionZ}
     //
@@ -65,7 +67,7 @@ internal fun Codec.registerRev948ServerCodecsRebuild() {
         out.writeByte((zoneZ ushr 8) and 0xFF)   // +2 centreZoneZ high (LE u16 with +1)
         out.writeByte(0x85)                      // +3 magic
         out.writeShort(zoneX)                    // +4 centreZoneX (BE)
-        out.writeByteAdd(cameraRotation)         // +6 cameraRotation (wire = value + 0x80)
+        out.writeByteAdd(npcInfoCoordBitWidth)   // +6 NPC_INFO coord bit width
         out.writeByte(0)                         // +7 ignored filler
         out.writeShort(sceneRootId)              // +8 sceneRootId (BE)
         out.writeInt(packedCoordA)               // +10 SW-corner packed coord (BE)

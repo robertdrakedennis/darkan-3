@@ -4,8 +4,8 @@ package org.darkan.core.net.prot.update
  * Sealed hierarchy of per-entity update masks for PLAYER_INFO (op 27) and NPC_INFO (op 12).
  *
  * Each subtype corresponds to one extended-info block from
- * `docs/net/serverprot/player-info-947-3.md` §4C (PLAYER_INFO) or
- * `docs/net/serverprot/npc-info-947-3.md` Phase 3 (NPC_INFO). The two protocols share several
+ * `docs/net/serverprot/player-extinfo-948.md` (PLAYER_INFO) or
+ * `docs/net/serverprot/npc-extinfo-948.md` (NPC_INFO). The two protocols share several
  * block shapes (same byte layout on both packets) but assign different bit positions and
  * include some protocol-only blocks. Encoder selection happens via [PlayerUpdateMaskKey] /
  * [NpcUpdateMaskKey] lookups in B4.

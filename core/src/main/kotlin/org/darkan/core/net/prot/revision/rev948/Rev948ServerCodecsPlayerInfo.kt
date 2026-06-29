@@ -16,7 +16,7 @@ import world.gregs.voidps.buffer.*
  * pre-built bit blocks followed by 2-byte length-prefixed ext-info blocks.
  *
  * **NOTE on ext-info bit positions:** the bit positions inside each player's ext-info block
- * DID change in 948 — the world-side builder in `world.../PlayerInfoBuilder.kt` reads from
+ * DID change in 948 — the world-side builder in `world.../PlayerInfoEncoder.kt` reads from
  * `PendingUpdates` which is keyed by [PlayerUpdateMaskKey] (the interface), and the active
  * codec registers its revision-specific encoders against [PlayerUpdateMaskEncoder]. So when
  * the active revision is 948 the world produces bit-position-correct ext-info bytes via

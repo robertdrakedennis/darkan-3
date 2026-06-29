@@ -20,7 +20,7 @@ object ActiveMaskKeys {
     /**
      * APPEARANCE block key for the active revision. Set by the codec registration.
      *
-     * If null, `PlayerInfoBuilder` skips its "synthesize APPEARANCE for first-tick" fast-path
+     * If null, `PlayerInfoEncoder` skips its "synthesize APPEARANCE for first-tick" fast-path
      * and the caller is expected to set the appearance via `setPlayer(rev.APPEARANCE, ...)`
      * directly.
      */
@@ -31,7 +31,7 @@ object ActiveMaskKeys {
      * Absolute LE bit positions of the expansion ("continue") bits in the PLAYER_INFO ext-info
      * flag bitset header, for the active revision. Index N is the continue-bit that must be set in
      * byte N so the client reads byte N+1. Published by codec registration from each revision's
-     * `EXPANSION_BITS` array so `PlayerInfoBuilder` never hardcodes per-revision literals.
+     * `EXPANSION_BITS` array so `PlayerInfoEncoder` never hardcodes per-revision literals.
      *
      * 947-3 = {0, 14, 18}; 948 = {0, 13, 22}.
      */

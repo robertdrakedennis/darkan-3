@@ -34,7 +34,7 @@ object NpcExtInfoEncoder {
      * Encode the Phase 3 ext-info byte block for one NPC. The 2-byte BE length header is added by the
      * codec (NOT here — we emit the raw block bytes).
      *
-     * Relocated unchanged from `NpcInfoBuilder.encodeExtendedInfoBlock` — byte output is identical.
+     * Relocated unchanged from the old monolithic builder's ext-info block encoder — byte output is identical.
      */
     fun encodeExtendedInfoBlock(pending: PendingUpdates): ByteArray {
         val extOut = BufferWriter(256)
@@ -76,7 +76,7 @@ object NpcExtInfoEncoder {
      * True if the NPC has any pending mask with a registered encoder. Drives the `hasExtInfo` bit in
      * both the Phase 1 update path and the Phase 2 add-record.
      *
-     * Relocated unchanged from `NpcInfoBuilder.hasFlaggableNpcExtendedInfo` — behavior is identical.
+     * Relocated unchanged from the old monolithic builder's ext-info gate — behavior is identical.
      */
     fun hasFlaggableNpcExtendedInfo(pending: PendingUpdates): Boolean {
         return pending.npcMaskEntries().any { NpcUpdateMaskEncoder.hasEncoder(it.first) }

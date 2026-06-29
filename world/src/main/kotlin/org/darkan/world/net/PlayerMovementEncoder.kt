@@ -22,8 +22,8 @@ import world.gregs.voidps.buffer.write.BufferWriter
  * seam only. None of these emit real walk/run motion.
  *
  * Wire references (relocated verbatim with their code — do not delete):
- *  * High-res form — `docs/net/serverprot/player-info-947-3.md` §4B `GetHighResolutionPlayerPosition`.
- *  * Low-res form — §4B `GetLowResolutionPlayerPosition`.
+ *  * High-res form — `docs/kb/glossary/player-npc-info.md` §"s2c op22 — PlayerInfo bit-loop semantics".
+ *  * Low-res form — same PlayerInfo bit-loop section.
  *  * Teleport / absolute-tile init — `docs/protocol/world-bootstrap-948.md` §4.3 +
  *    `GetHighResolutionPlayerPosition @0x00154d30`.
  *
@@ -134,7 +134,7 @@ object PlayerMovementEncoder {
      * no-op. This path is currently unreachable because the low-res list never flags a needed update
      * (it folds into the skip-run), but is wired in for forward compatibility.
      *
-     * Relocated unchanged from `PlayerInfoBuilder.encodeLowResPosition` — byte output is identical.
+     * Relocated unchanged from the old monolithic builder's low-res position encoder — byte output is identical.
      */
     fun encodeLowResPosition(
         out: BufferWriter,

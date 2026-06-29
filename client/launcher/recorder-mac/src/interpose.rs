@@ -1,5 +1,6 @@
-//! libc `connect()` / `close()` interposition for connect/disconnect events
-//! and per-fd peer (ip:port) tracking.
+//! libc `connect()` / `close()` / `send()` / `recv()` interposition for
+//! connect/disconnect events, per-fd peer tracking, and lower-level socket
+//! payload capture.
 //!
 //! We use the canonical macOS `__DATA,__interpose` mechanism (a table of
 //! {replacement, original} function-pointer pairs) rather than symbol
@@ -8,15 +9,15 @@
 //! TWOLEVEL-namespace rs2client even without `DYLD_FORCE_FLAT_NAMESPACE`
 //! (though the launcher sets that too).
 //!
-//! Both replacements are pure pass-throughs that record a side event and then
-//! tail-call the real libc routine — they NEVER alter behaviour or return
+//! Replacements are pure pass-throughs that record a side event or payload and
+//! then tail-call the real libc routine — they NEVER alter behaviour or return
 //! values, so leaving the dylib inserted is invisible to the client.
 
 use crate::state;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::os::raw::c_int;
+use std::os::raw::{c_int, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Armed only AFTER our ctor has fully initialised. CRITICAL: the libc
@@ -84,6 +85,62 @@ unsafe fn parse_sockaddr(
 extern "C" {
     fn connect(socket: c_int, address: *const libc::sockaddr, len: libc::socklen_t) -> c_int;
     fn close(fd: c_int) -> c_int;
+    fn send(
+        socket: c_int,
+        buffer: *const c_void,
+        length: libc::size_t,
+        flags: c_int,
+    ) -> libc::ssize_t;
+    fn recv(
+        socket: c_int,
+        buffer: *mut c_void,
+        length: libc::size_t,
+        flags: c_int,
+    ) -> libc::ssize_t;
+    fn getpeername(socket: c_int, address: *mut libc::sockaddr, len: *mut libc::socklen_t)
+        -> c_int;
+}
+
+fn fd_conn_label(port: u16) -> &'static str {
+    match port {
+        80 | 443 | 8829 => "fd-http",
+        _ => "fd-other",
+    }
+}
+
+fn peer_for_fd(fd: c_int) -> Option<(String, u16)> {
+    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+    let rc = unsafe {
+        getpeername(
+            fd,
+            &mut storage as *mut libc::sockaddr_storage as *mut libc::sockaddr,
+            &mut len,
+        )
+    };
+    if rc == 0 {
+        let addr = &storage as *const libc::sockaddr_storage as *const libc::sockaddr;
+        if let Some(peer) = unsafe { parse_sockaddr(addr, len) } {
+            return Some(peer);
+        }
+    }
+    peers().as_ref().and_then(|m| m.get(&fd).cloned())
+}
+
+unsafe fn capture_fd_payload(dir: &str, fd: c_int, buffer: *const c_void, len: usize) {
+    if len == 0 || buffer.is_null() {
+        return;
+    }
+    let Some(s) = state::session() else { return };
+    let (ip, port) = peer_for_fd(fd).unwrap_or_else(|| ("unknown".to_string(), 0));
+    let peer = if port == 0 {
+        ip
+    } else {
+        format!("{ip}:{port}")
+    };
+    let conn = fd_conn_label(port);
+    let body = std::slice::from_raw_parts(buffer as *const u8, len);
+    s.socket_fd(dir, conn, fd, &peer, port, body);
 }
 
 #[no_mangle]
@@ -124,6 +181,34 @@ pub unsafe extern "C" fn darkan_close(fd: c_int) -> c_int {
     close(fd)
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn darkan_send(
+    socket: c_int,
+    buffer: *const c_void,
+    length: libc::size_t,
+    flags: c_int,
+) -> libc::ssize_t {
+    let ret = send(socket, buffer, length, flags);
+    if armed() && ret > 0 {
+        capture_fd_payload("c2s", socket, buffer, ret as usize);
+    }
+    ret
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn darkan_recv(
+    socket: c_int,
+    buffer: *mut c_void,
+    length: libc::size_t,
+    flags: c_int,
+) -> libc::ssize_t {
+    let ret = recv(socket, buffer, length, flags);
+    if armed() && ret > 0 {
+        capture_fd_payload("s2c", socket, buffer as *const c_void, ret as usize);
+    }
+    ret
+}
+
 // -- __interpose table --------------------------------------------------------
 //
 // Each entry is { replacement_fn, original_fn }. The section name is the dyld
@@ -148,4 +233,18 @@ static INTERPOSE_CONNECT: Interpose = Interpose {
 static INTERPOSE_CLOSE: Interpose = Interpose {
     replacement: darkan_close as *const (),
     original: close as *const (),
+};
+
+#[used]
+#[link_section = "__DATA,__interpose"]
+static INTERPOSE_SEND: Interpose = Interpose {
+    replacement: darkan_send as *const (),
+    original: send as *const (),
+};
+
+#[used]
+#[link_section = "__DATA,__interpose"]
+static INTERPOSE_RECV: Interpose = Interpose {
+    replacement: darkan_recv as *const (),
+    original: recv as *const (),
 };

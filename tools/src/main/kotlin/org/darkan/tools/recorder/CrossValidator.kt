@@ -570,6 +570,7 @@ class CrossValidator(private val codec: Codec, private val known: KnownOpcodes) 
             val line = rawLine.trim()
             if (line.isEmpty()) return@forEachLine
             val obj = runCatching { json.parseToJsonElement(line) as? JsonObject }.getOrNull() ?: return@forEachLine
+            if (obj["source"]?.jsonPrimitive?.contentOrNull == "libc") return@forEachLine
             val dir = obj["dir"]?.jsonPrimitive?.contentOrNull ?: return@forEachLine
             val conn = obj["conn"]?.jsonPrimitive?.contentOrNull ?: "unknown"
             val body = resolveBody(obj, blobsDir) ?: return@forEachLine

@@ -343,12 +343,11 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
             call.respondText("Not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
             return
         }
-        val version = call.request.queryParameters["v"]?.toIntOrNull() ?: 0
-        val response = data
+        val response = buildJs5HttpResponse(provider, archive, group, data)
         // DIAGNOSTIC (JS5 stall): INFO-level so successful HTTP content serves are visible
         // at the default TRACE/FINER log level during a pilot run.
-        logInfo("JS5 HTTP: a=$archive g=$group v=$version -> ${response.size} bytes (container=${data.size}, suffix=raw)")
-        call.respondBytes(response, ContentType.Application.OctetStream)
+        logInfo("JS5 HTTP: a=$archive g=$group v=${response.version} -> ${response.body.size} bytes (container=${data.size}, suffix=cache-version)")
+        call.respondBytes(response.body, ContentType.Application.OctetStream)
     }
 
     private fun generateJavConfig(info: BinaryInfo): String = buildString {
@@ -508,6 +507,20 @@ class ConfigServer(private val fileProvider: FileProvider? = null) {
     }
 
     companion object {
+        internal data class Js5HttpResponse(val body: ByteArray, val version: Int)
+
+        internal fun buildJs5HttpResponse(provider: FileProvider, index: Int, archive: Int, container: ByteArray): Js5HttpResponse {
+            val version = provider.version(index, archive) ?: 0
+            return Js5HttpResponse(appendJs5HttpVersion(container, version), version)
+        }
+
+        private fun appendJs5HttpVersion(container: ByteArray, version: Int): ByteArray {
+            val response = container.copyOf(container.size + 2)
+            response[container.size] = (version ushr 8).toByte()
+            response[container.size + 1] = version.toByte()
+            return response
+        }
+
         // LZMA-alone (.lzma) encoder settings for the macos download payload. These mirror
         // what Jagex serves and what the unpatched RuneScape.app wrapper expects: 8 MiB
         // dictionary, 32 fast bytes, BT4 match finder, lc/lp/pb = 3/0/2, no end marker.

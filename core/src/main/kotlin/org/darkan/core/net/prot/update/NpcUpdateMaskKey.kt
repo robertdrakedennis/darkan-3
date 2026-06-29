@@ -11,7 +11,7 @@ package org.darkan.core.net.prot.update
  *  * `rev948/Rev948NpcUpdateMaskKey.kt` — the 948 layout, per the Phase 1 delta doc.
  *
  * `NpcUpdateMaskEncoder` is keyed by this interface so encoders from any revision can register
- * simultaneously without collisions. Consumers (PendingUpdates, NpcInfoBuilder, etc.) operate
+ * simultaneously without collisions. Consumers (PendingUpdates, NpcInfoEncoder, etc.) operate
  * on the interface type so swapping revisions only swaps the underlying key table.
  *
  * Flag is exposed as a 64-bit Long because NPC masks reach bit 33 in 947-3 and bit 31 in 948.

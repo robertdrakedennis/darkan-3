@@ -5,11 +5,11 @@ import org.darkan.core.net.prot.IfCloseSub
 import org.darkan.core.net.prot.IfSet2DAngle
 import org.darkan.core.net.prot.IfSetEvents
 import org.darkan.core.net.prot.IfSetHide
-import org.darkan.core.net.prot.IfSetPosition
 import org.darkan.core.net.prot.IfSetText
 import org.darkan.core.net.prot.IfSetTopLevelInterface
 import org.darkan.core.net.prot.RunClientScript
 import org.darkan.core.net.session.GameSession
+import org.darkan.world.entity.interfaceManager
 
 /**
  * The real world-entry HUD open (root gameframe 1477), per `docs/protocol/world-entry-render-948.md`
@@ -36,9 +36,6 @@ object GameHud {
 
     /** The modern RS3 resizable gameframe root interface id (§7.1/§7.2). */
     const val ROOT_INTERFACE = 1477
-
-    /** op82 layer byte (§7.2: wire byte 0x7F via writeByteSubtract; encoder takes the logical value). */
-    private const val LAYER = 1
 
     /**
      * The 1477 child placement sequence: each pair is `slot → childInterface`.
@@ -174,15 +171,10 @@ object GameHud {
         // 1. op3 — open root 1477.
         session.send(IfSetTopLevelInterface(topLevelId = rootInterface))
 
-        // 2. op82 — mount each child into a 1477 slot.
+        // 2. op82 — mount each child into a 1477 slot and record it for IF_BUTTON validation.
+        val interfaces = session.interfaceManager
         for (c in COMPONENT_MAP) {
-            session.send(
-                IfSetPosition(
-                    componentId = c.child,
-                    layer = LAYER,
-                    position = componentHash(ROOT_INTERFACE, c.slot),
-                )
-            )
+            interfaces.open(componentHash(ROOT_INTERFACE, c.slot), c.child)
         }
 
         // 3. op110 — per-tab HUD build.

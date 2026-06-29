@@ -41,16 +41,16 @@ object ContentTools {
             val p = Paths.get(env)
             if (Files.isDirectory(p)) return p
         }
-        val candidates = listOf(
-            Paths.get(System.getProperty("user.home"), "projects", "project-undercut", "rs3-cs2-dumps"),
-            Paths.get(System.getProperty("user.dir"), "rs3-cs2-dumps"),
-            Paths.get(System.getProperty("user.dir")).parent?.resolve("rs3-cs2-dumps"),
-        ).filterNotNull()
+        val cwd = Paths.get(System.getProperty("user.dir"))
+        val candidates = listOfNotNull(
+            cwd.resolve("re-resources/cs2-dumps"),
+            cwd.parent?.resolve("re-resources/cs2-dumps"),
+        )
         return candidates.firstOrNull { Files.isDirectory(it) }
     }
 
     private fun loadDump(filename: String): JsonElement = DUMP_CACHE.getOrPut(filename) {
-        val dir = locateDumpsDir() ?: throw EngineState("rs3-cs2-dumps directory not found; set UNDERCUT_DUMPS_DIR env var")
+        val dir = locateDumpsDir() ?: throw EngineState("re-resources/cs2-dumps directory not found; set UNDERCUT_DUMPS_DIR env var")
         val file = dir.resolve(filename)
         if (!Files.exists(file)) throw EngineState("dump file not found: ${file.toAbsolutePath()}")
         Json.parseToJsonElement(Files.readString(file))
@@ -153,7 +153,7 @@ object ContentTools {
         server.addTool(
             name = "get_content_type",
             description = """
-                Purpose: Unified lookup of any cache-defined content type — NPC, item (obj-type), location/object (loc-type), enum, struct, param, varbit, seq, bas, inv, quest. Returns the full field dump from the Kotlin cache reader (when available) and optionally merges supplementary fields from the rs3-cs2-dumps JSON.
+                Purpose: Unified lookup of any cache-defined content type — NPC, item (obj-type), location/object (loc-type), enum, struct, param, varbit, seq, bas, inv, quest. Returns the full field dump from the Kotlin cache reader (when available) and optionally merges supplementary fields from the re-resources/cs2-dumps JSON.
                 || Returns: JSON envelope with: kind, id, sources (array of "kotlin" / "dump"), fields (Kotlin-reflected fields, null defaults trimmed unless verbose), dump_extra (only present when verbose=true and the dump file has a record). For kinds with no Kotlin parser yet (varp, dbrow, achievement), only `dump_extra` is populated.
                 || Inputs: `kind` (required string, one of npc|item|obj|loc|enum|struct|param|varbit|seq|bas|inv|quest|varp|dbrow|achievement). `id` (required int). `verbose` (optional bool, default false) — include default/empty fields and merge dump extras.
                 || Use cases: "What does NPC type 0 look like (Hans)?", "List the option names on object id 1816 (a door)?", "Decode a varbit's base+bits", "Look up a struct's params by id".
@@ -172,7 +172,7 @@ object ContentTools {
                     }
                     putJsonObject("verbose") {
                         put("type", "boolean")
-                        put("description", "If true, include default/empty fields and merge rs3-cs2-dumps JSON fields under dump_extra")
+                        put("description", "If true, include default/empty fields and merge re-resources/cs2-dumps JSON fields under dump_extra")
                     }
                 },
                 required = listOf("kind", "id"),
@@ -342,7 +342,7 @@ object ContentTools {
         server.addTool(
             name = "search_cache_json",
             description = """
-                Purpose: Keyword search across the rs3-cs2-dumps JSON files (items.json, npcs.json, locations.json, enums.json, structs.json, quests.json, dbrows.json, achievements.json, latest_varbits.json, latest_varps.json). Matches `name` (case-insensitive substring) and optional `id`.
+                Purpose: Keyword search across the re-resources/cs2-dumps JSON files (items.json, npcs.json, locations.json, enums.json, structs.json, quests.json, dbrows.json, achievements.json, latest_varbits.json, latest_varps.json). Matches `name` (case-insensitive substring) and optional `id`.
                 || Returns: JSON envelope with kind, count, total, items[]. Each row is the raw JSON record from the dump (id + all known fields).
                 || Inputs: `kind` (required string, see get_content_type for valid kinds), standard list filters (`name`, `id`, `limit`, `offset`).
                 || Use cases: "Find anything named 'lobster'", "Look up dbrow 12345 in the database tables", "Search achievements containing 'slayer'".

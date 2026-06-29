@@ -9,9 +9,10 @@
 #
 # It answers the two questions the user asked of any new binary:
 #   1. WHICH BUILD  — printed as "NXT vMMM-S" from the RS2Engine-MMM-NXT-S string.
-#   2. ALL PROTS    — every ServerProt and ClientProt: opcode, size, handler,
-#                     entry address, and (if an oracle is supplied) packet name,
-#                     with newly-inserted packets flagged.
+#   2. ALL PROTS    — every ServerProt, ClientProt, and discovered zone-update
+#                     sub-opcode table: opcode, size, handler, entry address,
+#                     and (if an oracle is supplied) packet name, with
+#                     newly-inserted packets flagged.
 #
 # Outputs (console + <program_dir>/):
 #   prot_tables_dump.csv   direction,opcode,size,entry_addr,handler_addr,handler_name,handler_source,name,name_src
@@ -129,8 +130,17 @@ MAX_TABLE_ENTRIES = 400
 DOMINANCE = 0.6
 # Candidate handler-field offsets probed when auto-deriving HANDLER_OFF (SERVER).
 HANDLER_OFF_CANDIDATES = [0x28, 0x20, 0x30, 0x18, 0x38, 0x10]
+# The zone sub-opcode table (g_zoneSubProtVector) is too small for the RegisterAll
+# census floor; this is the secondary-scan floor used to locate it (see find_small_tables).
+MIN_ZONE_ENTRIES = 12
 
 VERSION_RE = re.compile(r"RS2Engine-(\d+)-NXT-(\d+)")
+
+# Size multiset signature of the 948-5 zone sub-opcode table. This structural
+# signature is used only to locate the table; it is not a packet-name oracle.
+KNOWN_948_5_ZONE_SIZES = [-1, -1, -1, 2, 3, 5, 5, 7, 7, 7, 10, 11, 11, 14, 20, 21, 28, 29]
+
+KNOWN_ZONE_SIZES_BY_VER = {"948-5": KNOWN_948_5_ZONE_SIZES}
 
 # SysV AMD64 integer arg registers and their 32-bit aliases.
 ARG_REGS = {
@@ -258,6 +268,31 @@ def find_registerall_pairs(census):
         if best_caller is None:
             continue
         if MIN_TABLE_ENTRIES <= best <= MAX_TABLE_ENTRIES and best >= DOMINANCE * total:
+            pairs.append((best_caller, ctor_off, best))
+    return pairs
+
+
+def find_small_tables(census, exclude_callers):
+    """Find SUB-tables below the main RegisterAll floor.
+
+    The zone-update sub-opcode table (g_zoneSubProtVector) has only about 18 entries, so
+    the MIN_TABLE_ENTRIES gate rejects it. This scans for a single caller that invokes a
+    ctor MIN_ZONE_ENTRIES..MIN_TABLE_ENTRIES-1 times with single-caller dominance,
+    excluding the already-found SERVER/CLIENT RegisterAll callers.
+    """
+    pairs = []
+    for ctor_off, callers in census.items():
+        best_caller = None
+        best = 0
+        total = 0
+        for c, n in callers.items():
+            total += n
+            if n > best:
+                best = n
+                best_caller = c
+        if best_caller is None or best_caller in exclude_callers:
+            continue
+        if MIN_ZONE_ENTRIES <= best < MIN_TABLE_ENTRIES and best >= DOMINANCE * total:
             pairs.append((best_caller, ctor_off, best))
     return pairs
 
@@ -677,6 +712,34 @@ def main():
             print("[*] CLIENT table: %d entries, stride 0x%x (no handler-store layer)"
                   % (len(rows), stride))
         results.append((direction, res, decl_rows, stride, rows))
+
+    # ---- zone sub-opcode table (small; below the main RegisterAll floor) ----
+    # The zone-update sub-opcode vector (g_zoneSubProtVector) is read inside
+    # UPDATE_ZONE_PARTIAL_ENCLOSED. It is too small for find_registerall_pairs, so scan
+    # for it separately and accept the candidate whose size-multiset matches the known
+    # signature for this build (or, with no known signature, a small dense var-size table).
+    zone_sizes_sig = KNOWN_ZONE_SIZES_BY_VER.get(ver)
+    for caller_off, ctor_off, cnt in find_small_tables(census, reg_callers):
+        raw = extract_entries(caller_off, ctor_off)
+        if not raw:
+            continue
+        zrows = orient_opcode_size(raw)
+        ops = [r[0] for r in zrows]
+        if len(set(ops)) != len(ops):
+            continue
+        sig = sorted(s for _, s, _ in zrows)
+        ok = (zone_sizes_sig is not None and sig == zone_sizes_sig)
+        if not ok and zone_sizes_sig is None:
+            ok = (max(ops) + 1 <= len(ops) + 4 and sum(1 for _, s, _ in zrows if s < 0) >= 1)
+        if not ok:
+            continue
+        zdecl = sorted([(op, size, e.getOffset()) for op, size, e in zrows], key=lambda r: r[2])
+        zres = [("ZONE", op, size, e.getOffset(), None, "ZONE_SUBOP", "ZONE")
+                for op, size, e in sorted(zrows, key=lambda r: r[0])]
+        results.append(("ZONE", zres, zdecl, get_stride(zrows), zrows))
+        print("[*] ZONE table: %d entries (zone-update sub-opcode vector) @ RegisterAll 0x%08x"
+              % (len(zrows), caller_off))
+        break
 
     # ---- naming ----
     oracle = load_oracle()

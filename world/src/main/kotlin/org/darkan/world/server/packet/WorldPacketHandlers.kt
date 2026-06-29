@@ -3,8 +3,11 @@ package org.darkan.world.server.packet
 import org.darkan.core.Logger
 import org.darkan.core.net.prot.AntiCheatChallengeResponse
 import org.darkan.core.net.prot.ClanChannelKickUser
+import org.darkan.core.net.prot.ClientInputEventBatch
+import org.darkan.core.net.prot.DisplayMetrics
 import org.darkan.core.net.prot.FriendListAdd
 import org.darkan.core.net.prot.FriendListDel
+import org.darkan.core.net.prot.IfButton
 import org.darkan.core.net.prot.IgnoreListAdd
 import org.darkan.core.net.prot.MapBuildComplete
 import org.darkan.core.net.prot.MessagePrivateSend
@@ -31,6 +34,8 @@ fun registerWorldPacketHandlers() {
     Logger.log("WorldPacketHandlers", "Registering world packet handlers...")
 
     PacketHandlers.register(Ping::class, PingHandler())
+    PacketHandlers.register(DisplayMetrics::class, DisplayMetricsHandler())
+    PacketHandlers.register(ClientInputEventBatch::class, ClientInputEventBatchHandler())
     PacketHandlers.register(SceneGraphReport::class, SceneGraphReportHandler())
     PacketHandlers.register(MapBuildComplete::class, MapBuildCompleteHandler())
     PacketHandlers.register(AntiCheatChallengeResponse::class, AntiCheatChallengeResponseHandler())
@@ -40,6 +45,7 @@ fun registerWorldPacketHandlers() {
     PacketHandlers.register(ClanChannelKickUser::class, ClanChannelKickUserHandler())
     PacketHandlers.register(MessagePrivateSend::class, MessagePrivateSendHandler())
     PacketHandlers.register(MoveGameClick::class, MoveGameClickHandler())
+    PacketHandlers.register(IfButton::class, IfButtonHandler())
 
-    Logger.log("WorldPacketHandlers", "World packet handlers registered (10 handlers)")
+    Logger.log("WorldPacketHandlers", "World packet handlers registered (13 handlers)")
 }

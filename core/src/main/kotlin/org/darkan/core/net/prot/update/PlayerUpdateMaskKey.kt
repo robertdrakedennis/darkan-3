@@ -14,7 +14,7 @@ package org.darkan.core.net.prot.update
  * from any revision's table can register simultaneously without collisions — the per-revision
  * key instances are distinct objects.
  *
- * Consumers (PendingUpdates, PlayerInfoBuilder, ext-info encoders) operate on the interface
+ * Consumers (PendingUpdates, PlayerInfoEncoder, ext-info encoders) operate on the interface
  * type, so swapping the active revision only swaps the key table the world produces.
  */
 interface PlayerUpdateMaskKey {
