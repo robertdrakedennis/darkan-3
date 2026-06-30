@@ -141,6 +141,18 @@ tasks.register<JavaExec>("handlerNamerSelfTest") {
     workingDir = rootProject.projectDir
 }
 
+// FAITHFUL-REPLICATION walk/stop ext-info probe — decodes what the server sends the LOCAL player per
+// op22 tick (movementType + ext-info bit-0x20 MOVEMENT_ANIM + bit-0x80 FORCED_MOVEMENT) from a
+// recorder capture's framed-s2c.jsonl, deriving the local slot index from the wire.
+//   ./gradlew :tools:walkExtInfo -Pargs="<captureDir> [<captureDir2> ...]"
+tasks.register<JavaExec>("walkExtInfo") {
+    mainClass.set("org.darkan.tools.recorder.WalkExtInfoProbeKt")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    val rawArgs = providers.gradleProperty("args").getOrElse("")
+    if (rawArgs.isNotBlank()) args(rawArgs.split(Regex("\\s+")).filter { it.isNotBlank() })
+}
+
 tasks.named<JavaExec>("run") {
     workingDir = rootProject.projectDir
 }

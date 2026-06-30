@@ -42,7 +42,101 @@ object PlayerInfoDecoder {
     /** Decode one PLAYER_INFO op22 body against the preceding op81 GPI prefix. */
     fun decode(bytes: ByteArray, gpiPrefix: GpiPrefix): PlayerScene =
         ClientStateCrossCheck.decodePlayerScene(bytes, gpiPrefix)
+
+    /**
+     * Decode one PLAYER_INFO op22 body against the preceding op81 GPI prefix, additionally surfacing
+     * the per-slot extended-info detail (mask bits + decoded bit-0x20 MOVEMENT_ANIM and bit-0x80
+     * FORCED_MOVEMENT payloads). Used by the faithful-replication harness to read exactly what the
+     * server sent each slot per tick (esp. the LOCAL slot's walk/glide ext-info). The byte-level mask
+     * walk mirrors `Rev948PlayerUpdateMaskKey` block order; the wire formats are from
+     * `re-resources/docs/net/serverprot/player-appearance-948.md`.
+     */
+    fun decodeDetailed(bytes: ByteArray, gpiPrefix: GpiPrefix): PlayerSceneDetailed =
+        ClientStateCrossCheck.decodePlayerSceneDetailed(bytes, gpiPrefix)
+
+    /**
+     * A STATEFUL detailed-decode session. op22 PLAYER_INFO is stateful — each packet mutates the
+     * render/pending slot lists seeded by op81 and evolved by every prior op22. Decoding each op22 from
+     * a fresh op81 prefix (as [decodeDetailed] does) is only correct for the FIRST op22; for a multi-
+     * player stream every subsequent frame desyncs. Seed this session once from the op81 prefix, then
+     * feed op22 bodies in arrival order via [next]; the fold carries slot state across frames.
+     */
+    class DetailedSession(gpiPrefix: GpiPrefix) {
+        val localIndex: Int = gpiPrefix.localPlayerIndex
+        // Opaque handle (the fold class is private to ClientStateCrossCheck); the helpers cast it back.
+        private val fold: Any = ClientStateCrossCheck.newSeededFold(gpiPrefix)
+
+        /** Decode the next op22 body against the carried-over slot state. */
+        fun next(bytes: ByteArray): PlayerSceneDetailed =
+            ClientStateCrossCheck.decodeDetailedOnFold(fold, bytes, localIndex)
+    }
 }
+
+/**
+ * Decoded bit-0x20 MOVEMENT_ANIM ext-info payload: 4× gSmart2or4s (bigSmart) movement-anim seq ids +
+ * 1× g1_sub priority byte. `-1`/`-1`/`-1`/`-1` is the "stop the seq" / ResetMovementSeqs form.
+ */
+data class ExtMovementAnim(
+    val seq0: Int,
+    val seq1: Int,
+    val seq2: Int,
+    val seq3: Int,
+    val priority: Int,
+) {
+    val isResetForm: Boolean get() = seq0 == -1 && seq1 == -1 && seq2 == -1 && seq3 == -1
+    val seqs: List<Int> get() = listOf(seq0, seq1, seq2, seq3)
+}
+
+/**
+ * Decoded bit-0x80 FORCED_MOVEMENT (glide) ext-info payload: 12 bytes → `SetRenderWaypoint`.
+ * Fields are the recovered (post-transform) signed values: src/dst fine tile deltas, two plane biases,
+ * the two POSITIVE tick deltas the client adds to its live cycle counter, and the 14-bit render yaw.
+ */
+data class ExtForcedMovement(
+    val srcDx: Int,
+    val srcDz: Int,
+    val dstDx: Int,
+    val dstDz: Int,
+    val delta3: Int,
+    val delta4: Int,
+    val startTick: Int,
+    val endTick: Int,
+    val yaw: Int,
+)
+
+/**
+ * The decoded extended-info block for one slot in one op22. [maskBits] is the raw OR of every flag bit
+ * present in the LE bitset header; [movementAnim]/[forcedMovement] are decoded when bits 0x20/0x80 are
+ * present. [parsedClean] is false when the per-bit walk hit an un-modelled bit and fell back to a
+ * mask-only read (so payload fields beyond the failure point are absent, not silently wrong).
+ */
+data class SlotExtInfo(
+    val index: Int,
+    val maskBits: Int,
+    val hasAppearance: Boolean,
+    val movementAnim: ExtMovementAnim?,
+    val forcedMovement: ExtForcedMovement?,
+    val parsedClean: Boolean,
+) {
+    fun hasBit(flag: Int): Boolean = maskBits and flag != 0
+    val maskBitList: List<Int>
+        get() = (0 until 32).filter { maskBits and (1 shl it) != 0 }.map { 1 shl it }
+}
+
+/**
+ * [PlayerScene] plus per-slot extended-info detail keyed by slot index, in the op22 ext-info dispatch
+ * order. [localIndex] echoes the GPI prefix's local slot for caller convenience.
+ */
+data class PlayerSceneDetailed(
+    val scene: PlayerScene,
+    val extInfo: Map<Int, SlotExtInfo>,
+    val extInfoOrder: List<Int>,
+    val localIndex: Int,
+    /** True iff the 4-pass GPI bit-decode completed without a skip-run desync fallback. When false the
+     *  movement/ext-info detail is unreliable for this frame (the bit cursor did not cleanly reach the
+     *  ext-info section, usually because the local index is wrong or the body is truncated/garbled). */
+    val decodeClean: Boolean,
+)
 
 /**
  * Folded PLAYER_INFO scene. [movements] is ordered by the op22 high-resolution pass walk order.
@@ -478,6 +572,143 @@ object ClientStateCrossCheck {
             players = fold.states(),
             movements = fold.movements(),
             appearance = fold.appearanceState(),
+        )
+    }
+
+    /**
+     * Like [decodePlayerScene] but also surfaces per-slot ext-info detail. Runs the same 4-pass GPI
+     * bit-decode, then re-walks the trailing ext-info `[u16 len][bytes]` blocks (one per slot in
+     * [PlayerSceneFold.lastExtInfoOrder]) decoding each block's mask + bit-0x20/0x80 payloads.
+     */
+    internal fun decodePlayerSceneDetailed(
+        bytes: ByteArray,
+        gpiPrefix: PlayerInfoDecoder.GpiPrefix,
+    ): PlayerSceneDetailed {
+        require(gpiPrefix.bytes.size >= GPI_PREFIX_BYTES) {
+            "GPI prefix must contain at least $GPI_PREFIX_BYTES bytes"
+        }
+        val fold = PlayerSceneFold()
+        decodeGpiPrefix(gpiPrefix.bytes, fold, gpiPrefix.localPlayerIndex)
+        decodePlayerInfo(bytes, fold, OP_PLAYER_INFO)
+        val scene = PlayerScene(
+            players = fold.states(),
+            movements = fold.movements(),
+            appearance = fold.appearanceState(),
+        )
+        val order = fold.lastExtInfoOrder
+        val detail = decodeExtInfoDetail(bytes, fold.lastExtInfoOffset, order)
+        return PlayerSceneDetailed(
+            scene = scene,
+            extInfo = detail,
+            extInfoOrder = order,
+            localIndex = gpiPrefix.localPlayerIndex,
+            decodeClean = fold.lastDecodeClean,
+        )
+    }
+
+    /** Seed a fresh fold from an op81 GPI prefix for a stateful [PlayerInfoDecoder.DetailedSession]. */
+    internal fun newSeededFold(gpiPrefix: PlayerInfoDecoder.GpiPrefix): Any {
+        require(gpiPrefix.bytes.size >= GPI_PREFIX_BYTES) {
+            "GPI prefix must contain at least $GPI_PREFIX_BYTES bytes"
+        }
+        val fold = PlayerSceneFold()
+        decodeGpiPrefix(gpiPrefix.bytes, fold, gpiPrefix.localPlayerIndex)
+        return fold
+    }
+
+    /** Decode one op22 on a carried-over fold (stateful — mutates the fold's slot lists). The fold's
+     *  movement list accumulates across frames, so we snapshot only THIS frame's new movements. */
+    internal fun decodeDetailedOnFold(foldHandle: Any, bytes: ByteArray, localIndex: Int): PlayerSceneDetailed {
+        val fold = foldHandle as PlayerSceneFold
+        val movementsBefore = fold.movementCount
+        // A desync throws (and runs the appearance-scan fallback inside); swallow it so one bad frame
+        // does not kill the session — the result's decodeClean=false flags the frame as unreliable.
+        runCatching { decodePlayerInfo(bytes, fold, OP_PLAYER_INFO) }
+        val scene = PlayerScene(
+            players = fold.states(),
+            movements = fold.movementsSince(movementsBefore),
+            appearance = fold.appearanceState(),
+        )
+        val order = fold.lastExtInfoOrder
+        val detail = decodeExtInfoDetail(bytes, fold.lastExtInfoOffset, order)
+        return PlayerSceneDetailed(
+            scene = scene,
+            extInfo = detail,
+            extInfoOrder = order,
+            localIndex = localIndex,
+            decodeClean = fold.lastDecodeClean,
+        )
+    }
+
+    /**
+     * Re-walk the trailing ext-info blocks (`[u16 len][block bytes]` per slot in [order]) decoding
+     * each block's LE mask header + the modelled bit-0x08/0x20/0x80 payloads. Each block is parsed in
+     * isolation (the length frames it), so a bit we don't model only loses THAT slot's detail past the
+     * unknown bit (`parsedClean=false`), never the whole packet.
+     */
+    private fun decodeExtInfoDetail(
+        body: ByteArray,
+        offset: Int,
+        order: List<Int>,
+    ): Map<Int, SlotExtInfo> {
+        val out = LinkedHashMap<Int, SlotExtInfo>()
+        var cursor = offset
+        for (idx in order) {
+            if (cursor + 2 > body.size) break
+            val length = ((body[cursor].toInt() and 0xff) shl 8) or (body[cursor + 1].toInt() and 0xff)
+            cursor += 2
+            if (cursor + length > body.size) break
+            val block = body.copyOfRange(cursor, cursor + length)
+            cursor += length
+            out[idx] = parsePlayerExtInfoBlock(idx, block)
+        }
+        return out
+    }
+
+    /**
+     * Parse ONE player ext-info block (after the u16 length is stripped): the 1..4 byte LE mask header,
+     * then per-flag payloads in ascending [Rev948PlayerUpdateMaskKey] order. We fully decode bit 0x08
+     * (appearance → hasAppearance), bit 0x20 (MOVEMENT_ANIM), bit 0x80 (FORCED_MOVEMENT) and skip the
+     * other modelled blocks by their documented widths. An un-modelled bit stops the walk early and
+     * marks [SlotExtInfo.parsedClean]=false (the mask is still reported).
+     */
+    private fun parsePlayerExtInfoBlock(idx: Int, block: ByteArray): SlotExtInfo {
+        val src = ByteBodyReader(block)
+        val mask = runCatching { src.readPlayerMask() }.getOrElse {
+            return SlotExtInfo(idx, 0, false, null, null, parsedClean = false)
+        }
+        var anim: ExtMovementAnim? = null
+        var forced: ExtForcedMovement? = null
+        var clean = true
+
+        // Walk EVERY set bit in the client's fixed dispatch order (ascending order). For each we either
+        // fully decode (0x08/0x20/0x80), skip by a documented fixed width, or — for any bit whose width
+        // we do not model — STOP and report mask-only (parsedClean=false) so the cursor is never walked
+        // past an unknown block and a later 0x20/0x80 mis-decoded. On the LOCAL slot prod sets only
+        // 0x08/0x20/0x80 (+ occasionally 0x02), which are all modelled, so clean stays true there.
+        for (e in PLAYER_EXT_ORDER) {
+            if (mask and e.flag == 0) continue
+            val ok = runCatching {
+                when (e.kind) {
+                    ExtKind.APPEARANCE -> src.skipAppearanceBlock()
+                    ExtKind.MOVEMENT_ANIM -> anim = src.readMovementAnimBlock()
+                    ExtKind.FORCED_MOVEMENT -> forced = src.readForcedMovementBlock()
+                    ExtKind.FIXED -> src.skipFixed(e.skipBytes)
+                    ExtKind.UNMODELLED -> throw IllegalStateException("unmodelled ext-info bit ${e.flag}")
+                }
+            }.isSuccess
+            if (!ok) {
+                clean = false
+                break
+            }
+        }
+        return SlotExtInfo(
+            index = idx,
+            maskBits = mask,
+            hasAppearance = mask and (1 shl PLAYER_APPEARANCE_MASK_BIT) != 0,
+            movementAnim = anim,
+            forcedMovement = forced,
+            parsedClean = clean,
         )
     }
 
@@ -1240,6 +1471,19 @@ object ClientStateCrossCheck {
         private var appearance = emptyMap<Int, AppearanceSlotState>()
         private var localIndex: Int = -1
 
+        /** The ext-info dispatch order (slot indices) + byte offset captured by the last decode, for
+         *  the detailed harness to re-walk the trailing `[u16 len][bytes]` blocks. */
+        var lastExtInfoOrder: List<Int> = emptyList()
+            private set
+        var lastExtInfoOffset: Int = 0
+            private set
+
+        /** True iff the last [decodePlayerInfo] completed all 4 GPI passes without a skip-run desync
+         *  fallback (i.e. the bit cursor reached the ext-info section cleanly). The harness uses this
+         *  to pick the correct local index and to report per-frame clean-vs-desync rates. */
+        var lastDecodeClean: Boolean = false
+            private set
+
         val initialized: Boolean
             get() = localIndex in 1 until PLAYER_SLOT_COUNT
 
@@ -1284,6 +1528,8 @@ object ClientStateCrossCheck {
         }
 
         fun decodePlayerInfo(body: ByteArray, bits: BitBodyReader, sourceOpcode: Int) {
+            lastDecodeClean = false
+            lastExtInfoOrder = emptyList()
             val extInfoOrder = ArrayList<Int>()
             fun scanFallback() {
                 scanAppearance(body, sourceOpcode, overwrite = false)
@@ -1312,6 +1558,9 @@ object ClientStateCrossCheck {
                 scanFallback()
                 return
             }
+            lastDecodeClean = true
+            lastExtInfoOffset = bits.byteOffset
+            lastExtInfoOrder = extInfoOrder.toList()
             val decodedLocalAppearance = readExtInfoBlocks(body, bits.byteOffset, extInfoOrder, sourceOpcode)
             if (!decodedLocalAppearance && localIndex !in extInfoOrder) scanFallback()
             rebuildActivityFlagsAndLists()
@@ -1327,6 +1576,13 @@ object ClientStateCrossCheck {
         }
 
         fun movements(): List<PlayerMovement> = movements.toList()
+
+        /** Number of movement records accumulated so far (across all frames decoded on this fold). */
+        val movementCount: Int get() = movements.size
+
+        /** Movement records added since index [from] (i.e. during the most recent frame). */
+        fun movementsSince(from: Int): List<PlayerMovement> =
+            if (from >= movements.size) emptyList() else movements.subList(from, movements.size).toList()
 
         fun appearanceState(): Map<Int, AppearanceSlotState> = LinkedHashMap(appearance)
 
@@ -1779,7 +2035,117 @@ object ClientStateCrossCheck {
         fun requireConsumed() {
             require(remaining == 0) { "trailing appearance bytes: $remaining" }
         }
+
+        // ---- detailed ext-info readers (faithful-replication harness) ----------------------------
+
+        fun skipFixed(n: Int) {
+            require(remaining >= n) { "short ext-info block: need $n, have $remaining" }
+            offset += n
+        }
+
+        /** APPEARANCE block (bit 0x08): mode-3 length byte then [length] payload bytes. Skip both. */
+        fun skipAppearanceBlock() {
+            val lengthByte = readUByte()
+            val length = if (lengthByte == PLAYER_APPEARANCE_EMPTY_LENGTH) 0 else (-0x80 - lengthByte) and 0xff
+            skipFixed(length)
+        }
+
+        /**
+         * gSmart2or4s / readBigSmart: high bit of the first byte set → 4-byte BE `& 0x7FFFFFFF`; else
+         * 2-byte BE, with `0x7FFF` (raw `0xFF7F`? no — value 32767) the null sentinel → `-1`. Mirrors
+         * the client's bit-0x20 seq-id read and the server's `writeBigSmart`.
+         */
+        fun readBigSmart(): Int {
+            val first = readUByte()
+            return if (first and 0x80 != 0) {
+                ((first and 0x7f) shl 24) or (readUByte() shl 16) or (readUByte() shl 8) or readUByte()
+            } else {
+                val v = (first shl 8) or readUByte()
+                if (v == 0x7fff) -1 else v
+            }
+        }
+
+        /** g1_sub: the value the client recovers from a `writeByteSubtract` (128 - wireByte) byte. */
+        fun readByteSubtractValue(): Int = (128 - readUByte()) and 0xff
+
+        /** MOVEMENT_ANIM block (bit 0x20): 4× gSmart2or4s seq ids + 1× g1_sub priority. */
+        fun readMovementAnimBlock(): ExtMovementAnim =
+            ExtMovementAnim(
+                seq0 = readBigSmart(),
+                seq1 = readBigSmart(),
+                seq2 = readBigSmart(),
+                seq3 = readBigSmart(),
+                priority = readByteSubtractValue(),
+            )
+
+        /**
+         * FORCED_MOVEMENT block (bit 0x80), 12 bytes per player-appearance-948.md §Q3:
+         * +0 g1_add(b-128) srcDx, +1 g1_neg(-b) srcDz, +2 g1(signed) dstDx, +3 g1_sub(128-b) dstDz,
+         * +4 g1_add delta3, +5 g1_neg delta4, +6..7 g2(BE) startTick, +8..9 g2(BE) endTick,
+         * +0xa g1_add yaw-low8, +0xb (&0x3f)<<8 yaw-high6.
+         */
+        fun readForcedMovementBlock(): ExtForcedMovement {
+            val srcDx = (readUByte() - 128).toByte().toInt()
+            val srcDz = (-readUByte()).toByte().toInt()
+            val dstDx = readUByte().toByte().toInt()
+            val dstDz = (128 - readUByte()).toByte().toInt()
+            val delta3 = (readUByte() - 128).toByte().toInt()
+            val delta4 = (-readUByte()).toByte().toInt()
+            val startTick = readUShort()
+            val endTick = readUShort()
+            val yawLow = readUByte()
+            val yawHigh = readUByte() and 0x3f
+            val yaw = (yawHigh shl 8) or yawLow
+            return ExtForcedMovement(srcDx, srcDz, dstDx, dstDz, delta3, delta4, startTick, endTick, yaw)
+        }
     }
+
+    private enum class ExtKind { APPEARANCE, MOVEMENT_ANIM, FORCED_MOVEMENT, FIXED, UNMODELLED }
+
+    /**
+     * The full 948 player ext-info bit table in the client's fixed dispatch order (ascending `order`),
+     * mirroring `Rev948PlayerUpdateMaskKey`. We FULLY DECODE the three movement/identity bits the
+     * faithful-replication question turns on — 0x08 APPEARANCE, 0x20 MOVEMENT_ANIM, 0x80
+     * FORCED_MOVEMENT — and decode 0x02 FACE_DIRECTION (fixed g2). EVERY OTHER bit is [ExtKind.UNMODELLED]:
+     * the walk STOPS at it and the slot is reported mask-only (`parsedClean=false`), so the cursor is
+     * never walked past a variable/uncharacterised block and a later 0x20/0x80 silently mis-decoded.
+     *
+     * This is deliberate and sufficient: on the LOCAL slot production only ever sets 0x08/0x20/0x80
+     * (plus occasionally 0x02), all modelled → the local parse is clean. Remote-player / NPC blocks
+     * that set spotanim/chat/hit bits will report `parsedClean=false`, which is honest (we still report
+     * which bits were set), not wrong.
+     */
+    private enum class ExtBit(val flag: Int, val order: Int, val kind: ExtKind, val skipBytes: Int = 0) {
+        SPOT_ANIM_REMOVAL(0x4000000, 1, ExtKind.UNMODELLED),
+        TRANSIENT_BOOL_BIT18(0x40000, 2, ExtKind.UNMODELLED),
+        OVERHEAD_CHAT(0x100000, 3, ExtKind.UNMODELLED),
+        APPEARANCE(0x8, 4, ExtKind.APPEARANCE),
+        OVERHEAD_TEXT(0x40, 5, ExtKind.UNMODELLED),
+        SPOT_ANIM_LIST_BIT24(0x1000000, 6, ExtKind.UNMODELLED),
+        UNK_BIT11(0x800, 7, ExtKind.UNMODELLED),
+        UNK_BIT15(0x8000, 8, ExtKind.UNMODELLED),
+        FORCED_MOVEMENT(0x80, 9, ExtKind.FORCED_MOVEMENT),
+        CHAT_TEXT_PRIVATE(0x4000, 10, ExtKind.UNMODELLED),
+        UNK_BIT25(0x2000000, 11, ExtKind.UNMODELLED),
+        SPOT_ANIM_LIST_BIT16(0x10000, 12, ExtKind.UNMODELLED),
+        UNK_BIT9(0x200, 13, ExtKind.UNMODELLED),
+        FACE_DIRECTION(0x2, 14, ExtKind.FIXED, skipBytes = 2),
+        SPOT_ANIM_LIST_BIT23(0x800000, 15, ExtKind.UNMODELLED),
+        MOVEMENT_ANIM(0x20, 16, ExtKind.MOVEMENT_ANIM),
+        UNK_BIT19(0x80000, 17, ExtKind.UNMODELLED),
+        OVERHEAD_OPACITY(0x1000, 18, ExtKind.FIXED, skipBytes = 1),
+        UNK_BIT2(0x4, 19, ExtKind.UNMODELLED),
+        CHAT_TEXT(0x400, 20, ExtKind.UNMODELLED),
+        POSITION_COLOR(0x200000, 21, ExtKind.UNMODELLED),
+        HITMARKS(0x10, 22, ExtKind.UNMODELLED),
+        HEAD_ICON_BIT17(0x20000, 23, ExtKind.UNMODELLED),
+        ;
+        companion object {
+            val byOrder: List<ExtBit> = entries.sortedBy { it.order }
+        }
+    }
+
+    private val PLAYER_EXT_ORDER: List<ExtBit> = ExtBit.byOrder
 
     private fun scanAppearancePayload(
         body: ByteArray,
