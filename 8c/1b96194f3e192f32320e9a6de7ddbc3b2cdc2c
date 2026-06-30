@@ -1,0 +1,94 @@
+world/src/test/kotlin/org/darkan/world/net/PlayerRunStateMachineTest.kt
+  s_f8acc34803d486::t_3747b82f191b84 207-209
+  s_f8acc34803d486::t_816697f8fd0fef 1-206,210-251
+world/src/test/kotlin/org/darkan/world/entity/MovementQueueRunTest.kt
+  s_f8acc34803d486::t_ba7469d21a877c 1-93
+world/src/main/kotlin/org/darkan/world/server/packet/MoveGameClickHandler.kt
+  s_f8acc34803d486::t_d42c2e90a151dd 27-35
+  s_f8acc34803d486::t_0986e8bf77ff1e 53-56,66-67
+world/src/main/kotlin/org/darkan/world/net/PlayerInfoEncoder.kt
+  s_f8acc34803d486::t_6871377b299f51 19,22-25,28-30
+  s_f8acc34803d486::t_c1ac800e93a1d8 254
+  s_f8acc34803d486::t_e233da2372a1cc 398-408,411-416,421-424,427-433,435-438,442-443,451-458,462-473
+  s_f8acc34803d486::t_57a7aa1a3faff3 35,39
+  s_f8acc34803d486::t_6e42289f893c72 274-276,278,280-285,287-291,298,310-333,337-370
+  s_f8acc34803d486::t_55e18fa29e783c 507-514,516,526-532
+  s_f8acc34803d486::t_fadd170b7282c2 279
+  s_f8acc34803d486::t_11709698455855 218
+  s_f8acc34803d486::t_3818502827a7cb 210
+  s_f8acc34803d486::t_2b23f3051f7514 409-410,418-420,439-441
+  s_f8acc34803d486::t_cbbde6904755d0 273
+  s_f8acc34803d486::t_cb8d4331607671 286
+  s_f8acc34803d486::t_35f016fb11eee5 8,10
+  s_f8acc34803d486::t_b4e030fd05245c 392-393
+  s_f8acc34803d486::t_95d67e398f6654 264
+  s_f8acc34803d486::t_40a52a45c7fab3 72
+  s_f8acc34803d486::t_224dc7d5ffbc38 538
+  s_f8acc34803d486::t_24f1b480aebaa0 558
+  s_f8acc34803d486::t_b08e85e6f30bde 41,45-54
+  s_f8acc34803d486::t_cc2eb55356a31c 371
+core/src/main/kotlin/org/darkan/core/net/recorder/ClientStateCrossCheck.kt
+  s_f8acc34803d486::t_1050d4b21b3579 1735-1741,1743,1746-1747
+  s_f8acc34803d486::t_777737932c00e3 181-185
+  s_f8acc34803d486::t_07fac95b07bdb2 191-193
+  s_f8acc34803d486::t_d4a902cab8b509 2495-2513
+world/src/test/kotlin/org/darkan/world/net/PlayerInfoEncoderRemoteRenderTest.kt
+  s_f8acc34803d486::t_515a4218392a08 1-193
+world/src/main/kotlin/org/darkan/world/net/PlayerMovementEncoder.kt
+  s_f8acc34803d486::t_cadd498d1d85c0 53-57
+  s_f8acc34803d486::t_4cd9cc0e8ffdaf 105-135,138,141,144,149-157,354
+  s_f8acc34803d486::t_ca9f76acb70f80 324,331,337-351
+  s_f8acc34803d486::t_fda26a7273f345 264-268,272
+  s_f8acc34803d486::t_c6b80ae11e0633 355,357-359,361-366,368-382,384,386-391,393-403,405-409
+  s_f8acc34803d486::t_80181739e775d1 356
+  s_f8acc34803d486::t_0bb232373842b3 312-322,325,327-328,330
+  s_f8acc34803d486::t_cb064242137a20 66
+  s_f8acc34803d486::t_e15747f8873160 208-214
+  s_f8acc34803d486::t_70071e1a80d540 262-263,269-271,273-296
+  s_f8acc34803d486::t_d7b95fff881bd3 238-239
+  s_f8acc34803d486::t_6dbaf248a7248a 404
+  s_f8acc34803d486::t_6e8636ebfe9308 64-65,67-71
+  s_f8acc34803d486::t_193e7b2cbaed3c 352-353
+world/src/test/kotlin/org/darkan/world/server/packet/MoveGameClickHandlerTest.kt
+  s_f8acc34803d486::t_c1b9f9fee629ea 103-125
+world/src/main/kotlin/org/darkan/world/entity/MovementQueue.kt
+  s_f8acc34803d486::t_13aa70c7554944 24-26,36-37
+  s_f8acc34803d486::t_e383a891c165b4 55-83
+  s_f8acc34803d486::t_2e9e7dc24f8a05 38
+world/src/main/kotlin/org/darkan/world/world/PlayerInfoSlots.kt
+  s_f8acc34803d486::t_20f82dd530799f 82-98
+  s_f8acc34803d486::t_a9cb16e3132edb 189
+  s_f8acc34803d486::t_c193dc4c872b15 194
+  s_f8acc34803d486::t_dfdc29cd56898b 171
+  s_f8acc34803d486::t_8077f90d244a29 188,190-193
+  s_f8acc34803d486::t_e0695c88394c5a 203
+  s_f8acc34803d486::t_69631b4b486695 20
+  s_f8acc34803d486::t_3d92c2f2486264 41,43-49
+  s_f8acc34803d486::t_650bb411b1d691 121
+  s_f8acc34803d486::t_abb2b1ed53fbfa 22
+  s_f8acc34803d486::t_1f93ec5dc98350 23
+  s_f8acc34803d486::t_36c52d30b92d97 29
+  s_f8acc34803d486::t_eabbb24a74c5fd 18
+world/src/main/kotlin/org/darkan/world/server/WorldTick.kt
+  s_f8acc34803d486::t_d42fa28e62a76e 206-209,214
+  s_f8acc34803d486::t_2f0708b69ab84e 20
+  s_f8acc34803d486::t_ba95fdb4c1e6f8 257-267,269-271,274-275,278-291
+world/src/main/kotlin/org/darkan/world/entity/Entity.kt
+  s_f8acc34803d486::t_5a531115a791ba 44-48,52-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "8c1b96194f3e192f32320e9a6de7ddbc3b2cdc2c",
+  "prompts": {},
+  "sessions": {
+    "s_f8acc34803d486": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98aa8e04-8dbd-4899-9598-7451f6a1a83b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
