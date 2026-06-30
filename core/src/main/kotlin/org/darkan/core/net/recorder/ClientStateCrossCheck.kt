@@ -153,6 +153,16 @@ data class PlayerScene(
  * [dir] is the raw direction payload for movement types that carry one: 3 bits for walk
  * (`movementType == 1`) and the raw 4-bit run payload for `movementType == 2`. [followup] is the
  * optional 2-bit walk follow-up payload, present only when the wire's follow-up flag is set.
+ *
+ * [descriptor] is the move-mode descriptor index for `movementType == 3` (and only that type) — the
+ * ENTRY index the client uses to index the move-mode descriptor table at `&DAT_100f13a30 +
+ * descriptor*4` in `jag::packethandlers::PlayerInfo::DecodeKnownPlayerUpdate` (rs2client 948-5
+ * @0x100025da6 / @0x100026493). **`descriptor == 4` selects the SMOOTH descriptor `&DAT_100f13a40`
+ * (`*0x100ed2ab0` points here; byte offset 0x10 from the base)** → `SetScenePosition` →
+ * `SetTranslationSmoothed` (continuous GLIDE, self-animating); any other descriptor →
+ * `AttachToMapSquare` (instant tile SNAP, idle). For the large form it is the raw 3-bit field; for the
+ * small (15-bit) form the client computes the table BYTE offset as `(code >> 10) & 0x1c`
+ * (@0x1000263cd), so the entry index is `((code >> 10) & 0x1c) >> 2 == (code >> 12) & 0x7`.
  */
 data class PlayerMovement(
     val index: Int,
@@ -160,6 +170,28 @@ data class PlayerMovement(
     val dir: Int?,
     val hasExt: Boolean,
     val followup: Int?,
+    val descriptor: Int? = null,
+    /** mvt=3 only: true = large form (`[1][3-bit desc][30-bit pos]`), false = small 15-bit form. */
+    val large: Boolean? = null,
+    /** mvt=3 only: the raw payload field — the 30-bit pos (large form) or the 15-bit code (small form). */
+    val payload: Int? = null,
+    /**
+     * The slot's high-resolution tile AFTER applying this movement, as maintained by the decode. For
+     * a high-res walk (`movementType==1`) this is `prevTile + DX/DY[dir]` — byte-exact (the dir→delta
+     * table is the same `PLAYER_REGION_DX/DY` the encoder inverts). For `movementType==0` it is the
+     * UNCHANGED tile (no forced movement). For run/teleport (`movementType==2/3`) it is best-effort
+     * (see [tileExact]). `null` only when the slot had no prior tile to advance from (e.g. a remote
+     * slot that has not yet promoted to high-res). This is the per-tick LOCAL-slot path the probe reads.
+     */
+    val tileAfter: ClientStateCrossCheck.Tile? = null,
+    /**
+     * True iff [tileAfter] is byte-exactly reconstructed from the wire (mvt 0 = unchanged, mvt 1 =
+     * verified `DX/DY` walk delta). False for mvt 2 (run — the 4-bit→delta table is NOT binary-verified
+     * here, so the tile is advanced best-effort and flagged) and mvt 3 (move-mode/teleport — the
+     * decode does not reconstruct the absolute destination). Lets the probe label uncertain tiles
+     * honestly instead of asserting a fabricated position.
+     */
+    val tileExact: Boolean = true,
 )
 
 /**
@@ -1655,39 +1687,109 @@ object ClientStateCrossCheck {
             val hasExt = bits.readBits(1) != 0
             if (hasExt) extInfoOrder += idx
             val movementType = bits.readBits(2)
+            // The tile BEFORE this update — what we advance from. For the local slot this is the
+            // op81-seeded absolute tile on the first walk and then the running maintained tile.
+            val prevTile = slot.tile
             when (movementType) {
                 0 -> {
-                    movements += PlayerMovement(idx, movementType, dir = null, hasExt = hasExt, followup = null)
-                    if (hasExt || idx == localIndex) return
-                    slot.present = false
-                    slot.tile = null
+                    // mvt=0 = NO FORCED MOVEMENT. The tile is UNCHANGED — record that, do NOT null it.
+                    // This is the local player's predicted-walk reconciliation form (and any stationary
+                    // high-res slot). We must NOT early-return: the per-tick local series has to stay
+                    // complete (a missing tick would corrupt the walk-window classification).
+                    movements += PlayerMovement(
+                        idx, movementType, dir = null, hasExt = hasExt, followup = null,
+                        tileAfter = prevTile, tileExact = true,
+                    )
                     slot.sourceOpcode = sourceOpcode
-                    if (bits.readBits(1) != 0) decodeExternalPlayerUpdate(bits, idx, slot, sourceOpcode, extInfoOrder)
+                    // The "demote to low-res" sub-form only exists for a NON-local slot with no ext-info:
+                    // [hasExt=0][mvt=0] then a 1-bit flag → optional low-res move. The local slot's
+                    // [hasExt=0][mvt=0] is a bare hold (binary: local mvt=0 early-returns as a no-op), so
+                    // it carries NO trailing bit. Mirror that: only the non-local hold reads the bit.
+                    if (!hasExt && idx != localIndex) {
+                        slot.present = false
+                        slot.tile = null
+                        if (bits.readBits(1) != 0) {
+                            decodeExternalPlayerUpdate(bits, idx, slot, sourceOpcode, extInfoOrder)
+                        }
+                    }
                 }
                 1 -> {
                     val dir = bits.readBits(3)
                     val hasFollowup = bits.readBits(1) != 0
                     val followup = if (hasFollowup) bits.readBits(2) else null
-                    movements += PlayerMovement(idx, movementType, dir = dir, hasExt = hasExt, followup = followup)
-                    slot.tile = null
+                    // WALK: advance the maintained tile by the verified 3-bit dir → DX/DY delta (the SAME
+                    // PLAYER_REGION_DX/DY table the server's PlayerMovementEncoder inverts), so a decoded
+                    // slot TRACKS the avatar's high-res walk path instead of dropping it.
+                    val moved = prevTile?.let {
+                        Tile(it.x + PLAYER_REGION_DX[dir], it.y + PLAYER_REGION_DY[dir], it.plane)
+                    }
+                    movements += PlayerMovement(
+                        idx, movementType, dir = dir, hasExt = hasExt, followup = followup,
+                        tileAfter = moved, tileExact = moved != null,
+                    )
+                    slot.tile = moved
                     slot.sourceOpcode = sourceOpcode
                 }
                 2 -> {
                     val dir = bits.readBits(4)
-                    movements += PlayerMovement(idx, movementType, dir = dir, hasExt = hasExt, followup = null)
-                    slot.tile = null
+                    // RUN: best-effort tile maintenance. The 4-bit run code → tile-delta table is NOT
+                    // binary-verified in this decode (the encoder never emits mvt=2), so we advance one
+                    // tile in the matching 8-dir when the low nibble is a known walk dir, but FLAG the
+                    // result inexact (tileExact=false) rather than fabricate a precise 2-tile run delta.
+                    val moved = prevTile?.let {
+                        if (dir in PLAYER_REGION_DX.indices) {
+                            Tile(it.x + PLAYER_REGION_DX[dir], it.y + PLAYER_REGION_DY[dir], it.plane)
+                        } else it
+                    }
+                    movements += PlayerMovement(
+                        idx, movementType, dir = dir, hasExt = hasExt, followup = null,
+                        tileAfter = moved, tileExact = false,
+                    )
+                    slot.tile = moved
                     slot.sourceOpcode = sourceOpcode
                 }
                 3 -> {
-                    movements += PlayerMovement(idx, movementType, dir = null, hasExt = hasExt, followup = null)
+                    // mvt=3 selects a move-mode descriptor (binary @0x100025da6 / @0x100026493). The
+                    // descriptor index is the raw 3-bit field (large form) or (code>>10)&0x7 (15-bit
+                    // small form); index 4 = the SMOOTH glide descriptor &DAT_100f13a40. Capture it so
+                    // the probe / round-trip can assert SMOOTH vs SNAP without re-reading the binary.
                     val large = bits.readBits(1) != 0
+                    val descriptor: Int
+                    val payload: Int
+                    val moved: Tile?
                     if (large) {
-                        bits.readBits(3)
-                        bits.readBits(30)
+                        descriptor = bits.readBits(3)
+                        payload = bits.readBits(30)
+                        // Large form carries the new ABSOLUTE tile as (plane<<28)|(x<<14)|y.
+                        moved = Tile(
+                            x = (payload ushr 14) and 0x3fff,
+                            y = payload and 0x3fff,
+                            plane = (payload ushr 28) and 0x3,
+                        )
                     } else {
-                        bits.readBits(15)
+                        payload = bits.readBits(15)
+                        // Table BYTE offset = (code>>10)&0x1c (binary @0x1000263cd); entry = offset>>2.
+                        descriptor = ((payload ushr 10) and 0x1c) ushr 2
+                        // Small form carries signed-5 tile deltas (X bits 9:5, Y bits 4:0; 512 fine = 1
+                        // tile) + a plane delta (code>>10)&3. Advance the maintained tile by them.
+                        fun s5(v: Int) = if (v < 0x10) v else v - 0x20
+                        val planeD = (payload ushr 10) and 0x3
+                        moved = prevTile?.let {
+                            Tile(
+                                x = it.x + s5((payload ushr 5) and 0x1f),
+                                y = it.y + s5(payload and 0x1f),
+                                plane = (it.plane + planeD) and 0x3,
+                            )
+                        }
                     }
-                    slot.tile = null
+                    movements += PlayerMovement(
+                        idx, movementType, dir = null, hasExt = hasExt, followup = null,
+                        descriptor = descriptor, large = large, payload = payload,
+                        // Large-form absolute tile IS exact; small-form delta is exact when we had a
+                        // prior tile. Flag false when small-form had no anchor to advance from.
+                        tileAfter = moved, tileExact = large || moved != null,
+                    )
+                    slot.tile = moved
                     slot.sourceOpcode = sourceOpcode
                 }
             }

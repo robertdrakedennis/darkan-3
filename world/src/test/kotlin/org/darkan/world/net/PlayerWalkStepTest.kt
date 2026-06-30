@@ -10,11 +10,9 @@ import org.darkan.world.entity.MovementQueue
 import org.darkan.world.entity.Player
 import org.darkan.world.world.PlayerInfoSlots
 import org.darkan.world.world.Players
-import org.darkan.core.net.recorder.PlayerInfoDecoder
 import world.gregs.voidps.buffer.read.BufferReader
 import world.gregs.voidps.buffer.write.BufferWriter
 import world.gregs.voidps.type.Tile
-import java.io.ByteArrayOutputStream
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -23,23 +21,27 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Unit guardrail for the 1.2b increment-2a local-player WALK encode — the exact inverse of the
- * verified decode's high-res walk branch (`core/.../recorder/ClientStateCrossCheck.kt:1260-1266`,
- * mvt=1 → `gBit(3)` direction + `gBit(1)` hasFollowup).
+ * Unit guardrail for the per-target WALK encode forms ([PlayerMovementEncoder.encodeHighResPosition]),
+ * the leaf the orchestrator's walk state machine calls.
  *
- * Two things are proven, deliberately NOT as a full expected-byte string (the encode→decode
- * round-trip via the recorder's `decodePlayerInfo` is the framing guardrail, landing separately):
+ * **SERVER-DRIVEN WALK (2026-06-30 — the prod-decoded model):** prod forces the walk for the LOCAL
+ * slot too. A decoded live-prod local walk (`session-20260630-033557-27478-production`, idx 1160) is
+ * the three-phase move-mode shape, identical for any walker:
+ *  * **WALK-START** (idle→walk): `mvt=3` small move-mode form, descriptor byte offset 0x8 (WALK token
+ *    a38), carrying the first step's ±1-tile signed-5 delta — `code15 = (8<<10)|(xS5<<5)|yS5`.
+ *  * **WALK-STEP** (walk→walk): plain `mvt=1` = `[3-bit dir][1-bit followup=0]`.
+ *  * **WALK-STOP** (walk→idle): `mvt=3` small move-mode form, descriptor byte offset 0x0 (IDLE token
+ *    a30), `code15 = 0`, no move.
+ * POSITION-ONLY — no movement ext-info on any walk/stop tick.
  *
- *  1. the [Direction8] inverse-table is the faithful inverse of the oracle's `PLAYER_REGION_DX/DY`
- *     (`ClientStateCrossCheck.kt:1614-1615`), and a queued step mutates `player.tile` + the GPI slot
- *     anchor exactly as the world tick applies it;
- *  2. [PlayerMovementEncoder.encodeHighResPosition] writes `movementType=1` + the RIGHT 3-bit
- *     direction index for a known `(dx,dy)` when the player walked this tick — asserting the dir INDEX
- *     against the table, not a full byte string.
+ * The earlier "local walk is client-predicted, server sends mvt=0/absent" premise (and the mvt=3
+ * descriptor-entry-4 SMOOTH form) was FALSIFIED: the prior tools mis-identified the local slot as a
+ * remote player. The orchestrator-level state machine (latch → phase) is covered by
+ * [PlayerWalkStateMachineTest]; here we pin the leaf forms byte-for-byte against the prod decode.
  */
 class PlayerWalkStepTest {
 
-    private var allocatedIndex: Int = -1
+    private val allocatedIndices = ArrayList<Int>()
 
     @BeforeTest
     fun setUp() {
@@ -48,101 +50,76 @@ class PlayerWalkStepTest {
 
     @AfterTest
     fun tearDown() {
-        if (allocatedIndex > 0) Players.release(allocatedIndex)
+        for (idx in allocatedIndices) Players.release(idx)
+        allocatedIndices.clear()
     }
 
-    private fun newPlayer(spawn: Tile): Player {
-        val account = Account(username = "tester", displayName = "Tester")
+    private fun newPlayer(spawn: Tile, name: String = "tester"): Player {
+        val account = Account(username = name, displayName = name)
         val session = GameSession(
             write = ByteChannel(),
             isaacIn = Isaac(IntArray(4)),
             isaacOut = Isaac(IntArray(4)),
             ip = "127.0.0.1",
             codec = register948(),
-            username = "tester",
+            username = name,
         )
         val player = Player(index = 0, account = account, session = session)
-        allocatedIndex = Players.allocate(player) { idx -> player.index = idx }
-        player.viewport.resetAfterGpiPrefix(allocatedIndex)
+        val idx = Players.allocate(player) { i -> player.index = i }
+        allocatedIndices += idx
+        player.viewport.resetAfterGpiPrefix(idx)
         player.tile = spawn
         return player
     }
 
-    private fun writeSkipCount(out: BufferWriter, following: Int) {
-        when {
-            following == 0 -> out.writeBits(2, 0)
-            following < 32 -> {
-                out.writeBits(2, 1)
-                out.writeBits(5, following)
+    private fun signed5(v: Int): Int = if (v < 0x10) v else v - 0x20
+
+    /** Encode one high-res form and return `(hasExt, mvt, large?, code15?, dir?, followup?)` fields. */
+    private data class HighRes(
+        val hasExt: Int,
+        val mvt: Int,
+        val large: Int? = null,
+        val code15: Int? = null,
+        val dir: Int? = null,
+        val followup: Int? = null,
+    )
+
+    private fun encode(
+        viewer: Player,
+        target: Player,
+        phase: PlayerMovementEncoder.WalkPhase,
+        flagged: MutableList<Int> = ArrayList(),
+    ): HighRes {
+        val out = BufferWriter(64)
+        out.startBitAccess()
+        PlayerMovementEncoder.encodeHighResPosition(out, viewer, target, phase, flagged)
+        out.stopBitAccess()
+        val r = BufferReader(out.toArray())
+        r.startBitAccess()
+        val hasExt = r.readBits(1)
+        val mvt = r.readBits(2)
+        return when (mvt) {
+            1 -> {
+                val dir = r.readBits(3)
+                val followup = r.readBits(1)
+                r.stopBitAccess()
+                HighRes(hasExt, mvt, dir = dir, followup = followup)
             }
-            following < 256 -> {
-                out.writeBits(2, 2)
-                out.writeBits(8, following)
+            3 -> {
+                val large = r.readBits(1)
+                val code15 = r.readBits(15)
+                r.stopBitAccess()
+                HighRes(hasExt, mvt, large = large, code15 = code15)
             }
             else -> {
-                out.writeBits(2, 3)
-                out.writeBits(11, following)
+                r.stopBitAccess()
+                HighRes(hasExt, mvt)
             }
         }
-    }
-
-    private fun writeSkipRun(out: BufferWriter, count: Int) {
-        var remaining = count
-        while (remaining > 0) {
-            val following = minOf(remaining - 1, 2047)
-            out.writeBits(1, 0)
-            writeSkipCount(out, following)
-            remaining -= following + 1
-        }
-    }
-
-    private fun playerRegionWord(tile: Tile): Int =
-        ((tile.level and 0x3) shl 16) or ((tile.x ushr 6) shl 8) or (tile.y ushr 6)
-
-    private fun gpiPrefixBody(localIndex: Int, local: Tile): ByteArray {
-        val out = BufferWriter(8192)
-        out.startBitAccess()
-        out.writeBits(30, ((local.level and 0x3) shl 28) or (local.x shl 14) or local.y)
-        val defaultWord = playerRegionWord(local)
-        for (slot in 1 until 2048) {
-            if (slot != localIndex) out.writeBits(20, defaultWord)
-        }
-        out.stopBitAccess()
-        return out.toArray()
-    }
-
-    private fun playerInfoKnownWalkBody(player: Player, dir: Int): ByteArray {
-        player.lastWalkStepDir = dir
-        val flagged = ArrayList<Int>()
-        val out = BufferWriter(8192)
-
-        out.startBitAccess()
-        out.writeBits(1, 1)
-        PlayerMovementEncoder.encodeHighResPosition(out, player, flagged)
-        out.stopBitAccess()
-
-        out.startBitAccess()
-        out.stopBitAccess()
-
-        out.startBitAccess()
-        writeSkipRun(out, 2046)
-        out.stopBitAccess()
-
-        out.startBitAccess()
-        out.stopBitAccess()
-
-        val extInfo = ByteArrayOutputStream()
-        repeat(flagged.size) {
-            extInfo.write(0)
-            extInfo.write(0)
-        }
-        return out.toArray() + extInfo.toByteArray()
     }
 
     @Test
     fun `Direction8 indexOf is the faithful inverse of the verified DX DY table`() {
-        // For every direction index, indexOf(DX[d], DY[d]) must round-trip back to d (the inverse of
-        // ClientStateCrossCheck.kt:1614-1615). Spot-check the compass meanings the debug path uses.
         for (d in Direction8.DX.indices) {
             assertEquals(d, Direction8.indexOf(Direction8.DX[d], Direction8.DY[d]), "round-trip index $d")
         }
@@ -164,7 +141,6 @@ class PlayerWalkStepTest {
         player.movementQueue.enqueueStep(1, 0) // E
         assertTrue(player.movementQueue.hasPendingStep(), "step is queued")
 
-        // Mirror WorldTick.applyPendingStep: poll the dir, move the tile, update the anchor on region change.
         val dir = player.movementQueue.pollStep()
         assertEquals(Direction8.indexOf(1, 0), dir, "polled dir is the E index")
         val from = player.tile
@@ -185,66 +161,93 @@ class PlayerWalkStepTest {
     }
 
     @Test
-    fun `encodeHighResPosition writes movementType 1 and the right 3-bit dir for a known step`() {
-        val player = newPlayer(Tile(3200, 3200, 0))
-        // Walk NORTH this tick (the encoder reads the tick-applied dir off the player).
-        val northDir = Direction8.indexOf(0, 1)
-        player.lastWalkStepDir = northDir
+    fun `WALK-START writes the prod mvt3 desc 0x8 small form carrying the step delta`() {
+        // The idle->walk marker: mvt=3, small form, descriptor byte offset 0x8 (WALK token a38), with the
+        // first step's ±1-tile signed-5 delta. Byte-for-byte against the prod local walk decode.
+        val viewer = newPlayer(Tile(3200, 3200, 0), name = "viewer")
+        viewer.lastWalkStepDir = Direction8.indexOf(0, -1) // SOUTH
 
-        val out = BufferWriter(64)
-        val flagged = ArrayList<Int>()
-        out.startBitAccess()
-        PlayerMovementEncoder.encodeHighResPosition(out, player, flagged)
-        out.stopBitAccess()
-
-        // Decode [1 hasExt][2 movementType][3 dir][1 hasFollowup]. Assert mvt + dir INDEX (not a byte string).
-        val r = BufferReader(out.toArray())
-        r.startBitAccess()
-        val hasExt = r.readBits(1)
-        assertEquals(1, r.readBits(2), "movementType must be 1 (walk)")
-        assertEquals(northDir, r.readBits(3), "3-bit dir must equal the verified Direction8 N index")
-        assertEquals(0, r.readBits(1), "single step → hasFollowup=0")
-        r.stopBitAccess()
-
-        // A fresh account carries a default appearance, so hasExt=1 and the slot is flagged for ext-info.
-        assertEquals(1, hasExt, "fresh player has deliverable appearance → hasExtendedInfo=1")
-        assertEquals(listOf(player.index), flagged, "walking slot with ext-info is flagged for the ext block")
+        val r = encode(viewer, viewer, PlayerMovementEncoder.WalkPhase.START)
+        assertEquals(3, r.mvt, "WALK-START: movementType=3 (move-mode)")
+        assertEquals(0, r.large, "small (15-bit) form")
+        // SOUTH start == prod tick11/tick33 code15 0x201f.
+        assertEquals(0x201f, r.code15, "SOUTH WALK-START == prod code15 0x201f (field 8 | yS5=-1)")
+        assertEquals(0x8, (r.code15!! ushr 10) and 0x1c, "descriptor byte offset must be 0x8 (WALK token a38)")
+        assertEquals(0, (r.code15 ushr 10) and 0x3, "plane delta must be 0")
+        assertEquals(0, signed5((r.code15 ushr 5) and 0x1f), "X delta = 0 (due south)")
+        assertEquals(-1, signed5(r.code15 and 0x1f), "Y delta = -1 tile (south)")
     }
 
     @Test
-    fun `PlayerInfoDecoder round-trips a known walk index and dir from op22`() {
-        val player = newPlayer(Tile(3200, 3200, 0))
-        val northDir = Direction8.indexOf(0, 1)
-        val prefix = gpiPrefixBody(player.index, player.tile)
-        val body = playerInfoKnownWalkBody(player, northDir)
-
-        val scene = PlayerInfoDecoder.decode(
-            bytes = body,
-            gpiPrefix = PlayerInfoDecoder.GpiPrefix(prefix, player.index),
-        )
-        val movement = scene.movements.singleOrNull { it.index == player.index && it.movementType == 1 }
-
-        require(movement != null) { "expected one retained walk movement for local player ${player.index}" }
-        assertEquals(player.index, movement.index, "retained movement index must be the player slot")
-        assertEquals(northDir, movement.dir, "retained walk dir must match the encoded 3-bit dir")
-        assertEquals(true, movement.hasExt, "walk record retains the hasExt bit")
-        assertEquals(null, movement.followup, "single-step walk has no follow-up payload")
+    fun `WALK-START code15 matches the prod-captured walk-start steps byte-for-byte`() {
+        // Ground-truth from session-20260630-033557-27478-production (local idx 1160):
+        //   tick11/33 SOUTH (DX=0,DY=-1) -> code15 = 0x201f ; tick20/58 NORTH (DX=0,DY=+1) -> 0x2001.
+        val viewer = newPlayer(Tile(3200, 3200, 0), name = "viewer")
+        fun code15For(dir: Int): Int {
+            viewer.lastWalkStepDir = dir
+            return encode(viewer, viewer, PlayerMovementEncoder.WalkPhase.START).code15!!
+        }
+        assertEquals(0x201f, code15For(Direction8.indexOf(0, -1)), "SOUTH start == prod 0x201f")
+        assertEquals(0x2001, code15For(Direction8.indexOf(0, 1)), "NORTH start == prod 0x2001")
+        assertEquals(0x2020, code15For(Direction8.indexOf(1, 0)), "EAST start == 0x2020 (field 8 | +1 tile X)")
+        assertEquals(0x23e0, code15For(Direction8.indexOf(-1, 0)), "WEST start == 0x23e0 (field 8 | -1 tile X)")
     }
 
     @Test
-    fun `with no step this tick encodeHighResPosition keeps the stationary movementType 0 form`() {
+    fun `WALK-STEP writes the plain mvt1 dir-followup form`() {
+        // The middle steps: mvt=1, [3-bit dir][1-bit followup=0]. The dir is the verified Direction8 index.
+        val viewer = newPlayer(Tile(3200, 3200, 0), name = "viewer")
+        val eastDir = Direction8.indexOf(1, 0)
+        viewer.lastWalkStepDir = eastDir
+
+        val r = encode(viewer, viewer, PlayerMovementEncoder.WalkPhase.STEP)
+        assertEquals(1, r.mvt, "WALK-STEP: movementType=1 (walk)")
+        assertEquals(eastDir, r.dir, "dir is the EAST Direction8 index")
+        assertEquals(0, r.followup, "single one-tile step → hasFollowup=0")
+    }
+
+    @Test
+    fun `WALK-STOP writes the prod mvt3 desc 0x0 idle marker with code15 0`() {
+        // The walk->idle marker: mvt=3, small form, descriptor byte offset 0x0 (IDLE token a30), code15=0,
+        // no move. == prod ticks 13/26/48/69.
+        val viewer = newPlayer(Tile(3200, 3200, 0), name = "viewer")
+        // STOP does not read lastWalkStepDir (no move) — leave it NO_STEP.
+
+        val r = encode(viewer, viewer, PlayerMovementEncoder.WalkPhase.STOP)
+        assertEquals(3, r.mvt, "WALK-STOP: movementType=3 (move-mode)")
+        assertEquals(0, r.large, "small (15-bit) form")
+        assertEquals(0x0, r.code15, "WALK-STOP code15 == 0 (IDLE token a30, no move)")
+        assertEquals(0x0, (r.code15!! ushr 10) and 0x1c, "descriptor byte offset must be 0x0 (IDLE token a30)")
+    }
+
+    @Test
+    fun `WalkPhase NONE keeps the stationary movementType 0 form`() {
         val player = newPlayer(Tile(3200, 3200, 0))
         assertEquals(MovementQueue.NO_STEP, player.lastWalkStepDir, "no step applied this tick")
+        // Mark the appearance delivered so NONE is the bare hasExt=0 stationary hold (no inline appearance).
+        player.viewport.cachedApprHashes[player.index] = player.appearance.cachedBytes
 
-        val out = BufferWriter(64)
-        out.startBitAccess()
-        PlayerMovementEncoder.encodeHighResPosition(out, player, ArrayList())
-        out.stopBitAccess()
+        val r = encode(player, player, PlayerMovementEncoder.WalkPhase.NONE)
+        assertEquals(0, r.mvt, "NONE → stationary movementType=0 (unchanged form)")
+        assertEquals(0, r.hasExt, "appearance delivered → no ext-info on a stationary hold")
+    }
 
-        val r = BufferReader(out.toArray())
-        r.startBitAccess()
-        r.readBits(1) // hasExt
-        assertEquals(0, r.readBits(2), "no step → stationary movementType=0 (unchanged form)")
-        r.stopBitAccess()
+    @Test
+    fun `the walk forms carry no movement ext-info (position-only) once appearance is delivered`() {
+        // POSITION-ONLY: a walk/start/step/stop tick must not flag the slot for an ext-info block once the
+        // appearance is delivered (prod's local slot carried 0 movement-anim / forced-movement bits).
+        val viewer = newPlayer(Tile(3200, 3200, 0))
+        viewer.viewport.cachedApprHashes[viewer.index] = viewer.appearance.cachedBytes
+        viewer.lastWalkStepDir = Direction8.indexOf(1, 0)
+
+        for (phase in listOf(
+            PlayerMovementEncoder.WalkPhase.START,
+            PlayerMovementEncoder.WalkPhase.STEP,
+            PlayerMovementEncoder.WalkPhase.STOP,
+        )) {
+            val flagged = ArrayList<Int>()
+            encode(viewer, viewer, phase, flagged)
+            assertTrue(flagged.isEmpty(), "$phase must not flag an ext-info block (position-only)")
+        }
     }
 }

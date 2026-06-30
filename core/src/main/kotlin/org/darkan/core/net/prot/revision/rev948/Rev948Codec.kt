@@ -47,6 +47,11 @@ fun register948() = Codec.register(948) {
     // Publish revision-specific well-known mask keys. APPEARANCE is confirmed at 948 bit 3
     // (dispatch order 4) — see file-level doc and Rev948PlayerUpdateMaskKey.
     ActiveMaskKeys.playerAppearance = Rev948PlayerUpdateMaskKey.APPEARANCE
+    // The two movement render blocks the world ext-info encoder synthesizes per walk step (the local
+    // avatar walk-animation + glide fix): MOVEMENT_ANIM (bit 0x20, the route-anim/leg driver) and
+    // FORCED_MOVEMENT (bit 0x80, the SetRenderWaypoint glide). See player-appearance-948.md.
+    ActiveMaskKeys.playerMovementAnim = Rev948PlayerUpdateMaskKey.MOVEMENT_ANIM
+    ActiveMaskKeys.playerForcedMovement = Rev948PlayerUpdateMaskKey.FORCED_MOVEMENT
 
     // Publish 948 ext-info flag-bitset expansion ("continue") bits so the world builders drive
     // their header expansion from the active revision rather than hardcoded 947 literals.

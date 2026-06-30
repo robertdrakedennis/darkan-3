@@ -35,6 +35,9 @@ const TARGETS: &[(&str, usize)] = &[
     ("Client::SetMainState", 0x27ff50),
     ("Isaac::Init", 0x71a10),
     ("ClientStream::Fill", 0x8dc070),
+    // (No AdvanceRenderPosition entry here: the per-frame anim trace is a register-
+    // safe poller, NOT an inline hook — an inline detour on that SSE render function
+    // crashes the client because install_inline does not preserve XMM. See hooks.rs.)
     // New lobby/login hooks (RE §8a). OpenLoginStream's first 14 bytes include a
     // rel8 `jne` whose target is OUTSIDE the stolen window — the BlockEncoder
     // widens it to rel32 in the trampoline, so it must still relocate cleanly.

@@ -145,6 +145,17 @@ fn run_ctor() {
             // `prot-table.json` the moment it is (always before any packet flows).
             state::publish_image_slide(image.slide);
             state::maybe_dump_prot_table();
+
+            // Per-frame anim trace (OPT-IN, default OFF): a register-SAFE poller
+            // thread that samples the LOCAL avatar's animation state every ~16ms and
+            // writes `anim-trace.jsonl`. Gated on DARKAN_ANIM_TRACE=1 — when unset we
+            // do NOT spawn it, so normal/production captures are completely
+            // unaffected. It is NOT an inline hook on the render function (that
+            // crashes the client by clobbering its XMM registers — see hooks.rs); a
+            // poller only reads memory and can never perturb the client.
+            if env::var("DARKAN_ANIM_TRACE").ok().as_deref() == Some("1") {
+                state::spawn_anim_trace_poller();
+            }
         }
         Proc::Wrapper => {
             log("wrapper: socket plane + process events only (no client struct)");

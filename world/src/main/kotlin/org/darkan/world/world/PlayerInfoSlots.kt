@@ -62,6 +62,21 @@ class PlayerInfoSlots(private val capacity: Int = SLOT_COUNT) {
     ) {
         /** The active flag for the NEXT tick, accumulated during this tick's passes; committed by [rebuildAfterPasses]. */
         var nextActive: Boolean = false
+
+        /**
+         * Walk move-state latch — true while THIS viewer's client believes the slot is in the WALK
+         * move-state (i.e. the last high-res form we emitted for it was a WALK-START or WALK-STEP and
+         * we have not yet emitted the WALK-STOP). The op22 walk state machine
+         * ([org.darkan.world.net.PlayerInfoEncoder]) reads it to choose the per-tick form:
+         *  * `!wasWalking && stepped` → WALK-START (`mvt=3` desc 0x8); then set the latch.
+         *  * `wasWalking && stepped`  → WALK-STEP (`mvt=1`).
+         *  * `wasWalking && !stepped` → WALK-STOP (`mvt=3` desc 0x0); then clear the latch. This tick is
+         *    itself an update (the stop marker), so it must NOT fold into a skip-run.
+         * It is intentionally NOT reset by [rebuildAfterPasses] — it persists across ticks (the client's
+         * move-state persists until the server changes it), and is committed by the encoder at the slot's
+         * emit point. Mirrors the prod walk decode (`session-20260630-033557-27478-production`).
+         */
+        var wasWalking: Boolean = false
     }
 
     /** Low-res region anchor: `plane` + region coords (`tile >> 6`). Mirrors the decode's `LowResCoord`. */

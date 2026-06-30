@@ -29,14 +29,18 @@ import org.darkan.core.net.prot.update.UpdateMask
  *   mode 3 — scalar: `wire = (-0x80-value)&0xFF`; buffer: each `(b+0x80)&0xFF`, REVERSED
  * So APPEARANCE: length byte = mode 3 = `(-0x80 - L) & 0xFF`; body = mode 2 = every byte `+0x80`.
  *
- * **The other scrambled-scalar encoders below now FAIL LOUD** (`sByte`/`sShort`/`sMedium` throw).
- * They are LATENT — none are emitted on the first-light path (only APPEARANCE is) — and emitting the
- * now-retired `writeByte(0)` mode prefix silently DESYNCS the client, so rather than ship known-wrong
- * bytes the guards throw if any of these masks is ever actually sent under 948. Re-auditing all 36
- * per-block `.rodata` bases is out of scope here (doc §6/§8 defers it: "trace them when those masks
- * are actually sent"); when FACE_DIRECTION/FORCED_MOVEMENT/etc. are wired, each must be re-pointed at
- * its own `table[blockBase + fieldIndex]` transform per doc §6 action item 2, replacing the guard.
- * This is FLAGGED for the ghidra-reverse-engineer agent (per-block base map).
+ * **APPEARANCE (bit 3), FORCED_MOVEMENT (bit 7, the glide block) and MOVEMENT_ANIM (bit 5, the walk/run
+ * anim block) are byte-verified and wired** — each writes the exact inverse of the client's per-field
+ * jag::Packet transforms (`g1_add/g1_neg/g1_sub`, `g2`, `gSmart2or4s`), with NO mode-prefix byte, per
+ * `re-resources/docs/net/serverprot/player-appearance-948.md`.
+ *
+ * **The remaining scrambled-scalar encoders below still FAIL LOUD** (`sByte`/`sShort`/`sMedium` throw).
+ * They are LATENT — none are on the movement render path — and emitting the now-retired `writeByte(0)`
+ * mode prefix silently DESYNCS the client, so rather than ship known-wrong bytes the guards throw if any
+ * of these masks is ever actually sent under 948. Re-auditing the remaining per-block `.rodata` bases is
+ * out of scope here (doc defers it: "trace them when those masks are actually sent"); when
+ * FACE_DIRECTION/OVERHEAD_OPACITY/etc. are wired, each must be re-pointed at its own
+ * `table[blockBase + fieldIndex]` transform, replacing the guard.
  *
  * Only blocks with DEFINITIVE identity (named fn / exact offset / 0xffff-clear semantics) and a
  * fully-characterised wire payload are registered here. Spot-anim list / transient-triple blocks
@@ -53,10 +57,11 @@ internal fun registerRev948ServerCodecsUpdateMasks() {
  *
  * The earlier implementation emitted a `writeByte(0)` mode selector + the plain value. That is **WRONG**
  * (`re-resources/docs/net/serverprot/player-appearance-948.md` §6 — the scramble mode is a fixed client
- * `.rodata` table, NOT a wire byte), so it silently DESYNCS the client. None of these blocks ship on the
- * first-light path today, so rather than emit known-wrong bytes the helpers now THROW: any code path that
- * actually tries to send FORCED_MOVEMENT / OVERHEAD_OPACITY / FACE_DIRECTION / VISIBILITY_FLAG /
- * MODEL_OVERRIDE_ID / COMBAT_LEVEL_HEADBAR_ID under 948 fails loudly here instead of corrupting the stream.
+ * `.rodata` table, NOT a wire byte), so it silently DESYNCS the client. The blocks still routed here are
+ * not on the movement render path today, so rather than emit known-wrong bytes the helpers THROW: any code
+ * path that actually tries to send OVERHEAD_OPACITY / FACE_DIRECTION / VISIBILITY_FLAG / MODEL_OVERRIDE_ID /
+ * COMBAT_LEVEL_HEADBAR_ID under 948 fails loudly here instead of corrupting the stream. (APPEARANCE,
+ * FORCED_MOVEMENT and MOVEMENT_ANIM are byte-verified and wired with real transforms — not routed here.)
  * To wire one of these, re-point it at its block's `table[blockBase + fieldIndex]` transform first
  * (per doc §6 action item 2), then replace the guard with the real encode. See NETWORKING_AUDIT.md (Phase 0).
  */
@@ -119,18 +124,48 @@ private fun registerPlayerMaskEncoders() {
         Rev948ExtInfoTransforms.write(this, (mask as UpdateMask.Appearance).data)
     }
 
-    // FORCED_MOVEMENT (bit 7, order 9). Wire: 6x scrambled byte + 3x scrambled short -> SetForcedMovement.
+    // FORCED/TEMP MOVEMENT — the GLIDE block (bit 7 / 0x80, order 9). 12 bytes ->
+    // GraphEntity::SetRenderWaypoint @0x10039e220 (opens the avatar+0xDBC lerp window so the avatar
+    // interpolates tile→tile instead of snapping). Wire layout (plain payload; transforms are the
+    // exact inverse of the client's per-byte reads, player-appearance-948.md §"Bit-7 (0x80)"):
+    //   +0 g1_add  (client wire-128)  -> writeByteAdd       srcDx tile delta (client * 0x200 fine)
+    //   +1 g1_neg  (client -wire)     -> writeByteInverse   srcDz tile delta (client * 0x200 fine)
+    //   +2 g1                          -> writeByte          dstDx tile delta (client * 0x200 fine)
+    //   +3 g1_sub  (client 128-wire)  -> writeByteSubtract  dstDz tile delta (client * 0x200 fine)
+    //   +4 g1_add                      -> writeByteAdd       delta3
+    //   +5 g1_neg                      -> writeByteInverse   delta4
+    //   +6..7 g2 BE                    -> writeShort         startTick
+    //   +8..9 g2 BE                    -> writeShort         endTick
+    //   +0xa yaw low  g1_add           -> writeByteAdd(yaw & 0xFF)
+    //   +0xb yaw high (wire & 0x3f)<<8 -> writeByte((yaw >> 8) & 0x3f)  (14-bit angle, NOT a full short)
     PlayerUpdateMaskEncoder.register(Rev948PlayerUpdateMaskKey.FORCED_MOVEMENT) { mask ->
         val m = mask as UpdateMask.ForcedMovement
-        sByte(m.srcDx)
-        sByte(m.srcDz)
-        sByte(m.dstDx)
-        sByte(m.dstDz)
-        sByte(m.delta3)
-        sByte(m.delta4)
-        sShort(m.startTime and 0xFFFF)
-        sShort(m.endTime and 0xFFFF)
-        sShort(m.animationId and 0xFFFF)
+        writeByteAdd(m.srcDx)
+        writeByteInverse(m.srcDz)
+        writeByte(m.dstDx)
+        writeByteSubtract(m.dstDz)
+        writeByteAdd(m.delta3)
+        writeByteInverse(m.delta4)
+        writeShort(m.startTime and 0xFFFF)
+        writeShort(m.endTime and 0xFFFF)
+        writeByteAdd(m.yaw and 0xFF)
+        writeByte((m.yaw shr 8) and 0x3F)
+    }
+
+    // MOVEMENT_ANIM — the walk/run leg-animation block (bit 5 / 0x20, order 16). Wire:
+    //   4x gSmart2or4s (movement-anim seq ids: walk/run/turn/idle set) -> writeBigSmart
+    //   1x g1_sub (priority flag, client 128-wire)                     -> writeByteSubtract
+    // -> GraphEntity::SetMovementAnimSet @0x1003a69f0 pushes the seqs into the route-anim queue so the
+    // bas walk/run seq plays (player-appearance-948.md §"What ACTUALLY animates a remote-player walk").
+    // writeBigSmart already encodes -1 as the 2-byte 0x7FFF sentinel the client reads as -1 (4×-1 ⇒
+    // ResetMovementSeqs, stop). All four ids are emitted regardless of value (the client always reads 4).
+    PlayerUpdateMaskEncoder.register(Rev948PlayerUpdateMaskKey.MOVEMENT_ANIM) { mask ->
+        val m = mask as UpdateMask.MovementAnim
+        writeBigSmart(m.seq0)
+        writeBigSmart(m.seq1)
+        writeBigSmart(m.seq2)
+        writeBigSmart(m.seq3)
+        writeByteSubtract(m.priority and 0xFF)
     }
 
     // OVERHEAD_OPACITY (bit 12, order 18). Wire: 1 scrambled byte -> PlayerEntity+0x1074.
@@ -153,9 +188,9 @@ private fun registerPlayerMaskEncoders() {
         writeByte(0)
     }
 
-    // DEFERRED (not on first-tick render path; need focused re-walk + capture before wiring):
+    // DEFERRED (not on the movement render path; need focused re-walk + capture before wiring):
     //  - OVERHEAD_CHAT (bit 20), OVERHEAD_TEXT (bit 6), CHAT_TEXT_PRIVATE (bit 14),
-    //    POSITION_COLOR (bit 21), HITMARKS (bit 4), EXACT_MOVE (bit 5), HEAD_ICON (bit 17),
+    //    POSITION_COLOR (bit 21), HITMARKS (bit 4), HEAD_ICON (bit 17),
     //    SPOT_ANIM_REMOVAL (bit 26), and all spot-anim list/slot UNK_BIT* blocks.
 }
 
@@ -192,18 +227,22 @@ private fun registerNpcMaskEncoders() {
         writeByte(0)
     }
 
-    // FORCED_MOVEMENT (bit 15, order 24). Wire: 6x scrambled byte + 3x scrambled short -> SetForcedMovement.
+    // FORCED/TEMP MOVEMENT — the GLIDE block (bit 15 / 0x8000, order 24). NPCs use the IDENTICAL
+    // temp-movement -> SetRenderWaypoint glide path as players (player-appearance-948.md: SetRenderWaypoint
+    // has exactly two callers, NpcInfo::DecodeNpcExtendedInfo and the player bit-0x80 block), so the wire
+    // shape matches the player FORCED_MOVEMENT block above (6x transformed byte + 2x g2 + 14-bit yaw).
     NpcUpdateMaskEncoder.register(Rev948NpcUpdateMaskKey.FORCED_MOVEMENT) { mask ->
         val m = mask as UpdateMask.ForcedMovement
-        sByte(m.srcDx)
-        sByte(m.srcDz)
-        sByte(m.dstDx)
-        sByte(m.dstDz)
-        sByte(m.delta3)
-        sByte(m.delta4)
-        sShort(m.startTime and 0xFFFF)
-        sShort(m.endTime and 0xFFFF)
-        sShort(m.animationId and 0xFFFF)
+        writeByteAdd(m.srcDx)
+        writeByteInverse(m.srcDz)
+        writeByte(m.dstDx)
+        writeByteSubtract(m.dstDz)
+        writeByteAdd(m.delta3)
+        writeByteInverse(m.delta4)
+        writeShort(m.startTime and 0xFFFF)
+        writeShort(m.endTime and 0xFFFF)
+        writeByteAdd(m.yaw and 0xFF)
+        writeByte((m.yaw shr 8) and 0x3F)
     }
 
     // CLIENT_SCRIPT_OVERRIDE (bit 16, order 25). Opaque payload (heavy struct; server builds raw bytes).

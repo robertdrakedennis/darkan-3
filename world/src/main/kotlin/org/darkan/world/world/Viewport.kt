@@ -54,16 +54,20 @@ class Viewport(val owner: Player) {
     val sentNpcAdds: MutableSet<Int> = mutableSetOf()
 
     /**
-     * The build-area map-square (region) grid the client allocated from the last op81, and the
-     * authoritative spatial gate for zone streaming (`ZoneBundleBuilder`). Computed from the
-     * owner's spawn tile + a [BuildAreaSize] by [loadBuildArea]; defaults to a window centred on
+     * Scene plan from the last op81, including the build-area map-square grid, render-scene zones,
+     * world-area type, and op78 local-origin mapping. Computed from the owner's spawn tile by
+     * [loadSceneBuild]; defaults to a window centred on
      * the owner's current tile so the viewport is coherent before the first explicit rebuild.
      *
      * Per `docs/protocol/packed-coord-buildarea-948.md`, this drives op81's `packedCoordA`
      * (SW corner) / `packedCoordB` (NE corner). Keep it in sync with what was sent on the wire:
-     * [loadBuildArea] is the single routine that recomputes it and (callers then) re-send op81.
+     * [loadSceneBuild] is the single routine that recomputes it and (callers then) re-send op81.
      */
-    var buildArea: BuildArea = BuildArea.of(owner.tile)
+    var sceneBuildPlan: SceneBuildPlan =
+        SceneBuildPlanner.planFor(owner.tile, SceneBuildMode.Rebuild, BuildAreaSize.DEFAULT, resolveWorldAreaType = false)
+        private set
+
+    var buildArea: BuildArea = sceneBuildPlan.buildArea
         private set
 
     /**
@@ -71,8 +75,8 @@ class Viewport(val owner: Player) {
      * from the owner's spawn tile (`tile >> 3`); the render scene window is positioned here inside
      * the larger [buildArea] map-square grid (spec §2).
      */
-    var buildAreaChunkX: Int = owner.tile.x shr 3
-    var buildAreaChunkY: Int = owner.tile.y shr 3
+    var buildAreaChunkX: Int = sceneBuildPlan.centreZoneX
+    var buildAreaChunkY: Int = sceneBuildPlan.centreZoneY
 
     /**
      * Recomputes [buildArea] (and the centre zone) from the given spawn tile + size, returning the
@@ -81,18 +85,29 @@ class Viewport(val owner: Player) {
      * state, keeping [buildArea] coherent with the op81 the world server then ships.
      */
     fun loadBuildArea(tile: Tile, size: BuildAreaSize = BuildAreaSize.DEFAULT): BuildArea {
-        buildArea = BuildArea.of(tile, size)
-        buildAreaChunkX = tile.x shr 3
-        buildAreaChunkY = tile.y shr 3
+        loadSceneBuild(tile, SceneBuildMode.Rebuild, size, resolveWorldAreaType = false)
         return buildArea
     }
 
     fun loadFirstLightBuildArea(tile: Tile): BuildArea {
-        buildArea = BuildArea.firstLight(tile)
-        buildAreaChunkX = tile.x shr 3
-        buildAreaChunkY = tile.y shr 3
+        loadSceneBuild(tile, SceneBuildMode.WorldEntry)
         return buildArea
     }
+
+    fun loadSceneBuild(
+        tile: Tile,
+        mode: SceneBuildMode,
+        size: BuildAreaSize = BuildAreaSize.DEFAULT,
+        resolveWorldAreaType: Boolean = true,
+    ): SceneBuildPlan {
+        sceneBuildPlan = SceneBuildPlanner.planFor(tile, mode, size, resolveWorldAreaType)
+        buildArea = sceneBuildPlan.buildArea
+        buildAreaChunkX = sceneBuildPlan.centreZoneX
+        buildAreaChunkY = sceneBuildPlan.centreZoneY
+        return sceneBuildPlan
+    }
+
+    fun requiresSceneRebuild(tile: Tile): Boolean = sceneBuildPlan.requiresRebuildFor(tile)
 
     /** First-tick init flag — must send the init-form PlayerInfo with 18-bit region hashes. */
     var firstTick: Boolean = true

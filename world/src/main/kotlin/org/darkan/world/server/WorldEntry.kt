@@ -3,7 +3,6 @@ package org.darkan.world.server
 import org.darkan.core.EnvVars
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logTrace
-import org.darkan.core.Logger.logWarn
 import org.darkan.core.net.prot.*
 import org.darkan.core.net.session.GameSession
 import org.darkan.world.entity.Player
@@ -15,6 +14,7 @@ import org.darkan.world.net.PlayerInfoEncoder
 import org.darkan.world.net.SceneMapCacheDiagnostics
 import org.darkan.world.net.SceneMapRegionPlanner
 import org.darkan.world.net.ZoneStreamer
+import org.darkan.world.world.SceneBuildMode
 import world.gregs.voidps.cache.Cache
 import java.security.SecureRandom
 import java.util.Base64
@@ -36,7 +36,7 @@ import java.util.Base64
  *
  * Several pieces are FROZEN single-player "first light" dev-scaffolding — captured from one Lumbridge
  * recording, not derived from world state — gated behind [EnvVars.firstLightScaffolding] (default
- * true, so current behaviour is preserved). They are individually marked below and are slated for
+ * false). They are individually marked below and are slated for
  * replacement by real inventory / stat / zone-spawn services in a later phase.
  */
 object WorldEntry {
@@ -73,7 +73,7 @@ object WorldEntry {
         ZoneStreamer.streamScene(session, player.viewport)
 
         // buildWorldEntrySync clears firstTick and marks appearance delivered.
-        // FROZEN DEV-SCAFFOLDING (default-on): captured single-player inventory/container block.
+        // FROZEN DEV-SCAFFOLDING (debug-only): captured single-player inventory/container block.
         if (EnvVars.firstLightScaffolding) sendInitialInventories(session)
 
         // Step 15b: THE IN-GAME TRANSITION (§8 task #1+#2) — swap the client's top-level
@@ -122,15 +122,8 @@ object WorldEntry {
         // larger asymmetric map-square grid observed in production rev948 so the scene manager
         // allocates the same map window before the op78 stream arrives.
         val spawn = player.tile
-        val buildArea = player.viewport.loadFirstLightBuildArea(spawn)
-        val centreZone = spawn.zone                      // render-scene centre (positioned inside the grid)
-        val sceneRootId = Cache.worldAreaTypeAt(spawn.x, spawn.y) ?: run {
-            logWarn(
-                "No WorldAreaType covers spawn (${spawn.x},${spawn.y}) for ${player.account.username}; " +
-                    "using WORLD_SCENE_ROOT_ID=${EnvVars.worldSceneRootId}"
-            )
-            EnvVars.worldSceneRootId
-        }
+        val plan = player.viewport.loadSceneBuild(spawn, SceneBuildMode.WorldEntry)
+        val buildArea = plan.buildArea
         // GPI prefix: local player's 30-bit tile == this same spawn tile; the skipped slot is the
         // player's allocated index (== WorldLoginDetails.playerIndex == viewport.highResIndices[0]).
         val gpiPrefix = Op81GpiPrefix.build(spawnTile = spawn, localPlayerIndex = player.index)
@@ -149,17 +142,21 @@ object WorldEntry {
                 // never fires ComposeAppearanceModel and render_model (avatar+0xC58) stays null (INVISIBLE
                 // avatar), while the camera anchors off the avatar (sustained DRIFT). The build-area corners
                 // (packedCoordA/B) already matched prod exactly; ONLY this centre-zone order was off.
-                zoneX = centreZone.x,                    // +4 = centreZoneX (east-west) — matches prod (403)
-                zoneZ = centreZone.y,                    // +1/+2 = centreZoneZ (north-south) — matches prod (402)
+                zoneX = plan.centreZoneX,                // +4 = centreZoneX (east-west) — matches prod (403)
+                zoneZ = plan.centreZoneY,                // +1/+2 = centreZoneZ (north-south) — matches prod (402)
                 packedCoordA = buildArea.packedCoordA,   // +10 SW corner {minRegionX, minRegionZ}
                 packedCoordB = buildArea.packedCoordB,   // +14 NE corner {maxRegionX, maxRegionZ}
                 npcInfoCoordBitWidth = NPC_INFO_COORD_BIT_WIDTH,
-                sceneRootId = sceneRootId,
+                sceneRootId = plan.worldAreaTypeId,
                 rebuildPrefix = gpiPrefix,               // Shape B: 5119-byte GPI init; body = 5119 + 18 = 5137
             )
         )
-        logTrace("World build area for ${player.account.username}: $buildArea centreZone=${centreZone.x},${centreZone.y} gpiPrefix=${gpiPrefix.size}B slot=${player.index}")
-        val sceneRegions = SceneMapRegionPlanner.regionsForScene(centreZone.x, centreZone.y)
+        logTrace(
+            "World build area for ${player.account.username}: $buildArea " +
+                "centreZone=${plan.centreZoneX},${plan.centreZoneY} worldArea=${plan.worldAreaTypeId} " +
+                "gpiPrefix=${gpiPrefix.size}B slot=${player.index}"
+        )
+        val sceneRegions = SceneMapRegionPlanner.regionsForScene(plan)
         logInfo(
             "World scene map groups for ${player.account.username}: " +
                 SceneMapCacheDiagnostics.describe(Cache.get(), sceneRegions)
@@ -293,7 +290,7 @@ object WorldEntry {
         session.send(TriggerOnDialogAbort())
         session.send(ClearPendingUpdates())
         session.send(NpcInfoEncoder.buildInit(player))
-        // FROZEN DEV-SCAFFOLDING (default-on): captured single-player 28-skill stat block.
+        // FROZEN DEV-SCAFFOLDING (debug-only): captured single-player 28-skill stat block.
         if (EnvVars.firstLightScaffolding) sendInitialStats(session)
         session.send(UpdateRunWeight(0))
         // Run energy via op13 (UPDATE_RUNENERGY), g1 0..100 — full bar. (op80 is the chat filter; §10.4.)

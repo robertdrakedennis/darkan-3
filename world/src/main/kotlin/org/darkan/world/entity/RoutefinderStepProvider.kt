@@ -13,8 +13,8 @@ import kotlin.math.abs
  * route tile into the verified 3-bit [Direction8] index expected by [MovementQueue].
  */
 class RoutefinderStepProvider(
-    private val flags: CollisionFlagMap = WorldCollisionFlagMap.flags,
-    private val ensureLoaded: (Tile) -> Unit = WorldCollisionFlagMap::ensureLoadedForRoute,
+    private val flags: CollisionFlagMap = WorldCollisionProvider.flags,
+    private val ensureLoaded: (Tile) -> Unit = WorldCollisionProvider::ensureLoadedForRoute,
     private val routeFinding: RouteFinding = RouteFinding(flags),
     private val maxSteps: Int = NaiveStraightLineStepProvider.MAX_STEPS,
 ) : StepProvider {

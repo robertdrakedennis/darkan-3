@@ -1,8 +1,12 @@
 package org.darkan.world.net
 
+import org.darkan.world.world.SceneBuildPlan
 import world.gregs.voidps.type.Region
 
 object SceneMapRegionPlanner {
+
+    fun regionsForScene(plan: SceneBuildPlan): Set<Region> =
+        plan.renderZones.mapTo(LinkedHashSet()) { it.zone.region }
 
     fun regionsForScene(centreZoneX: Int, centreZoneY: Int): Set<Region> {
         val regions = LinkedHashSet<Region>()

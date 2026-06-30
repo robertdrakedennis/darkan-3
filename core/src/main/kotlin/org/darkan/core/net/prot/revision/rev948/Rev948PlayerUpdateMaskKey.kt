@@ -26,11 +26,13 @@ import org.darkan.core.net.prot.update.PlayerUpdateMaskKey
  *  * OVERHEAD_CHAT     : bit 21 -> bit 20     (order 3)   — AddChat with effect flags
  *  * CHAT_TEXT_PRIVATE : bit 16 -> bit 14     (order 10)  — compound guard (len + buffer)
  *
- * **948 ext-info readers use a per-field "scrambled" mode byte.** Each `gScrambled*` read in the
- * handler (`gScrambledByte/Ubyte/Ushort/Uint/Medium`, plus `FUN_0047f240` mode-select short)
- * consumes a leading 1-byte mode selector choosing one of 4 transforms (0=BE/plain, 1=LE/reverse,
- * 2=BE+0x80, 3=LE+0x80) before the value. The server may always emit mode 0 + the plain value.
- * See `docs/net/serverprot/948-research-C-player-npc-misc.md` for the full reader spec.
+ * **948 ext-info transforms are a FIXED client-side `.rodata` table, NOT a wire mode byte** (CORRECTED;
+ * the earlier "server may always emit mode 0 + the plain value" model was WRONG and DESYNCS the client —
+ * see `re-resources/docs/net/serverprot/player-appearance-948.md` §"Ext-info framing"). Each field's
+ * transform is `table[blockBase + fieldIndex]` (forms: plain, reverse, +0x80, reverse+0x80) applied with
+ * NO leading mode byte. The MOVEMENT_ANIM / FORCED_MOVEMENT / FACE_DIRECTION reads are ordinary
+ * jag::Packet transforms (`gSmart2or4s`, `g1_add/g1_neg/g1_sub`, `g2`) — see `player-appearance-948.md`
+ * and `player-extinfo-948.md` for the per-block byte layout. The server writes the matching inverse.
  *
  * Blocks whose exact wire payload was NOT fully characterised here are named UNK_BIT<n> with the
  * observed read shape in the comment; do not wire production encoders for those without a focused
@@ -56,7 +58,11 @@ enum class Rev948PlayerUpdateMaskKey(
     UNK_BIT11(11, 7),
     // ord8  bit15 0x8000    : spot-anim slot block (g2 + scrambled uint + scrambled byte)
     UNK_BIT15(15, 8),
-    // ord9  bit7  0x80      : FORCED_MOVEMENT — 6x scrambled byte + 3x g2 -> PathingEntity::SetForcedMovement
+    // ord9  bit7  0x80      : FORCED/TEMP MOVEMENT (glide) — 6x transformed byte + 2x g2 (start/end tick)
+    //                          + 14-bit yaw (p1 + 6-bit) -> GraphEntity::SetRenderWaypoint @0x10039e220
+    //                          (opens the avatar+0xDBC lerp window). The ONLY PLAYER_INFO path that makes
+    //                          the avatar GLIDE tile→tile instead of snapping. See player-appearance-948.md
+    //                          §"Bit-7 (0x80) temp-movement block". NOT bit 4/0x10 (that is a spotanim block).
     FORCED_MOVEMENT(7, 9),
     // ord10 bit14 0x4000    : CHAT_TEXT_PRIVATE — compound guard: len byte + mode-buffer (FUN_00121980)
     CHAT_TEXT_PRIVATE(14, 10),
@@ -70,8 +76,15 @@ enum class Rev948PlayerUpdateMaskKey(
     FACE_DIRECTION(1, 14),
     // ord15 bit23 0x800000  : spot-anim list
     SPOT_ANIM_LIST_BIT23(23, 15),
-    // ord16 bit5  0x20      : EXACT_MOVE — 4x gSmart2or4s + scrambled byte (anchor/timer vector)
-    EXACT_MOVE(5, 16),
+    // ord16 bit5  0x20      : MOVEMENT_ANIM — 4x gSmart2or4s (movement-anim seq ids) + 1x g1_sub (priority)
+    //                          -> GraphEntity::SetMovementAnimSet @0x1003a69f0 (vtable +0x1e0), which pushes
+    //                          the seqs into the route-anim queue (avatar+0x2c8/+0x2d0) so the bas walk/run
+    //                          seq plays. THE walk/run leg-animation driver (without it the avatar plays the
+    //                          bas IDLE loop while its tile advances). 4×-1 stops the anim. The same block
+    //                          the old "EXACT_MOVE" name partially described — definitively identified by
+    //                          finding the writer SetMovementAnimSet. See player-appearance-948.md
+    //                          §"What ACTUALLY animates a remote-player walk: ext-info mask bit 0x20".
+    MOVEMENT_ANIM(5, 16),
     // ord17 bit19 0x80000   : spot-anim slot block (g2 + scrambled uint + scrambled byte)
     UNK_BIT19(19, 17),
     // ord18 bit12 0x1000    : OVERHEAD_OPACITY — 1 scrambled byte -> PlayerEntity+0x1074

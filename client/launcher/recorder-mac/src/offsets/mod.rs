@@ -76,6 +76,14 @@ pub use gen::{
 pub mod client_oracle {
     pub use super::gen::client_oracle::*;
 
+    /// Live client cycle counter / "baseTick" (`Client + 0x518`, int) — the
+    /// per-frame render tick. VERIFIED rs2client 948-5: read at the top-level loop
+    /// call site `0x10027d060` (`MOV ESI,[RBX+0x518]`) and passed as the tick arg
+    /// into `AdvanceRenderPosition`; doc `player-appearance-948.md` §"Tick
+    /// reference". The anim-trace poller reads it off the client base each sample so
+    /// the avatar's lerp window (`+0xDBC`/`+0xDC0`) is interpretable against it.
+    pub const BASE_TICK: usize = 0x518;
+
     /// `Client + 0x196D8` is a pointer to the client-var domain (`vt-varc`).
     pub const VARC_DOMAIN: usize = 0x196D8;
     pub const VARC_RECORD_TREE_HEADER: usize = 0x1E120;
@@ -271,19 +279,107 @@ pub mod avatar {
     /// handle attached to the avatar (model not loaded/built).
     pub const RENDER_MODEL: usize = 0xC58;
 
-    /// PathingEntity last move speed (OPathingEntity.LAST_MOVESPEED). The engine
-    /// source annotates this field as a `UInt32*`; the oracle resolves that pointer
-    /// to stand(0)/walk(1)/run(2), with an inline-small-value fallback for capture
-    /// diagnostics if a future layout stores it directly.
-    pub const LAST_MOVESPEED: usize = 0x98;
+    /// Live move-speed the per-frame animator reads (`avatar + 0x1F0`, **inline
+    /// int32 — NOT a pointer**). `SelectMovementAnimation @0x1003a4e90` compares it
+    /// against the threshold float at `+0x1EC` and branches on the run flag at
+    /// `+0x1F8` to pick the walk/run vs idle BAS seq. This SUPERSEDES the engine
+    /// `Offsets.kt` `OPathingEntity.LAST_MOVESPEED = 0x98` (a `UInt32*`), which is
+    /// WRONG for this binary — `+0x98` derefs to a non-pointer on the live avatar
+    /// and the resolved speed never appears. SOURCE OF TRUTH:
+    /// `re-resources/docs/net/serverprot/player-appearance-948.md` §"Per-frame
+    /// idle/walk/run selection". `Offsets.kt` needs a separate user-approved sync;
+    /// do NOT `assert_eq!` this against `0x98`.
+    pub const MOVE_SPEED: usize = 0x1F0;
+    /// Move-speed threshold float (`avatar + 0x1EC`, int32 read as raw bits) the
+    /// animator compares `MOVE_SPEED` against to decide walk vs run. Per the RE doc
+    /// §"Per-frame idle/walk/run selection".
+    pub const MOVE_SPEED_THRESHOLD: usize = 0x1EC;
+    /// Run flag (`avatar + 0x1F8`, `== 1` ⇒ running) read by the animator alongside
+    /// `MOVE_SPEED`. Per the RE doc §"Per-frame idle/walk/run selection".
+    pub const RUN_FLAG: usize = 0x1F8;
+
+    // --- Route-anim queue: the ACTUAL walk/run movement-seq driver (NOT the seq
+    // override `ANIMATION_ID`, NOT the BAS-set `RENDER_ANIM_SET_ID`). The 4 movement
+    // seq ids decoded from the PLAYER_INFO op22 ext-info block gated by mask bit 0x20
+    // are PUSHED into this EASTL `int` vector by
+    // `jag::graphics::GraphEntity::SetMovementAnimSet @0x1003a69f0` (vtable +0x1e0);
+    // `AdvanceRenderPosition @0x1003a2500` starts the walk seq from the queue head when
+    // it is non-empty and `*(avatar+0xad4) <= priority`. SOURCE OF TRUTH:
+    // `re-resources/docs/net/serverprot/player-appearance-948.md` §"What ACTUALLY
+    // animates a remote-player walk". Element type/stride VERIFIED by decompiling
+    // `SetMovementAnimSet`: begin/end/cap are typed `int *`, the 4 ids are written as
+    // `*begin / begin[1] / begin[2] / begin[3]`, and the live count is `(end-begin) >> 2`
+    // — a **4-byte (int32) stride**, max 4 elements.
+    /// Route-anim queue BEGIN (`avatar + 0x2c8`, == `AdvanceRenderPosition`
+    /// `param_1[0x59]`). EASTL `int` vector holding the live walk/run movement seq ids.
+    pub const ROUTE_ANIM_QUEUE_BEGIN: usize = 0x2c8;
+    /// Route-anim queue END (`avatar + 0x2d0`, == `param_1[0x5a]`). `(END-BEGIN)>>2` =
+    /// the number of queued movement seq ids (4-byte stride). `END == BEGIN` => empty
+    /// (no movement anim active, e.g. after `AttachToMapSquare` clears it on a GPI step).
+    pub const ROUTE_ANIM_QUEUE_END: usize = 0x2d0;
+    /// Stride between route-anim queue elements (4 = one `int32` seq id). Verified from
+    /// `SetMovementAnimSet`'s `int *` element accesses + the `>> 2` count math.
+    pub const ROUTE_ANIM_QUEUE_STRIDE: usize = 4;
+    /// Movement-anim PRIORITY (`avatar + 0xb64`, u32) — the max anim priority of the 4
+    /// queued seqs, written by `SetMovementAnimSet`. `AdvanceRenderPosition`'s walk-start
+    /// gate requires `*(avatar+0xad4) <= *(avatar+0xb64)` before kicking the walk seq.
+    pub const ROUTE_ANIM_QUEUE_PRIORITY: usize = 0xb64;
+
+    /// Current RENDER animation id on the PathingEntity/GraphEntity (`avatar + 0x958`,
+    /// int32) — the player-side equivalent of the engine `ONPC.RENDER_ANIM = 0x958`
+    /// (`NPC.renderAnim`). Read by `AdvanceRenderPosition @0x1003a2500` at `0x1003a2dda`
+    /// (`MOV ECX,[RBX+0x958]; CMP ECX,[RBX+0xa88]`) as the live render-anim the avatar is
+    /// playing. Distinct from the seq OVERRIDE at `ANIMATION_ID` (`0xA88`). NOT in the
+    /// engine `Offsets.kt` for the PathingEntity (only `ONPC` has it) — see the flag in
+    /// the handoff note.
+    pub const RENDER_ANIM: usize = 0x958;
 
     /// Current animation id (OEntity.ANIMATION_ID), stored inline on the entity.
+    /// NOTE: this is ALSO the anim controller's secondary/incoming seq slot
+    /// (`controller+0x788`, where `controller == avatar+0x300`): `0x300 + 0x788 ==
+    /// 0xA88`. `StartAnimSeq @0x100589f80` reads it as the incoming-seq guard. So
+    /// the per-frame trace's `ctrl_secondary_seq` and this field are the SAME
+    /// memory — a built-in cross-check.
     pub const ANIMATION_ID: usize = 0xA88;
-    /// Current animation object shared-ptr payload (OEntity.ANIMATION_SHARED_PTR),
-    /// used to chase OAnimation.CURRENT_FRAME.
+    /// `avatar+0xAA0` (OEntity.ANIMATION_SHARED_PTR). Retained ONLY for the
+    /// pre-existing (best-effort, RE-inconclusive) `state_snapshot` `animation_frame`
+    /// read — NOT used by the anim-trace poller. CAUTION: the engine's
+    /// `Entity.animation` shared_ptr chain would read the object pointer from
+    /// `0xAA0+0x8 == 0xAA8`, but `0xAA8` is `MAP_SQUARE_BIND` on this PathingEntity
+    /// layout (proven in `AdvanceRenderPosition`: `MOV RCX,[RBX+0xaa8]; … [RCX+0xa60]`
+    /// = a map square), so that chain does NOT resolve an Animation object here. The
+    /// real GraphNode playback-frame field is unverified; do not derive one from this.
     pub const ANIMATION_SHARED_PTR: usize = 0xAA0;
-    /// OAnimation.CURRENT_FRAME.
+    /// OAnimation.CURRENT_FRAME (`+0x24`) — used only by the pre-existing snapshot
+    /// `animation_frame` read off `*(avatar+0xAA0)` (see the caution above; this is
+    /// NOT a verified per-frame counter on this layout).
     pub const ANIMATION_CURRENT_FRAME: usize = 0x24;
+
+    // --- Animation controller (embedded sub-object at `avatar+0x300`). Verified
+    // rs2client 948-5 via `jag::graphics::AnimController::StartAnimSeq @0x100589f80`
+    // (called as `StartAnimSeq((long)(avatar+0x60 /*qword index*/), …)` ⇒ controller
+    // base == `avatar + 0x60*8 == avatar+0x300`) and `BindSecondaryAnim @0x10058a370`
+    // (RDI == `avatar+0x300`). Offsets below are ABSOLUTE on the avatar (controller
+    // base + the controller-relative field). These distinguish "a seq is bound but
+    // frozen on frame 0" from "the controller never bound a walk seq".
+    /// Anim controller base (`avatar+0x300`). Not read directly; documents the base
+    /// the absolute controller offsets below are derived from.
+    pub const ANIM_CONTROLLER: usize = 0x300;
+    /// Controller PRIMARY active seq id (`controller+0x818` ⇒ `avatar+0xB18`, int;
+    /// `-1` = none). `StartAnimSeq` stores the new seq here (`MOV [RDI+0x818],seqId`)
+    /// and early-outs when it already equals `seqId`. The authoritative "what seq is
+    /// the controller playing".
+    pub const ANIM_CONTROLLER_PRIMARY_SEQ: usize = 0xB18;
+    /// Controller SECONDARY/incoming seq id (`controller+0x788` ⇒ `avatar+0xA88`,
+    /// int) — the SAME memory as `ANIMATION_ID`. `StartAnimSeq` reads it as the
+    /// incoming-seq guard (only when `+0x7a8` is non-null). Emitted so the trace can
+    /// cross-check it against `anim_id`.
+    pub const ANIM_CONTROLLER_SECONDARY_SEQ: usize = 0xA88;
+    /// Controller BLEND ticks (`controller+0x860` ⇒ `avatar+0xB60`, int) — the
+    /// crossfade duration `StartAnimSeq` applies (inherits the previous value when a
+    /// 0 is passed). Non-zero during a walk→idle blend, the witness for a natural
+    /// (blended) vs snapped transition.
+    pub const ANIM_CONTROLLER_BLEND_TICKS: usize = 0xB60;
 
     /// Entity size (int; low byte is the tile footprint). OEntity.SIZE — same field
     /// the tile formula uses.
@@ -296,7 +392,52 @@ pub mod avatar {
     pub const RENDER_GRAPH_NODE: usize = 0x8;
     /// Scene-bucket GraphNode (`avatar + 0x268`, `param_1[0x4d]`) inserted into the
     /// scene graph by AttachToMapSquare. NULL before the avatar is scene-attached.
+    ///
+    /// This SAME pointer is the `jag::graphics::RouteWaypointManager` (the route node
+    /// does scene-bucket insertion via its vtable) — see the [`route`] submodule for
+    /// the ring internals. The bare pointer is `scene_bucket_graph_node`; the ring
+    /// fields below are the client-prediction witness.
     pub const SCENE_BUCKET_GRAPH_NODE: usize = 0x268;
+
+    /// RouteWaypointManager ring internals — offsets RELATIVE to the heap object at
+    /// `*(avatar + SCENE_BUCKET_GRAPH_NODE)` (NOT the avatar). RE: rs2client 948-5
+    /// `jag::graphics::RouteWaypointManager` (AppendWaypoint `0x1003983f0`, RouteStep
+    /// `0x100398920`, ctor `0x10039b700`). This is the client's OWN pathfind route; the
+    /// per-frame route-step in `AdvanceRenderPosition` walks it ONLY in the drift path
+    /// (server lerp window `LERP_END_TICK == -1`). So **`COUNT > 0` during a walk proves
+    /// the local avatar is CLIENT-PREDICTED** — a server-forced GPI move (mvt=1/2/3) calls
+    /// `AttachToMapSquare`, which EMPTIES the ring rather than filling it.
+    pub mod route {
+        /// Whole-struct size; gate the heap object mapped to here before reading.
+        pub const STRUCT_EXTENT: usize = 0xC0;
+        /// READ cursor (ptr) — the ring entry the route-step is currently consuming.
+        pub const HEAD: usize = 0x20;
+        /// WRITE cursor (ptr) — next append / one-past-last.
+        pub const TAIL: usize = 0x28;
+        /// Active waypoint COUNT (i32). **THE prediction signal:** `>0` = client routed
+        /// a walk locally; `0` = idle (the client's own idle test, used at `0x100014f95`).
+        pub const COUNT: usize = 0x30;
+
+        /// Per-waypoint ring-entry stride (bytes).
+        pub const WP_STRIDE: usize = 0x18;
+        /// Entry plane/level (i32; `-1` = empty sentinel).
+        pub const WP_PLANE: usize = 0x00;
+        /// Entry destination X in FINE units — 256 fine = 1 tile (f32). Tile = `x >> 8`.
+        pub const WP_X_FINE: usize = 0x04;
+        /// Entry destination Z in FINE units (f32). Tile = `z >> 8`.
+        pub const WP_Z_FINE: usize = 0x0C;
+        /// Per-step move-mode descriptor (ptr) — compare (minus dyld slide) vs MODE_*.
+        pub const WP_MOVE_MODE: usize = 0x10;
+
+        // Move-mode descriptor LINK-TIME addresses (image base 0x100000000; the live
+        // token = link-time + the main image's dyld slide). Dumped from the `__data`
+        // holders `0x100ed2a90..ab0` (the stored value is the descriptor they point to).
+        pub const MODE_IDLE: usize = 0x100f13a30;
+        pub const MODE_CRAWL: usize = 0x100f13a34;
+        pub const MODE_WALK: usize = 0x100f13a38;
+        pub const MODE_RUN: usize = 0x100f13a3c;
+        pub const MODE_SMOOTH: usize = 0x100f13a40;
+    }
 
     /// Committed render position, ABSOLUTE FINE coords as doubles, written every
     /// frame by AdvanceRenderPosition (`param_1[0x55]`=X, `param_1[0x57]`=Y). This
@@ -348,6 +489,12 @@ pub mod avatar {
     /// interpolating a real segment. -1 here while the avatar should be moving =>
     /// the drift fallback (the documented invisible+creeping-avatar symptom).
     pub const LERP_END_TICK: usize = 0x0DBC;
+
+    /// Secondary lerp end-tick (`avatar + 0x0DC0`, i32) — the second window bound
+    /// `AdvanceRenderPosition` reads alongside `LERP_END_TICK` (`MOV EAX,[RBX+0x180]
+    /// ; CMP [RBX+0xdc0],EAX`, file 0x3a2585). Emitted by the per-frame trace next
+    /// to `LERP_END_TICK` so a two-segment glide window is fully visible.
+    pub const LERP_END_TICK_2: usize = 0x0DC0;
 
     /// Bound map-square (`avatar + 0x0AA8`, ptr) — the BIND WITNESS. Non-zero => the
     /// avatar is bound to a loaded map square; `AdvanceRenderPosition` only submits
@@ -412,10 +559,26 @@ pub mod avatar {
     /// null: non-null here => the compose STARTED (SetAppearance ran) but the model
     /// build produced null; null here (with `PENDING_APPEARANCE` also null) =>
     /// the appearance was NEVER applied (the compose never ran for the local avatar).
-    /// Mirrors the engine's `Offsets.AVATAR.CURRENT_APPEARANCE = 0x12A0`.
+    /// Mirrors the engine's `Offsets.AVATAR.CURRENT_APPEARANCE = 0x12A0`. Still
+    /// emitted as a context pointer, but NO LONGER the BAS source — see
+    /// `RENDER_ANIM_SET_ID` below.
     pub const CURRENT_APPEARANCE: usize = 0x12A0;
-    /// `Appearance + 0x0C` (u16): applied BAS/render-animation-set id. Anchored as
-    /// `client_oracle::APPEARANCE_BAS` in `anchor_registry_mac.json`.
+    /// LIVE applied BAS / render-animation-set id (`avatar + 0xF38`, **inline
+    /// int32**). This is the id that actually drives the playing animation: `-1` =
+    /// none, `2699` = our default-char bas once composed. Written by
+    /// `ComposeAppearanceModel @0x100032cf0` (`MOV [avatar+0xf38], ECX`) and read
+    /// every frame via vtable slot `+0x1d0` (`GetRenderAnimSetId @0x100038d00`,
+    /// literally `return *(avatar+0xf38)`). SOURCE OF TRUTH:
+    /// `re-resources/docs/net/serverprot/player-appearance-948.md` §"Live applied
+    /// BAS + walk/idle animation". This REPLACES the old `*(current_appearance+0x0C)`
+    /// read, which the same RE pass proved is the pending object's **title** field
+    /// (not the bas) — hence the historical garbage/0. `Offsets.kt` (`+0x0C`-as-bas)
+    /// is WRONG for this binary and needs a separate user-approved sync; do NOT
+    /// `assert_eq!` the bas against `0x0C`.
+    pub const RENDER_ANIM_SET_ID: usize = 0xF38;
+    /// `Appearance + 0x0C` (u16): the appearance object's TITLE field (was wrongly
+    /// read as the bas — see `RENDER_ANIM_SET_ID`). Retained only so the stale name
+    /// resolves; not the bas, not currently read for it.
     pub const APPEARANCE_BAS: usize = 0x0C;
 
     /// `pending + 0x88` (byte): needsAsyncLoad. 1 for op22-ext-info appearances, which
@@ -576,6 +739,16 @@ pub const SIG_OPEN_LOGIN_STREAM: Pattern = Pattern::new(
     "83 7F 10 0E 75 ?? 55 48 89 E5 53 50 31 D2 83 7F 20 02 0F 95 C2 48 8B 47",
 );
 
+// NOTE — there is deliberately NO `SIG_ADVANCE_RENDER_POSITION`. The per-frame anim
+// trace does NOT hook `AdvanceRenderPosition @0x1003a2500`: it is a wall-to-wall SSE
+// per-frame render function and `detour::install_inline` does not save/restore
+// XMM0-15, so an inline observer corrupts its float registers → `libc++abi:
+// terminating` (verified prod crash at the login screen). The trace is instead a
+// register-safe POLLER that reads the local avatar off `mem::*` (see
+// `oracle::read_anim_frame`). The avatar struct offsets it uses (controller
+// +0x300/+0xB18/+0xB60, LERP_END_TICK_2) live in the `avatar` mod below; the
+// per-frame tick is `client_oracle::BASE_TICK` (Client+0x518).
+
 /// `jag::ConnectionManager::SetupLoginCiphers` — the Phase A→B login boundary
 /// (RE §8a). This runs at reply-state 0x50, exactly where the login handshake's
 /// PLAINTEXT phase ends and the ISAAC CIPHERTEXT phase begins. We hook it at
@@ -635,6 +808,9 @@ mod tests {
     #[test]
     fn oracle_offsets_match_re_doc() {
         use client_oracle as o;
+        // Live per-frame cycle counter "baseTick" (RE: read at 0x10027d060 as
+        // [Client+0x518], passed into AdvanceRenderPosition; player-appearance-948.md).
+        assert_eq!(o::BASE_TICK, 0x518);
         // Client-base embeds shifted +0x288 vs Linux (RE §10).
         assert_eq!(o::PLAYER_VAR_DOMAIN, 0x19DC8);
         assert_eq!(o::LOGGED_IN_PLAYER, 0x19DB8);
@@ -745,10 +921,49 @@ mod tests {
         assert_eq!(avatar::LIP_LOCAL_OVERRIDE, 0x58);
         assert_eq!(avatar::VISIBLE_FLAG, 0x1070);
         assert_eq!(avatar::RENDER_MODEL, 0xC58); // OEntity.RENDER_MODEL
-        assert_eq!(avatar::LAST_MOVESPEED, 0x98); // OPathingEntity.LAST_MOVESPEED
+        // Live move-speed / threshold / run-flag the per-frame animator reads
+        // (SelectMovementAnimation @0x1003a4e90). SOURCE OF TRUTH = the RE doc
+        // player-appearance-948.md §"Per-frame idle/walk/run selection"; NOT the
+        // engine `Offsets.kt` LAST_MOVESPEED@0x98 (a `UInt32*`, WRONG for this
+        // binary — flagged for a separate user-approved Offsets.kt sync). Hence NO
+        // cross-check against 0x98 here.
+        assert_eq!(avatar::MOVE_SPEED, 0x1F0);
+        assert_eq!(avatar::MOVE_SPEED_THRESHOLD, 0x1EC);
+        assert_eq!(avatar::RUN_FLAG, 0x1F8);
+        // Route-anim queue (the real walk/run movement-seq driver): begin/end an EASTL
+        // `int` vector @ +0x2c8/+0x2d0, stride 4 (int32), priority @ +0xb64. VERIFIED by
+        // decompiling SetMovementAnimSet @0x1003a69f0 (RE doc §"What ACTUALLY animates a
+        // remote-player walk"); the count is `(end-begin)>>2`.
+        assert_eq!(avatar::ROUTE_ANIM_QUEUE_BEGIN, 0x2c8);
+        assert_eq!(avatar::ROUTE_ANIM_QUEUE_END, 0x2d0);
+        assert_eq!(avatar::ROUTE_ANIM_QUEUE_STRIDE, 4);
+        assert_eq!(avatar::ROUTE_ANIM_QUEUE_PRIORITY, 0xb64);
+        // Player-side current render-anim @ +0x958 — the PathingEntity equivalent of the
+        // engine ONPC.RENDER_ANIM (0x958); read in AdvanceRenderPosition @0x1003a2dda.
+        assert_eq!(avatar::RENDER_ANIM, 0x958);
         assert_eq!(avatar::ANIMATION_ID, 0xA88); // OEntity.ANIMATION_ID
         assert_eq!(avatar::ANIMATION_SHARED_PTR, 0xAA0); // OEntity.ANIMATION_SHARED_PTR
         assert_eq!(avatar::ANIMATION_CURRENT_FRAME, 0x24); // OAnimation.CURRENT_FRAME
+        // WHY the anim-trace poller does NOT use the engine's shared_ptr→Animation
+        // chain for a playback frame: that chain reads the object ptr from
+        // `0xAA0+0x8 == 0xAA8`, which is `MAP_SQUARE_BIND` on this layout — proven in
+        // AdvanceRenderPosition. This assert pins that collision so nobody re-adds a
+        // (fabricated) frame read off the shared_ptr `+0x8` slot.
+        assert_eq!(avatar::ANIMATION_SHARED_PTR + 0x8, avatar::MAP_SQUARE_BIND);
+        // Anim controller (avatar+0x300). Verified via StartAnimSeq @0x100589f80 +
+        // the AdvanceRenderPosition disassembly: `LEA R15,[RBX+0x300]` is the
+        // controller base; `CMP [RBX+0xb18],-1` = primary seq; the incoming-seq
+        // guard reads controller+0x788 == avatar+0xA88 (== ANIMATION_ID); blend is
+        // controller+0x860 == avatar+0xB60.
+        assert_eq!(avatar::ANIM_CONTROLLER, 0x300);
+        assert_eq!(avatar::ANIM_CONTROLLER_PRIMARY_SEQ, 0xB18);
+        assert_eq!(avatar::ANIM_CONTROLLER + 0x818, avatar::ANIM_CONTROLLER_PRIMARY_SEQ);
+        assert_eq!(avatar::ANIM_CONTROLLER_SECONDARY_SEQ, 0xA88);
+        assert_eq!(avatar::ANIM_CONTROLLER + 0x788, avatar::ANIM_CONTROLLER_SECONDARY_SEQ);
+        // The controller's secondary-seq slot IS the entity's ANIMATION_ID memory.
+        assert_eq!(avatar::ANIM_CONTROLLER_SECONDARY_SEQ, avatar::ANIMATION_ID);
+        assert_eq!(avatar::ANIM_CONTROLLER_BLEND_TICKS, 0xB60);
+        assert_eq!(avatar::ANIM_CONTROLLER + 0x860, avatar::ANIM_CONTROLLER_BLEND_TICKS);
         assert_eq!(avatar::SIZE, 0x184); // OEntity.SIZE — same as the oracle tile path
         assert_eq!(avatar::RENDER_GRAPH_NODE, 0x8); // param_1[1] == entity+0x8
         assert_eq!(avatar::SCENE_BUCKET_GRAPH_NODE, 0x268); // param_1[0x4d]
@@ -766,7 +981,13 @@ mod tests {
         assert_eq!(avatar::PENDING_APPEARANCE, 0x1298);
         // Applied/current appearance @ avatar+0x12A0 (Avatar::SetAppearance @0x100411a60).
         assert_eq!(avatar::CURRENT_APPEARANCE, 0x12A0);
-        assert_eq!(avatar::APPEARANCE_BAS, 0x0C); // client_oracle::APPEARANCE_BAS
+        // LIVE applied BAS @ avatar+0xF38 (inline int32; GetRenderAnimSetId
+        // @0x100038d00 / ComposeAppearanceModel @0x100032cf0). THE bas the oracle
+        // reads. SOURCE OF TRUTH = the RE doc §"Live applied BAS …"; NOT the engine
+        // `Offsets.kt` `+0x0C`-as-bas (that is the appearance TITLE, WRONG for this
+        // binary — flagged for a separate Offsets.kt sync). So no bas cross-check vs 0x0C.
+        assert_eq!(avatar::RENDER_ANIM_SET_ID, 0xF38);
+        assert_eq!(avatar::APPEARANCE_BAS, 0x0C); // appearance TITLE field (NOT the bas)
         assert_eq!(avatar::PENDING_NEEDS_ASYNC_LOAD, 0x88);
         assert_eq!(avatar::PENDING_BYTE_0X89, 0x89);
         assert_eq!(avatar::PENDING_COMPOSED_FLAG, 0x8a);

@@ -126,15 +126,37 @@ pub struct LocalPlayer {
     /// PathingEntity render-model pointer (`avatar+0xC58`). 0 => no model handle
     /// attached (model not loaded/built).
     pub render_model: Option<usize>,
-    /// OPathingEntity.LAST_MOVESPEED (`avatar+0x98`, normally a `UInt32*`):
-    /// resolved stand(0)/walk(1)/run(2). This is the client-side movement state
-    /// that selects the BAS walk/run sequence.
+    /// Live move-speed the per-frame animator reads (`avatar+0x1F0`, INLINE int32 —
+    /// NOT a pointer). `SelectMovementAnimation @0x1003a4e90` compares it against
+    /// `movespeed_threshold` and `run_flag` to pick the walk/run vs idle BAS seq.
+    /// (Supersedes the old `*(avatar+0x98)` pointer deref, which returned null on
+    /// the live avatar — `0x98` is the wrong/engine-`Offsets.kt` slot for this
+    /// binary. RE doc: player-appearance-948.md §"Per-frame idle/walk/run selection".)
     pub last_movespeed: Option<i32>,
-    /// OEntity.ANIMATION_ID (`avatar+0xA88`): the currently-playing seq id.
+    /// Move-speed threshold (`avatar+0x1EC`, int32) the animator compares
+    /// `last_movespeed` against to decide walk vs run.
+    pub movespeed_threshold: Option<i32>,
+    /// Run flag (`avatar+0x1F8`, int32; `==1` => running) read by the animator
+    /// alongside `last_movespeed`.
+    pub run_flag: Option<i32>,
+    /// OEntity.ANIMATION_ID (`avatar+0xA88`): the currently-playing seq OVERRIDE id.
     pub animation_id: Option<i32>,
     /// OAnimation.CURRENT_FRAME (`animation+0x24`) via the null-guarded current
     /// animation object pointer at OEntity.ANIMATION_SHARED_PTR (`avatar+0xAA0`).
     pub animation_frame: Option<i32>,
+    /// The live WALK/RUN movement seq ids the avatar is actually playing — the route-anim
+    /// queue `[begin,end)` at `avatar+0x2c8`/`+0x2d0` (EASTL `int` vector, 4-byte stride,
+    /// up to 4 ids) pushed by `SetMovementAnimSet @0x1003a69f0` from the op22 ext-info
+    /// bit-`0x20` block. Empty `Vec` => the queue was readable but empty (no movement anim
+    /// active, e.g. a GPI-only step that `AttachToMapSquare` cleared). `None` => the queue
+    /// header was unreadable. THE field that shows which walk animation is on the avatar.
+    pub movement_anim_seqs: Option<Vec<i32>>,
+    /// Movement-anim priority (`avatar+0xb64`, u32) the walk-start gate compares against
+    /// `avatar+0xad4`. Read alongside `movement_anim_seqs`.
+    pub movement_anim_priority: Option<i32>,
+    /// Current RENDER animation id (`avatar+0x958`, int32) — the PathingEntity equivalent
+    /// of `ONPC.RENDER_ANIM`; the live render-anim read by `AdvanceRenderPosition`.
+    pub render_anim: Option<i32>,
     /// Render scene-graph GraphNode (`avatar+0x8`) — the node the integrator
     /// commits onto. 0 => avatar has no render node.
     pub render_graph_node: Option<usize>,
@@ -179,9 +201,14 @@ pub struct LocalPlayer {
     /// => compose ran but the model build failed; zero (with pending also 0) => the
     /// appearance was never applied (compose never ran for the local avatar).
     pub current_appearance: Option<usize>,
-    /// Applied BAS/render-animation-set id (`*(current_appearance+0x0C)`, u16).
-    /// Confirms whether the BAS we sent in op22 actually landed on the applied
-    /// appearance object.
+    /// LIVE applied BAS / render-animation-set id (`*(int32_t*)(avatar+0xF38)`) —
+    /// the id that actually drives the playing animation (`-1` = none; `2699` = our
+    /// default-char bas once composed). Read INLINE off the avatar (the canonical
+    /// `GetRenderAnimSetId @0x100038d00` accessor, written by `ComposeAppearanceModel
+    /// @0x100032cf0`). REPLACES the old `*(current_appearance+0x0C)` read, which RE
+    /// proved is the pending object's TITLE (not the bas), hence the historical 0.
+    /// `current_appearance` is still emitted separately for context (not the bas).
+    /// RE doc: player-appearance-948.md §"Live applied BAS + walk/idle animation".
     pub applied_bas: Option<i32>,
     /// `pending+0x88` (byte): needsAsyncLoad — 1 for op22-delivered appearances,
     /// which makes the compose wait on `SceneLoadRegistry::IsResourceGroupReady`.
@@ -247,8 +274,13 @@ impl Default for LocalPlayer {
             visible_flag: None,
             render_model: None,
             last_movespeed: None,
+            movespeed_threshold: None,
+            run_flag: None,
             animation_id: None,
             animation_frame: None,
+            movement_anim_seqs: None,
+            movement_anim_priority: None,
+            render_anim: None,
             render_graph_node: None,
             scene_bucket_graph_node: None,
             render_tile: None,
@@ -282,6 +314,260 @@ impl Default for LocalPlayer {
             compose_gender: None,
         }
     }
+}
+
+/// One RENDER-FRAME sample of the LOCAL avatar's animation + render-position
+/// state, read at the entry to `AdvanceRenderPosition` (the per-frame driver) so
+/// the walk→stop transition — only 3-6 render frames (~50-100ms) — is visible at
+/// frame granularity (the periodic `state_snapshot` at ~1.8s is far too coarse).
+///
+/// Every field is `Option`: emitted only when its read was plausible (omit, never
+/// fabricate — identical contract to `LocalPlayer`). `base_tick` is the live cycle
+/// counter (`Client+0x518`), so the lerp window is interpretable against it.
+///
+/// The walk→stop transition is visible as: the controller PRIMARY seq
+/// (`ctrl_primary_seq`, `avatar+0xB18` — VERIFIED) flipping from a walk seq to idle
+/// (`-1`/idle), the route-anim queue (`seqs`) emptying, and the render position
+/// (`render_pos_double`/`render_tile`) advancing sub-tile each frame while moving
+/// then holding still when stopped. (There is deliberately NO Animation-object
+/// playback-frame field: the engine's shared_ptr chain would read it from
+/// `avatar+0xAA0+0x8 == 0xAA8`, but that offset is `MAP_SQUARE_BIND` on this
+/// PathingEntity layout — proven in `AdvanceRenderPosition` — so it is NOT a frame
+/// counter here. Emitting it would be fabrication; the verified controller seq +
+/// position deltas are the honest per-frame signal.)
+#[derive(Default, Clone)]
+pub struct AnimFrame {
+    /// The avatar/GraphEntity pointer this sample was read from (the resolved live
+    /// local avatar).
+    pub avatar: usize,
+    /// The live render/base tick (`Client+0x518`) — interpret `lerp` against it.
+    pub base_tick: i32,
+    /// Current RENDER animation id (`avatar+0x958`).
+    pub render_anim: Option<i32>,
+    /// OEntity.ANIMATION_ID (`avatar+0xA88`) — also the controller secondary slot.
+    pub anim_id: Option<i32>,
+    /// Live walk/run movement seq ids from the route-anim queue (`avatar+0x2c8..`).
+    pub seqs: Option<Vec<i32>>,
+    /// Movement-anim priority (`avatar+0xb64`).
+    pub movement_anim_priority: Option<i32>,
+    /// Anim controller PRIMARY active seq id (`avatar+0xB18`; `-1` = none).
+    pub ctrl_primary_seq: Option<i32>,
+    /// Anim controller SECONDARY/incoming seq id (`avatar+0xA88`; == `anim_id`).
+    pub ctrl_secondary_seq: Option<i32>,
+    /// Anim controller BLEND ticks (`avatar+0xB60`).
+    pub ctrl_blend: Option<i32>,
+    /// Live applied BAS / render-anim-set id (`avatar+0xF38`).
+    pub applied_bas: Option<i32>,
+    /// Live move-speed (`avatar+0x1F0`, vestigial in this build — typically 0).
+    pub last_movespeed: Option<i32>,
+    /// Run flag (`avatar+0x1F8`).
+    pub run_flag: Option<i32>,
+    /// Lerp end-tick (`avatar+0xDBC`) — `-1` = no active waypoint (drift fallback).
+    pub lerp_end_tick: Option<i32>,
+    /// Secondary lerp end-tick (`avatar+0xDC0`).
+    pub lerp_end_tick2: Option<i32>,
+    /// Committed render position doubles (`avatar+0x2A8`/`+0x2B8`), absolute fine.
+    pub render_pos_double: Option<(f64, f64)>,
+    /// Render tile (x, y, plane) derived from the render GraphNode scene-fine.
+    pub render_tile: Option<(i32, i32, i32)>,
+    /// TARGET GPI waypoint fine (`avatar+0xDB0`/`+0xDB8`) — logical destination.
+    pub target_waypoint_fine: Option<(f32, f32)>,
+    /// PREV GPI waypoint fine (`avatar+0xDA0`/`+0xDA8`) — the lerp source.
+    pub prev_waypoint_fine: Option<(f32, f32)>,
+    /// VISIBLE flag (`avatar+0x1070`).
+    pub visible_flag: Option<i32>,
+    /// Render-model pointer (`avatar+0xC58`; 0 => no model).
+    pub render_model: Option<usize>,
+    /// Pending-appearance composed flag (`pending+0x8a`, when pending non-null).
+    pub pending_composed_flag: Option<i32>,
+    /// Client-side ROUTE waypoint COUNT (`*(avatar+0x268) + 0x30`). The prediction
+    /// witness: `>0` = the client pathfound its OWN route (client-predicted walk);
+    /// `0` = no client route (a SERVER-DRIVEN walk — the server's GPI movement empties
+    /// the ring). Distinguishes "client predicts" from "server forces" at a glance.
+    pub route_count: Option<i32>,
+    /// Current (HEAD) route waypoint destination tile (x, y, plane), only when
+    /// `route_count>0`. Where the client's own route is heading this step.
+    pub route_dest_tile: Option<(i32, i32, i32)>,
+    /// HEAD waypoint move-mode (mapped from the descriptor token at head+0x10):
+    /// idle/crawl/walk/run/smooth, or a raw hex string if unrecognised. Only when
+    /// `route_count>0`.
+    pub route_mode: Option<String>,
+}
+
+/// Map a live move-mode descriptor token (read from a route waypoint, `head+0x10`)
+/// to a label. The token is an image global (`route::MODE_*` are LINK-TIME addresses);
+/// the live value = link-time + the main image's dyld `slide`, so subtract the slide
+/// before matching. Unknown tokens render as the raw (slide-relative) hex.
+fn move_mode_label(token: usize, slide: Option<isize>) -> String {
+    use av::route as rt;
+    let rel = match slide {
+        Some(s) => (token as isize).wrapping_sub(s) as usize,
+        None => return format!("0x{token:x}+slide?"),
+    };
+    match rel {
+        rt::MODE_IDLE => "idle".into(),
+        rt::MODE_CRAWL => "crawl".into(),
+        rt::MODE_WALK => "walk".into(),
+        rt::MODE_RUN => "run".into(),
+        rt::MODE_SMOOTH => "smooth".into(),
+        _ => format!("0x{rel:x}"),
+    }
+}
+
+/// Read one per-render-frame animation sample for the avatar the hook handed us
+/// (RDI) with the live tick (ESI). Every hop is `mem::*` null-guarded; an
+/// implausible avatar yields an all-default sample (which the writer skips). This
+/// is deliberately a handful of cheap inline reads — it runs on the per-frame hot
+/// path, so it must not allocate beyond the (≤4-element) seq queue or chase deep
+/// chains.
+pub fn read_anim_frame(avatar: usize, base_tick: i32, image_slide: Option<isize>) -> AnimFrame {
+    let mut af = AnimFrame {
+        avatar,
+        base_tick,
+        ..Default::default()
+    };
+    // CROSS-THREAD SAFETY (poller runs off the client thread): verify the avatar
+    // struct is currently mapped+readable out to the HIGHEST offset we touch
+    // (`PENDING_APPEARANCE 0x1298` + 8) before ANY field read. If the client freed
+    // the avatar concurrently, this fails and we return the all-default (skipped)
+    // sample instead of faulting. Past this gate, every inline `mem::*` avatar read
+    // only touches the validated pages.
+    const AVATAR_EXTENT: usize = av::PENDING_APPEARANCE + 8;
+    if !mem::is_readable(avatar, AVATAR_EXTENT) {
+        return af;
+    }
+
+    af.render_anim = mem::read_i32(avatar, av::RENDER_ANIM);
+    af.anim_id = mem::read_i32(avatar, av::ANIMATION_ID);
+    af.seqs = read_route_anim_queue(avatar);
+    af.movement_anim_priority = mem::read_i32(avatar, av::ROUTE_ANIM_QUEUE_PRIORITY);
+    af.ctrl_primary_seq = mem::read_i32(avatar, av::ANIM_CONTROLLER_PRIMARY_SEQ);
+    af.ctrl_secondary_seq = mem::read_i32(avatar, av::ANIM_CONTROLLER_SECONDARY_SEQ);
+    af.ctrl_blend = mem::read_i32(avatar, av::ANIM_CONTROLLER_BLEND_TICKS);
+    af.applied_bas = mem::read_i32(avatar, av::RENDER_ANIM_SET_ID);
+    af.last_movespeed = mem::read_i32(avatar, av::MOVE_SPEED);
+    af.run_flag = mem::read_i32(avatar, av::RUN_FLAG);
+    af.lerp_end_tick = mem::read_i32(avatar, av::LERP_END_TICK);
+    af.lerp_end_tick2 = mem::read_i32(avatar, av::LERP_END_TICK_2);
+    af.visible_flag = mem::read_i32(avatar, av::VISIBLE_FLAG).map(|v| v & 0xff);
+    af.render_model = mem::read_ptr(avatar, av::RENDER_MODEL);
+
+    if let (Some(rx), Some(ry)) = (
+        read_f64(avatar, av::RENDER_POS_X_DOUBLE),
+        read_f64(avatar, av::RENDER_POS_Y_DOUBLE),
+    ) {
+        af.render_pos_double = Some((rx, ry));
+    }
+
+    let size = mem::read_i32(avatar, av::SIZE).map(|s| s & 0xff).unwrap_or(0);
+    let plane = mem::read_i32(avatar, o::ENTITY_PLANE).unwrap_or(0);
+    // render GraphNode is a SEPARATE heap object — gate its mapped-ness (out to the
+    // scene-fine Y field + 4) before reading through it.
+    if let Some(gn) = mem::read_ptr(avatar, av::RENDER_GRAPH_NODE).filter(|p| mem::is_readable(*p, o::GRAPH_SCENE_Y_FINE + 4)) {
+        if let (Some(sx), Some(sy)) = (
+            read_f32(gn, o::GRAPH_SCENE_X_FINE),
+            read_f32(gn, o::GRAPH_SCENE_Y_FINE),
+        ) {
+            af.render_tile = Some((scene_to_tile(sx, size), scene_to_tile(sy, size), plane));
+        }
+    }
+
+    if let (Some(tx), Some(ty)) = (
+        read_f32(avatar, av::TARGET_WAYPOINT_X_FINE),
+        read_f32(avatar, av::TARGET_WAYPOINT_Y_FINE),
+    ) {
+        af.target_waypoint_fine = Some((tx, ty));
+    }
+    if let (Some(px), Some(py)) = (
+        read_f32(avatar, av::PREV_WAYPOINT_X_FINE),
+        read_f32(avatar, av::PREV_WAYPOINT_Y_FINE),
+    ) {
+        af.prev_waypoint_fine = Some((px, py));
+    }
+
+    // CLIENT-SIDE ROUTE (the prediction witness): the RouteWaypointManager hangs off
+    // `*(avatar+0x268)`. COUNT>0 during a walk = the client pathfound its OWN route
+    // (client-predicted); COUNT==0 = a SERVER-DRIVEN walk (the server's GPI mvt empties
+    // the ring). The manager is a SEPARATE heap object — gate it mapped first.
+    if let Some(route) = mem::read_ptr(avatar, av::SCENE_BUCKET_GRAPH_NODE)
+        .filter(|p| mem::is_readable(*p, av::route::STRUCT_EXTENT))
+    {
+        af.route_count = mem::read_i32(route, av::route::COUNT);
+        // The HEAD (current) waypoint is only meaningful with an active route; the ring
+        // entry it points to is itself mapped-checked before deref.
+        if af.route_count.unwrap_or(0) > 0 {
+            if let Some(head) = mem::read_ptr(route, av::route::HEAD)
+                .filter(|p| mem::is_readable(*p, av::route::WP_MOVE_MODE + 8))
+            {
+                if let (Some(pl), Some(xf), Some(zf)) = (
+                    mem::read_i32(head, av::route::WP_PLANE),
+                    read_f32(head, av::route::WP_X_FINE),
+                    read_f32(head, av::route::WP_Z_FINE),
+                ) {
+                    af.route_dest_tile = Some(((xf as i32) >> 8, (zf as i32) >> 8, pl));
+                }
+                af.route_mode = mem::read_ptr(head, av::route::WP_MOVE_MODE)
+                    .map(|tok| move_mode_label(tok, image_slide));
+            }
+        }
+    }
+
+    // Pending compose flag only when the pending object is a SEPARATE mapped heap
+    // object (gate it out to the composed-flag byte + 1).
+    if let Some(pending) = mem::read_ptr(avatar, av::PENDING_APPEARANCE)
+        .filter(|p| mem::is_readable(*p, av::PENDING_COMPOSED_FLAG + 1))
+    {
+        af.pending_composed_flag =
+            mem::read_i32(pending, av::PENDING_COMPOSED_FLAG).map(|v| v & 0xff);
+    }
+
+    af
+}
+
+/// Resolve the LIVE local avatar pointer the same way `read_local_player` does
+/// (the explicit override `*(lip+0x58)` if non-zero, else
+/// `*(playerList[lip+0x48].node + 0x38)`), returning `Some(avatar)` only once the
+/// client is in-world with a resolved avatar.
+///
+/// CROSS-THREAD SAFE: the anim-trace poller runs off the client thread, so every
+/// heap hop is gated on `mem::is_readable` (the pointer's region is currently
+/// mapped + readable) BEFORE it is dereferenced — a pointer the client freed
+/// concurrently fails the gate and yields `None` (a skipped sample) instead of a
+/// fault. The published `client_base` is stable for the session (never freed), so
+/// it only needs the cheap `is_plausible` check.
+pub fn live_local_avatar(client_base: usize) -> Option<usize> {
+    if !mem::is_plausible(client_base) {
+        return None;
+    }
+    // Each heap base must be MAPPED before we read a pointer through it. We read at
+    // most 8 bytes at the largest offset used off each base, so gate that extent.
+    let lip = readable_deref(client_base, o::LOGGED_IN_PLAYER, av::LIP_LOCAL_OVERRIDE + 8)?;
+    let override_avatar = mem::read_ptr(lip, av::LIP_LOCAL_OVERRIDE).unwrap_or(0);
+    if mem::is_plausible(override_avatar) {
+        return Some(override_avatar);
+    }
+    let idx = mem::read_i32(lip, o::LIP_SERVER_INDEX)?;
+    if idx < 0 {
+        return None;
+    }
+    let pm = readable_deref(client_base, o::PLAYER_MANAGER, o::PM_PLAYER_LIST + 8)?;
+    let list_slot_off = (idx as usize) * 8;
+    let list = readable_deref(pm, o::PM_PLAYER_LIST, list_slot_off + 8)?;
+    let node = readable_deref(list, list_slot_off, o::NODE_ENTITY + 8)?;
+    if !mem::is_readable(node + o::NODE_ENTITY, 8) {
+        return None;
+    }
+    mem::deref(node, o::NODE_ENTITY).filter(|a| mem::is_plausible(*a))
+}
+
+/// `mem::deref(base, off)` but only after verifying `base` is mapped+readable for
+/// `min_extent` bytes (so the raw pointer read at `base+off` cannot fault). For the
+/// cross-thread poller chain. `None` if `base` is unmapped or the pointer is null.
+fn readable_deref(base: usize, off: usize, min_extent: usize) -> Option<usize> {
+    if !mem::is_readable(base, min_extent) {
+        return None;
+    }
+    mem::deref(base, off)
 }
 
 /// A point-in-time snapshot of the client's decoded state. Every field is
@@ -435,12 +721,37 @@ fn read_local_player(client_base: usize) -> LocalPlayer {
     // The render-bind gate + the model handle (the two prime "won't render" causes).
     lp.visible_flag = mem::read_i32(avatar, av::VISIBLE_FLAG).map(|v| v & 0xff);
     lp.render_model = mem::read_ptr(avatar, av::RENDER_MODEL);
-    lp.last_movespeed = read_last_movespeed(avatar);
+    // Movement-anim inputs the per-frame selector reads (SelectMovementAnimation
+    // @0x1003a4e90): all INLINE int32s on the avatar (NOT pointers). `avatar` is
+    // known-plausible past the early return above, so each is `Some` when readable.
+    lp.last_movespeed = mem::read_i32(avatar, av::MOVE_SPEED);
+    lp.movespeed_threshold = mem::read_i32(avatar, av::MOVE_SPEED_THRESHOLD);
+    lp.run_flag = mem::read_i32(avatar, av::RUN_FLAG);
     lp.animation_id = mem::read_i32(avatar, av::ANIMATION_ID);
+    // animation_frame: UNCHANGED from before this session (do-no-harm to the
+    // in-world snapshot). NB the engine's `Entity.animation` shared_ptr chain would
+    // read the object pointer from `avatar+0xAA0+0x8 == avatar+0xAA8`, but on THIS
+    // PathingEntity layout `0xAA8` is `MAP_SQUARE_BIND` (proven in
+    // AdvanceRenderPosition: `MOV RCX,[RBX+0xaa8]; … [RCX+0xa60]` = a map square),
+    // so that chain does NOT yield an Animation object here. Until the real
+    // playback-frame field is RE-verified, this stays the original best-effort read
+    // (which the RE workorder already flagged as inconclusive — see §2.7). It is
+    // fault-safe regardless (null-guarded), and the anim-trace poller relies on the
+    // VERIFIED controller seq ids, not this.
     let animation = mem::read_ptr(avatar, av::ANIMATION_SHARED_PTR).unwrap_or(0);
     if mem::is_plausible(animation) {
         lp.animation_frame = mem::read_i32(animation, av::ANIMATION_CURRENT_FRAME);
     }
+    // The ACTUAL walk/run movement seq ids: walk the route-anim queue `[begin,end)`
+    // (avatar+0x2c8/+0x2d0, EASTL `int` vector, 4-byte stride) pushed by
+    // SetMovementAnimSet from the op22 bit-`0x20` ext-info block. This is what the seq
+    // OVERRIDE (`animation_id`) and the BAS-set (`applied_bas`) CANNOT show: which walk
+    // animation is on the avatar. `Some(vec)` (possibly empty) when the header was a
+    // sane begin<=end run; `None` if either pointer was unreadable. Priority read
+    // alongside.
+    lp.movement_anim_seqs = read_route_anim_queue(avatar);
+    lp.movement_anim_priority = mem::read_i32(avatar, av::ROUTE_ANIM_QUEUE_PRIORITY);
+    lp.render_anim = mem::read_i32(avatar, av::RENDER_ANIM);
     lp.render_graph_node = mem::read_ptr(avatar, av::RENDER_GRAPH_NODE);
     lp.scene_bucket_graph_node = mem::read_ptr(avatar, av::SCENE_BUCKET_GRAPH_NODE);
 
@@ -511,9 +822,11 @@ fn read_local_player(client_base: usize) -> LocalPlayer {
     // `Some(0)` — distinguishing "SetAppearance ran, model build failed" (non-zero) from
     // "appearance never applied / compose never ran" (zero, with pending also zero).
     lp.current_appearance = Some(mem::read_ptr(avatar, av::CURRENT_APPEARANCE).unwrap_or(0));
-    if let Some(appearance) = lp.current_appearance.filter(|p| mem::is_plausible(*p)) {
-        lp.applied_bas = read_u16(appearance, av::APPEARANCE_BAS).map(|v| v as i32);
-    }
+    // LIVE applied BAS — INLINE int32 at `avatar+0xF38` (GetRenderAnimSetId), NOT
+    // `*(current_appearance+0x0C)` (that is the appearance TITLE, RE-proven garbage).
+    // `2699` => our bas composed; `-1`/`0` => not composed. Read off `avatar`
+    // directly (no current_appearance deref); `avatar` is known-plausible here.
+    lp.applied_bas = mem::read_i32(avatar, av::RENDER_ANIM_SET_ID);
     if mem::is_plausible(pending) {
         lp.pending_needs_async_load =
             mem::read_i32(pending, av::PENDING_NEEDS_ASYNC_LOAD).map(|v| v & 0xff);
@@ -933,6 +1246,45 @@ fn lookup_npc_entity(buckets: usize, bucket_count: usize, npc_index: u32) -> Opt
     None
 }
 
+/// Walk the avatar's route-anim queue `[begin,end)` (`avatar+0x2c8`/`+0x2d0`, an
+/// EASTL `int` vector, 4-byte stride) and collect the live walk/run movement seq
+/// ids. `None` if either header pointer is unreadable, a non-empty `begin` is
+/// implausible, the run is non-monotonic, or its byte span is not 4-aligned (a
+/// poisoned/torn header) — i.e. only a coherent header yields a value. An EMPTY
+/// queue (`begin == end == 0`, or `begin == end`) is coherent and yields an empty
+/// `Vec` (the "no movement anim active" state, which must be visible). Bounded by
+/// the queue's real max (4 ids) with a small safety ceiling so a torn header can
+/// neither spin nor over-read.
+fn read_route_anim_queue(avatar: usize) -> Option<Vec<i32>> {
+    const MAX_QUEUE: usize = 16; // real max is 4; ceiling guards a torn header
+    let stride = av::ROUTE_ANIM_QUEUE_STRIDE;
+
+    let begin = mem::read_ptr(avatar, av::ROUTE_ANIM_QUEUE_BEGIN)?;
+    let end = mem::read_ptr(avatar, av::ROUTE_ANIM_QUEUE_END)?;
+
+    if begin == 0 && end == 0 {
+        return Some(Vec::new());
+    }
+    if !mem::is_plausible(begin) || end < begin {
+        return None;
+    }
+    let bytes = end - begin;
+    if bytes % stride != 0 {
+        return None;
+    }
+    let count = (bytes / stride).min(MAX_QUEUE);
+
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        match mem::read_i32(begin, i * stride) {
+            Some(id) => out.push(id),
+            None => break, // partial read: emit what was readable, never fault
+        }
+    }
+    Some(out)
+}
+
+
 /// Read EASTL vector begin/end/cap fields and return `(begin,count)`. Empty
 /// vectors (`begin=end=0`) are readable and produce count 0. Non-empty vectors
 /// must have plausible begin/end/cap, monotonic pointers, and stride alignment.
@@ -1180,31 +1532,6 @@ fn status_object(client_base: usize) -> Option<usize> {
     mem::deref(mlm, o::MLM_STAT_TABLE)
 }
 
-/// Resolve OPathingEntity.LAST_MOVESPEED. The engine offset source comments the
-/// slot as a `UInt32*`; generated datatype outputs agree. If the runtime value is
-/// a small canonical speed instead of a plausible pointer, keep that inline value
-/// so the capture still exposes stand(0)/walk(1)/run(2).
-#[inline]
-fn read_last_movespeed(avatar: usize) -> Option<i32> {
-    let raw = mem::read_ptr(avatar, av::LAST_MOVESPEED)?;
-    if mem::is_plausible(raw) {
-        return mem::read_i32(raw, 0);
-    }
-    (raw <= 2).then_some(raw as i32)
-}
-
-/// Read a `u16` at `base + off`, or `None` if `base` is implausible. Used for
-/// the applied appearance BAS (`Appearance+0x0C`) without widening the memory
-/// access to the neighboring fields.
-#[inline]
-fn read_u16(base: usize, off: usize) -> Option<u16> {
-    if !mem::is_plausible(base) {
-        return None;
-    }
-    let p = (base + off) as *const u16;
-    Some(unsafe { p.read_unaligned() })
-}
-
 /// Read an `f32` at `base + off`, or `None` if `base` is implausible. (Mirror of
 /// `mem::read_i32` for the GraphNode scene-fine floats.)
 #[inline]
@@ -1376,6 +1703,46 @@ mod tests {
         assert!(lp.avatar.is_none());
         assert!(lp.visible_flag.is_none());
         assert_eq!(lp.avatar_source, "none");
+    }
+
+    #[test]
+    fn route_anim_queue_reads_movement_seq_ids_in_order() {
+        // Stage a 4-id EASTL `int` vector (4-byte stride) and point an avatar's
+        // begin/end (avatar+0x2c8/+0x2d0) at it.
+        let ids = [824i32, 819, 820, 821];
+        let mut seqs = vec![0u8; ids.len() * av::ROUTE_ANIM_QUEUE_STRIDE];
+        for (i, id) in ids.iter().enumerate() {
+            write_i32(&mut seqs, i * av::ROUTE_ANIM_QUEUE_STRIDE, *id);
+        }
+        let mut avatar = vec![0u8; av::ROUTE_ANIM_QUEUE_END + 8];
+        let begin = seqs.as_ptr() as usize;
+        let end = begin + seqs.len();
+        write_ptr(&mut avatar, av::ROUTE_ANIM_QUEUE_BEGIN, begin);
+        write_ptr(&mut avatar, av::ROUTE_ANIM_QUEUE_END, end);
+
+        let got = read_route_anim_queue(avatar.as_ptr() as usize).expect("coherent header");
+        assert_eq!(got, ids.to_vec());
+    }
+
+    #[test]
+    fn route_anim_queue_empty_is_some_empty_not_none() {
+        // begin == end == 0 is the coherent "no movement anim active" state.
+        let avatar = vec![0u8; av::ROUTE_ANIM_QUEUE_END + 8];
+        let got = read_route_anim_queue(avatar.as_ptr() as usize);
+        assert_eq!(got, Some(Vec::new()));
+    }
+
+    #[test]
+    fn route_anim_queue_rejects_misaligned_span() {
+        // A byte span not divisible by the 4-byte stride is a torn header → None.
+        let mut seqs = vec![0u8; 6]; // 6 bytes: not a whole number of int32s
+        write_i32(&mut seqs[0..4], 0, 824);
+        let mut avatar = vec![0u8; av::ROUTE_ANIM_QUEUE_END + 8];
+        let begin = seqs.as_ptr() as usize;
+        write_ptr(&mut avatar, av::ROUTE_ANIM_QUEUE_BEGIN, begin);
+        write_ptr(&mut avatar, av::ROUTE_ANIM_QUEUE_END, begin + 6);
+
+        assert!(read_route_anim_queue(avatar.as_ptr() as usize).is_none());
     }
 
     fn write_i32(buf: &mut [u8], off: usize, value: i32) {

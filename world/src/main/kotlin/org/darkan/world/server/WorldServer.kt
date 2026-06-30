@@ -29,6 +29,7 @@ import org.darkan.core.social.gateway.*
 import org.darkan.world.entity.Player
 import org.darkan.world.social.SocialClient
 import org.darkan.world.world.Players
+import org.darkan.world.world.SpawnService
 import world.gregs.voidps.buffer.*
 import world.gregs.voidps.buffer.write.BufferWriter
 import world.gregs.voidps.cache.secure.RSA
@@ -336,6 +337,7 @@ object WorldServer {
             // match the allocated slot — otherwise the high-res cohort would point at slot
             // 0, which is the protocol "no player" sentinel.
             val player = Player(index = 0, account = account, session = session)
+            player.tile = SpawnService.initialSpawn(account)
             session.attachment = player
             val playerIndex = Players.allocate(player) { idx -> player.index = idx }
             // Build the spawn avatar (default identitykits only — a fresh character). The worn

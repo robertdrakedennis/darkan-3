@@ -8,6 +8,8 @@
 //!     framed-c2s.jsonl     one flat JSON object per C->S framed packet
 //!     socket.jsonl         raw ClientStream bytes + additive libc send/recv fd bytes
 //!     events.jsonl         state_change / connect / disconnect / process
+//!     state-snapshots.jsonl   periodic client-state oracle snapshots (coarse)
+//!     anim-trace.jsonl     one line PER RENDER FRAME: local-avatar anim/render state
 //!     blobs/<sha256-prefix>.bin   bodies > 8192 bytes (referenced by body_ref)
 //!     raw-<role>-s2c.bin / raw-<role>-c2s.bin   optional cross-validation
 //!     isaac-keys.txt       optional ISAAC seeds for tools/DecodeCapture.kt
@@ -53,6 +55,11 @@ struct Files {
     /// Client-state oracle snapshots (the "client is king" cross-check). One
     /// JSON object per snapshot: periodic + an authoritative one at exit.
     state_snapshots: File,
+    /// Per-render-frame LOCAL-avatar animation trace. One compact JSON object PER
+    /// RENDER FRAME (emitted from the AdvanceRenderPosition per-frame observer),
+    /// so a walk→stop transition (3-6 frames) is visible at frame granularity.
+    /// Separate from `state_snapshots` (which stays coarse/periodic).
+    anim_trace: File,
 }
 
 pub struct Session {
@@ -152,11 +159,31 @@ fn encode_local_player(lp: &crate::oracle::LocalPlayer) -> serde_json::Value {
     if let Some(v) = lp.last_movespeed {
         o.insert("last_movespeed".into(), json!(v));
     }
+    if let Some(v) = lp.movespeed_threshold {
+        o.insert("movespeed_threshold".into(), json!(v));
+    }
+    if let Some(v) = lp.run_flag {
+        o.insert("run_flag".into(), json!(v));
+    }
     if let Some(v) = lp.animation_id {
         o.insert("animation_id".into(), json!(v));
     }
     if let Some(v) = lp.animation_frame {
         o.insert("animation_frame".into(), json!(v));
+    }
+    // The live walk/run movement seq ids from the route-anim queue (the actual walk
+    // animation on the avatar — what `animation_id`/`applied_bas` cannot show). Emitted
+    // as an array whenever the queue header was coherent; an empty array means the queue
+    // was readable but empty (no movement anim active), distinct from omission (header
+    // unreadable). Priority/render-anim emitted only when readable (omit, never fabricate).
+    if let Some(seqs) = &lp.movement_anim_seqs {
+        o.insert("movement_anim_seqs".into(), json!(seqs));
+    }
+    if let Some(v) = lp.movement_anim_priority {
+        o.insert("movement_anim_priority".into(), json!(v));
+    }
+    if let Some(v) = lp.render_anim {
+        o.insert("render_anim".into(), json!(v));
     }
     if let Some(p) = lp.render_graph_node {
         o.insert("render_graph_node".into(), ptr(p));
@@ -302,6 +329,7 @@ impl Session {
             socket: open("socket.jsonl")?,
             events: open("events.jsonl")?,
             state_snapshots: open("state-snapshots.jsonl")?,
+            anim_trace: open("anim-trace.jsonl")?,
         };
 
         let session = Session {
@@ -721,6 +749,94 @@ impl Session {
         }
         let mut files = self.files.lock();
         Self::write_line(&mut files.state_snapshots, &obj);
+    }
+
+    /// Write one PER-SAMPLE line to `anim-trace.jsonl` (the poller samples the LOCAL
+    /// avatar ~every render frame). Flat + compact: pointers are hex strings, every
+    /// field is emitted ONLY when it was readable (omit, never fabricate — same
+    /// contract as the snapshot). `frame_seq` is the recorder's monotonically-
+    /// increasing sample counter; `base_tick` (`Client+0x518`) is the client's live
+    /// cycle counter for interpreting the lerp window. The shape is the diagnostic:
+    /// `ctrl_primary_seq` flipping walk→idle (and `seqs` emptying) across lines ⇒ the
+    /// stop transition; `lerp` vs `base_tick` ⇒ the movement window; `rtile`/`rpos`
+    /// advancing then holding ⇒ moving then stopped.
+    pub fn anim_trace(&self, frame_seq: u64, af: &crate::oracle::AnimFrame) {
+        let ptr = |p: usize| json!(format!("0x{p:x}"));
+        let mut o = serde_json::Map::new();
+        o.insert("ts".into(), json!(wall_iso_now()));
+        o.insert("mono_us".into(), json!(self.mono_us() as u64));
+        o.insert("frame_seq".into(), json!(frame_seq));
+        o.insert("avatar".into(), ptr(af.avatar));
+        o.insert("base_tick".into(), json!(af.base_tick));
+        if let Some(v) = af.render_anim {
+            o.insert("render_anim".into(), json!(v));
+        }
+        if let Some(v) = af.anim_id {
+            o.insert("anim_id".into(), json!(v));
+        }
+        if let Some(seqs) = &af.seqs {
+            o.insert("seqs".into(), json!(seqs));
+        }
+        if let Some(v) = af.movement_anim_priority {
+            o.insert("movement_anim_priority".into(), json!(v));
+        }
+        if let Some(v) = af.ctrl_primary_seq {
+            o.insert("ctrl_primary_seq".into(), json!(v));
+        }
+        if let Some(v) = af.ctrl_secondary_seq {
+            o.insert("ctrl_secondary_seq".into(), json!(v));
+        }
+        if let Some(v) = af.ctrl_blend {
+            o.insert("ctrl_blend".into(), json!(v));
+        }
+        if let Some(v) = af.applied_bas {
+            o.insert("applied_bas".into(), json!(v));
+        }
+        if let Some(v) = af.last_movespeed {
+            o.insert("movespeed".into(), json!(v));
+        }
+        if let Some(v) = af.run_flag {
+            o.insert("run_flag".into(), json!(v));
+        }
+        // lerp window [end, end2] — emitted as a 2-array when BOTH read.
+        if let (Some(e), Some(e2)) = (af.lerp_end_tick, af.lerp_end_tick2) {
+            o.insert("lerp".into(), json!([e, e2]));
+        }
+        if let Some((x, y)) = af.render_pos_double {
+            o.insert("rpos".into(), json!([x, y]));
+        }
+        if let Some((x, y, plane)) = af.render_tile {
+            o.insert("rtile".into(), json!([x, y, plane]));
+        }
+        if let Some((x, y)) = af.target_waypoint_fine {
+            o.insert("target".into(), json!([x, y]));
+        }
+        if let Some((x, y)) = af.prev_waypoint_fine {
+            o.insert("prev".into(), json!([x, y]));
+        }
+        if let Some(v) = af.visible_flag {
+            o.insert("visible".into(), json!(v));
+        }
+        if let Some(p) = af.render_model {
+            o.insert("render_model".into(), ptr(p));
+        }
+        if let Some(v) = af.pending_composed_flag {
+            o.insert("pending_composed".into(), json!(v));
+        }
+        // CLIENT-SIDE ROUTE witness: route_count>0 => client-predicted walk (own route
+        // ring populated); route_count==0 => server-driven (ring empty). dest/mode only
+        // present with an active route.
+        if let Some(v) = af.route_count {
+            o.insert("route_count".into(), json!(v));
+        }
+        if let Some((x, y, p)) = af.route_dest_tile {
+            o.insert("route_dest".into(), json!([x, y, p]));
+        }
+        if let Some(m) = &af.route_mode {
+            o.insert("route_mode".into(), json!(m));
+        }
+        let mut files = self.files.lock();
+        Self::write_line(&mut files.anim_trace, &serde_json::Value::Object(o));
     }
 
     /// Write the one-shot `prot-table.json`: the client's OWN live opcode table,
@@ -1156,6 +1272,12 @@ mod tests {
         lp.avatar_source = "slot";
         lp.visible_flag = Some(0);
         lp.render_model = Some(0); // model NOT loaded
+        // The live walk/run movement seq ids on the avatar (the route-anim queue) +
+        // its priority + the player-side render-anim. This is the new capability:
+        // seeing exactly which walk animation is playing.
+        lp.movement_anim_seqs = Some(vec![824, 819, 820, 821]);
+        lp.movement_anim_priority = Some(5);
+        lp.render_anim = Some(824);
         lp.render_graph_node = Some(0xabc0);
         lp.render_tile = Some((3231, 3110, 0));
         lp.render_scene_fine = Some((1_655_040.0, 1_592_576.0));
@@ -1210,6 +1332,11 @@ mod tests {
         // the two prime "won't render" signals
         assert_eq!(p["visible_flag"], 0);
         assert_eq!(p["render_model"], "0x0");
+        // the live walk/run movement seq ids on the avatar (array, in queue order) +
+        // priority + render-anim — the new "which walk animation is playing" read.
+        assert_eq!(p["movement_anim_seqs"], json!([824, 819, 820, 821]));
+        assert_eq!(p["movement_anim_priority"], 5);
+        assert_eq!(p["render_anim"], 824);
         // render vs logical position both present (the drift read)
         assert_eq!(p["render_tile"]["y"], 3110);
         assert_eq!(p["target_tile"]["y"], 3112);
@@ -1267,6 +1394,9 @@ mod tests {
         assert_eq!(p["current_appearance"], "0x0");
         assert!(p["pending_composed_flag"].is_null());
         assert!(p["pending_needs_async_load"].is_null());
+        // movement_anim_seqs was None (queue header unreadable) => key ABSENT (an empty
+        // array would instead mean "readable but empty"; the two are distinguishable).
+        assert!(p.get("movement_anim_seqs").is_none());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1288,6 +1418,139 @@ mod tests {
         assert!(p.get("lip").is_none());
         assert!(p.get("avatar").is_none());
         assert!(p.get("visible_flag").is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The anim-trace.jsonl per-frame contract: a fully-populated frame emits every
+    /// documented key with the right compact shapes (flat object, pointers as hex,
+    /// arrays for seqs/lerp/rpos/rtile/target/prev), and a second frame appends a
+    /// new line with an advanced `frame_seq`.
+    #[test]
+    fn anim_trace_emits_per_frame_contract() {
+        use crate::oracle::AnimFrame;
+        let (s, dir) = temp_session();
+
+        // Frame 0: a walk in progress — the controller PRIMARY seq is a walk seq,
+        // the route-anim queue is populated, and a movement waypoint window is open.
+        let af0 = AnimFrame {
+            avatar: 0x1_2345_6780,
+            base_tick: 5000,
+            render_anim: Some(824),
+            anim_id: Some(-1),
+            seqs: Some(vec![824, 819, 820, 821]),
+            movement_anim_priority: Some(5),
+            ctrl_primary_seq: Some(824), // walk seq bound
+            ctrl_secondary_seq: Some(-1),
+            ctrl_blend: Some(3),
+            applied_bas: Some(2699),
+            last_movespeed: Some(0),
+            run_flag: Some(0),
+            lerp_end_tick: Some(5036),
+            lerp_end_tick2: Some(5036),
+            render_pos_double: Some((1_655_040.0, 1_592_576.0)),
+            render_tile: Some((3231, 3110, 0)),
+            target_waypoint_fine: Some((1_655_040.0, 1_593_600.0)),
+            prev_waypoint_fine: Some((1_655_040.0, 1_592_576.0)),
+            visible_flag: Some(1),
+            render_model: Some(0xc0ffee),
+            pending_composed_flag: Some(1),
+            route_count: Some(2),
+            route_dest_tile: Some((3231, 3108, 0)),
+            route_mode: Some("walk".into()),
+        };
+        s.anim_trace(0, &af0);
+
+        // Frame 1: a few render frames later — the STOP transition: the walk seq has
+        // flipped to idle on the controller and the route-anim queue has emptied (the
+        // signal the per-sample trace exists to capture), tick advanced.
+        let af1 = AnimFrame {
+            base_tick: 5040,
+            ctrl_primary_seq: Some(-1), // walk seq cleared (idle)
+            seqs: Some(vec![]),         // queue drained
+            lerp_end_tick: Some(-1),    // window closed
+            lerp_end_tick2: Some(-1),
+            ..af0.clone()
+        };
+        s.anim_trace(1, &af1);
+
+        let lines = read_jsonl(&dir, "anim-trace.jsonl");
+        assert_eq!(lines.len(), 2);
+        let o = &lines[0];
+        assert!(o.get("ts").is_some() && o.get("mono_us").is_some());
+        assert_eq!(o["frame_seq"], 0);
+        assert_eq!(o["avatar"], "0x123456780");
+        assert_eq!(o["base_tick"], 5000);
+        assert_eq!(o["render_anim"], 824);
+        assert_eq!(o["anim_id"], -1);
+        // the live walk/run movement seq ids (queue order)
+        assert_eq!(o["seqs"], json!([824, 819, 820, 821]));
+        assert_eq!(o["movement_anim_priority"], 5);
+        // controller seq slots: primary plays the walk; secondary == anim_id memory
+        assert_eq!(o["ctrl_primary_seq"], 824);
+        assert_eq!(o["ctrl_secondary_seq"], -1);
+        assert_eq!(o["ctrl_secondary_seq"], o["anim_id"]);
+        assert_eq!(o["ctrl_blend"], 3);
+        assert_eq!(o["applied_bas"], 2699);
+        assert_eq!(o["movespeed"], 0);
+        assert_eq!(o["run_flag"], 0);
+        // lerp window [end, end2] interpretable against base_tick
+        assert_eq!(o["lerp"], json!([5036, 5036]));
+        assert_eq!(o["rpos"], json!([1_655_040.0, 1_592_576.0]));
+        assert_eq!(o["rtile"], json!([3231, 3110, 0]));
+        assert_eq!(o["target"], json!([1_655_040.0, 1_593_600.0]));
+        assert_eq!(o["prev"], json!([1_655_040.0, 1_592_576.0]));
+        assert_eq!(o["visible"], 1);
+        assert_eq!(o["render_model"], "0xc0ffee");
+        assert_eq!(o["pending_composed"], 1);
+        // client-side route witness: count + (active-route) dest tile + move-mode label
+        assert_eq!(o["route_count"], 2);
+        assert_eq!(o["route_dest"], json!([3231, 3108, 0]));
+        assert_eq!(o["route_mode"], "walk");
+
+        // Frame 1: the captured STOP transition — walk seq cleared, queue emptied,
+        // lerp window closed. This is exactly the per-sample signal the trace gives.
+        let o1 = &lines[1];
+        assert_eq!(o1["frame_seq"], 1);
+        assert_eq!(o1["base_tick"], 5040);
+        assert_eq!(o1["ctrl_primary_seq"], -1);
+        assert_eq!(o1["seqs"], json!([]));
+        assert_eq!(o1["lerp"], json!([-1, -1]));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Unreadable fields are OMITTED (never null, never fabricated) — only `ts`,
+    /// `mono_us`, `frame_seq`, `avatar`, `base_tick` are always present. A partial
+    /// lerp (only one of the two end-ticks readable) omits the `lerp` array.
+    #[test]
+    fn anim_trace_omits_unreadable_fields() {
+        use crate::oracle::AnimFrame;
+        let (s, dir) = temp_session();
+        let af = AnimFrame {
+            avatar: 0xdead_beef,
+            base_tick: 42,
+            ctrl_primary_seq: Some(824),
+            lerp_end_tick: Some(100), // only one half of the window read
+            ..Default::default()
+        };
+        s.anim_trace(9, &af);
+
+        let o = &read_jsonl(&dir, "anim-trace.jsonl")[0];
+        // always-present scaffold
+        assert_eq!(o["frame_seq"], 9);
+        assert_eq!(o["avatar"], "0xdeadbeef");
+        assert_eq!(o["base_tick"], 42);
+        // a readable field appears
+        assert_eq!(o["ctrl_primary_seq"], 824);
+        // everything unreadable is ABSENT (not null)
+        assert!(o.get("render_anim").is_none());
+        assert!(o.get("seqs").is_none());
+        assert!(o.get("anim_id").is_none());
+        assert!(o.get("applied_bas").is_none());
+        assert!(o.get("rtile").is_none());
+        assert!(o.get("render_model").is_none());
+        // partial lerp (only end, not end2) => the whole `lerp` array omitted.
+        assert!(o.get("lerp").is_none());
         let _ = fs::remove_dir_all(&dir);
     }
 

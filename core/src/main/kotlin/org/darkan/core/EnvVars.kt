@@ -92,17 +92,15 @@ object EnvVars {
     val worldHighlighted: Boolean = dotenv.get("WORLD_HIGHLIGHTED", "false").toBooleanStrict()
 
     /**
-     * Emit the FROZEN single-player "first light" dev-scaffolding at world entry — the captured stat
-     * block ([WorldEntry]'s `sendInitialStats`: 28 skills replayed from one recording), the captured
-     * inventory/container block (`sendInitialInventories`: hardcoded item ids + the bronze-dagger worn
-     * loadout), and the captured Lumbridge zone spawns (`FirstLightSceneBootstrap`'s ~40 ObjAdd/LocAdd
-     * records). NONE of it is derived from real world state.
+     * Emit the FROZEN single-player "first light" debug fixture at world entry — captured stat,
+     * inventory/container, and Lumbridge zone-spawn records from one recording. NONE of it is derived
+     * from real world state.
      *
-     * DEFAULTS TO TRUE so current behaviour is preserved. Set FALSE once real inventory / stat /
-     * zone-spawn services exist (a later phase) to stop replaying the capture. This is the one flag
-     * that fences off all of the world-entry single-player demo data.
+     * Defaults to FALSE: normal world login must be driven by cache-backed static geometry plus
+     * server-owned dynamic registries, not by captured Lumbridge packet replay. Set TRUE only when
+     * intentionally reproducing the old first-light fixture for debugging.
      */
-    val firstLightScaffolding: Boolean = dotenv.get("FIRST_LIGHT_SCAFFOLDING", "true").toBooleanStrict()
+    val firstLightScaffolding: Boolean = dotenv.get("FIRST_LIGHT_SCAFFOLDING", "false").toBooleanStrict()
 
     /**
      * Scripted local-player WALK path for a debug capture (1.2b increment 2a) — a comma-separated list

@@ -8,6 +8,7 @@ import org.darkan.core.net.prot.revision.rev948.register948
 import org.darkan.core.net.recorder.PlayerInfoDecoder
 import org.darkan.core.net.session.GameSession
 import org.darkan.world.entity.Appearance
+import org.darkan.world.entity.Direction8
 import org.darkan.world.entity.Player
 import org.darkan.world.world.Players
 import world.gregs.voidps.buffer.read.BufferReader
@@ -189,6 +190,36 @@ class PlayerInfoBuilderInitTest {
         r.startBitAccess()
         assertEquals(0, r.readBits(1), "idle local player must be stationary (hasUpdate=0)")
         r.stopBitAccess()
+    }
+
+    @Test
+    fun `a LOCAL walk step is a forced high-res update (the prod START marker, hasUpdate=1)`() {
+        // SERVER-DRIVEN LOCAL WALK (2026-06-30 — the prod-decoded model): prod FORCES the local walk. The
+        // first walk step is the WALK-START marker [hasUpdate=1][hasExt=0][mvt=3][large=0][code15] with the
+        // descriptor byte offset 0x8 (WALK token a38) + the step delta — NOT a stationary skip-run. (The
+        // earlier "client-predicted local walk → mvt=0/absent" premise was falsified; the prior tools
+        // mis-identified the local slot as a remote player.) POSITION-ONLY: no ext-info.
+        val player = newPlayer(Tile(3200, 3200, 0))
+        // Deliver the appearance once (world entry) so the walk tick is pure movement (no ext-info noise).
+        PlayerInfoEncoder.buildWorldEntrySync(player)
+        val idleAfterEntry = PlayerInfoEncoder.buildIfNeeded(player)
+        assertEquals(0, idleAfterEntry.extendedInfo.size, "appearance delivered → idle tick carries no ext-info")
+
+        // WALK tick: the world tick applied a one-tile SOUTH step (lastWalkStepDir set), nothing else changed.
+        player.lastWalkStepDir = Direction8.indexOf(0, -1)
+        val walk = PlayerInfoEncoder.buildIfNeeded(player)
+
+        assertEquals(0, walk.extendedInfo.size, "LOCAL walk step is POSITION-ONLY (no ext-info block)")
+        val rw = BufferReader(walk.bitBlock)
+        rw.startBitAccess()
+        assertEquals(1, rw.readBits(1), "LOCAL walk step: local hasUpdate=1 (the forced WALK-START marker)")
+        assertEquals(0, rw.readBits(1), "appearance delivered → hasExt=0 on the walk tick")
+        assertEquals(3, rw.readBits(2), "WALK-START is mvt=3 (move-mode)")
+        assertEquals(0, rw.readBits(1), "small (15-bit) form")
+        val code15 = rw.readBits(15)
+        rw.stopBitAccess()
+        assertEquals(0x201f, code15, "SOUTH WALK-START == prod code15 0x201f (field 8 | yS5=-1)")
+        assertEquals(0x8, (code15 ushr 10) and 0x1c, "descriptor byte offset 0x8 = WALK move-mode token a38")
     }
 
     @Test

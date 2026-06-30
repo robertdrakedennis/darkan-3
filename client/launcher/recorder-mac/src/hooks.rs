@@ -189,6 +189,19 @@ fn write_isaac_seeds(s: &crate::session::Session) {
     }
 }
 
+// NOTE — the per-frame anim trace is NOT an inline hook. AdvanceRenderPosition
+// @0x1003a2500 is a wall-to-wall SSE per-frame render function, and `install_inline`
+// saves only the GPRs + FLAGS (NOT XMM0-15), so an inline observer that calls into
+// Rust/serde/IO clobbers the float registers the function relies on → corrupt render
+// math → `libc++abi: terminating` (verified: a prod run crashed at the login screen,
+// exit code 6, before any in-world frame). It is therefore implemented as a
+// register-SAFE background POLLER (the sampler thread spawned from `lib.rs`, gated on
+// `DARKAN_ANIM_TRACE=1`) that reads the local avatar's anim state off the existing
+// fault-tolerant `mem::*` infra and NEVER touches the render function — see
+// `oracle::read_anim_frame`/`oracle::live_local_avatar` + `state::sample_anim_frame`.
+// The 11 hooks below are on cold IO/networking functions, where the missing XMM save
+// is latent (those functions barely touch float).
+
 // ---------------------------------------------------------------------------
 // S2C — BACKSTOP: ConnectionManager::ReadPacket entry hook (post-trampoline)
 //
@@ -783,6 +796,11 @@ pub fn install_all(image: &MainImage) -> usize {
         );
     }
 
+    // (The per-frame anim trace is a register-safe background poller, spawned from
+    // `lib.rs` and gated on `DARKAN_ANIM_TRACE=1` — NOT an inline hook here. See the
+    // note above the ReadPacket backstop for why an inline detour on the SSE-heavy
+    // AdvanceRenderPosition render function crashes the client.)
+
     n += install!(
         image,
         offsets::SIG_READ_PACKET,
@@ -868,5 +886,7 @@ pub fn install_all(image: &MainImage) -> usize {
 
 /// Total number of capture-point hooks `install_all` attempts (for the log line):
 /// the inline s2c dispatch observer + the 8 original entry/backstop hooks + the
-/// 2 new lobby hooks (OpenLoginStream anchor, SetupLoginCiphers boundary).
+/// 2 lobby hooks (OpenLoginStream anchor, SetupLoginCiphers boundary). The
+/// per-frame anim trace is a poller (spawned from `lib.rs`), NOT a hook, so it is
+/// not counted here.
 pub const HOOK_COUNT: usize = 11;

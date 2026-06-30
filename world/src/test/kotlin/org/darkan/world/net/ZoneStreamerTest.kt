@@ -7,22 +7,37 @@ import org.darkan.core.net.prot.LocAnim
 import org.darkan.core.net.prot.LocAdd
 import org.darkan.core.net.prot.LocDel
 import org.darkan.core.net.prot.ObjAdd
+import org.darkan.core.net.prot.ServerProt
+import org.darkan.core.net.prot.UpdateZoneFullFollowsV2
 import org.darkan.core.net.prot.UpdateZonePartialEnclosed
 import org.darkan.core.net.prot.UpdateZonePartialFollows
 import org.darkan.core.net.prot.revision.rev948.register948
 import org.darkan.core.net.session.GameSession
 import org.darkan.world.entity.Player
+import org.darkan.world.world.BuildAreaSize
+import org.darkan.world.world.LocalSceneZone
+import org.darkan.world.world.SceneBuildMode
+import org.darkan.world.world.SceneBuildPlanner
+import org.darkan.world.world.WorldZoneState
+import org.darkan.world.world.ZoneStateProvider
 import org.darkan.world.world.Zones
 import world.gregs.voidps.type.Region
 import world.gregs.voidps.type.Tile
 import world.gregs.voidps.type.Zone
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class ZoneStreamerTest {
+    private fun plan(spawn: Tile) =
+        SceneBuildPlanner.planFor(
+            tile = spawn,
+            mode = SceneBuildMode.Rebuild,
+            size = BuildAreaSize.DEFAULT,
+            resolveWorldAreaType = false,
+        )
+
     private fun newPlayer(spawn: Tile): Player {
         val account = Account(username = "tester", displayName = "Tester")
         val session = GameSession(
@@ -40,29 +55,33 @@ class ZoneStreamerTest {
     }
 
     @Test
-    fun `world entry zone mask matches latest production count`() {
-        val counts = (0 until ZoneStreamer.SCENE_PLANES).map { level ->
-            var count = 0
-            for (x in -ZoneStreamer.SCENE_RADIUS_ZONES..ZoneStreamer.SCENE_RADIUS_ZONES) {
-                for (y in -ZoneStreamer.SCENE_RADIUS_ZONES..ZoneStreamer.SCENE_RADIUS_ZONES) {
-                    if (ZoneStreamer.shouldStream(level, x, y)) count++
-                }
-            }
-            count
-        }
+    fun `zone streamer emits every render-zone marker from the scene plan`() {
+        val packets = ZoneStreamer.buildPackets(plan(Tile(3224, 3224, 0)), object : ZoneStateProvider {
+            override fun packetsFor(zone: Zone, localSceneZone: LocalSceneZone): List<ServerProt> = emptyList()
+        })
 
-        assertEquals(listOf(169, 169, 150, 118), counts)
-        assertEquals(606, counts.sum())
+        assertEquals(ZoneStreamer.SCENE_PLANES * 13 * 13, packets.size)
+        assertEquals(UpdateZoneFullFollowsV2(level = 0, zoneX = 10, zoneY = 10), packets.first())
+        assertEquals(UpdateZoneFullFollowsV2(level = 3, zoneX = 22, zoneY = 22), packets.last())
+        assertTrue(packets.all { it is UpdateZoneFullFollowsV2 })
     }
 
     @Test
-    fun `upper plane omissions match production examples`() {
-        assertTrue(ZoneStreamer.shouldStream(0, -6, -2))
-        assertTrue(ZoneStreamer.shouldStream(1, -6, -2))
-        assertFalse(ZoneStreamer.shouldStream(2, -6, -2))
-        assertFalse(ZoneStreamer.shouldStream(3, -6, -2))
-        assertTrue(ZoneStreamer.shouldStream(2, 6, 6))
-        assertTrue(ZoneStreamer.shouldStream(3, 6, 6))
+    fun `zone streamer appends provider packets for matching render zones`() {
+        val plan = plan(Tile(3224, 3224, 0))
+        val provider = object : ZoneStateProvider {
+            override fun packetsFor(zone: Zone, localSceneZone: LocalSceneZone): List<ServerProt> =
+                if (zone.x == plan.centreZoneX && zone.y == plan.centreZoneY && zone.level == 0) {
+                    listOf(ObjAdd(packedCoord = 1, objId = 2, count = 3))
+                } else {
+                    emptyList()
+                }
+        }
+
+        val packets = ZoneStreamer.buildPackets(plan, provider)
+
+        assertEquals(ZoneStreamer.SCENE_PLANES * 13 * 13 + 1, packets.size)
+        assertEquals(listOf(ObjAdd(packedCoord = 1, objId = 2, count = 3)), packets.filterIsInstance<ObjAdd>())
     }
 
     @Test
@@ -78,6 +97,8 @@ class ZoneStreamerTest {
 
     @Test
     fun `Lumbridge scene map planner covers visible region squares`() {
+        val plan = plan(Tile(3200, 3200, 0))
+
         assertEquals(
             setOf(
                 Region(49, 49),
@@ -85,7 +106,7 @@ class ZoneStreamerTest {
                 Region(50, 49),
                 Region(50, 50),
             ),
-            SceneMapRegionPlanner.regionsForScene(400, 400),
+            SceneMapRegionPlanner.regionsForScene(plan),
         )
     }
 
@@ -139,5 +160,40 @@ class ZoneStreamerTest {
         val deletes = FirstLightSceneBootstrap.packets(level = 0, zoneX = 19, zoneY = 12)
         assertEquals(11, deletes.size)
         assertEquals(LocDel(shapeFlags = 42, packedCoord = 86), assertIs<LocDel>(deletes[0]))
+    }
+
+    @Test
+    fun `first light fixture is appended only when the provider flag is enabled`() {
+        val zone = Zone(0, 0, 0)
+        val local = LocalSceneZone(level = 0, zoneX = 14, zoneY = 14)
+
+        assertEquals(emptyList(), WorldZoneState.packetsFor(zone, local, includeFirstLightScaffolding = false))
+        assertEquals(
+            listOf(
+                ObjAdd(packedCoord = 84, objId = 1, count = 946),
+                ObjAdd(packedCoord = 96, objId = 1, count = 558),
+            ),
+            WorldZoneState.packetsFor(zone, local, includeFirstLightScaffolding = true),
+        )
+    }
+
+    @Test
+    fun `world zone state streams persistent ground items by absolute tile zone`() {
+        val tile = Tile(3225, 3218, 0)
+        try {
+            WorldZoneState.addGroundItem(tile, objId = 995, count = 42)
+
+            assertEquals(
+                listOf(ObjAdd(packedCoord = tile.chunkLocalHash, objId = 995, count = 42)),
+                WorldZoneState.packetsFor(tile.zone, LocalSceneZone(0, 16, 16), includeFirstLightScaffolding = false),
+            )
+            assertEquals(
+                emptyList(),
+                WorldZoneState.packetsFor(tile.transform(8, 0, 0).zone, LocalSceneZone(0, 17, 16), includeFirstLightScaffolding = false),
+            )
+        } finally {
+            WorldZoneState.clear()
+            Zones.clear()
+        }
     }
 }

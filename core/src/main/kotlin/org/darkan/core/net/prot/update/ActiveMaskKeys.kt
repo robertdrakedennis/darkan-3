@@ -28,6 +28,23 @@ object ActiveMaskKeys {
     var playerAppearance: PlayerUpdateMaskKey? = null
 
     /**
+     * MOVEMENT_ANIM block key for the active revision (PLAYER_INFO bit 0x20 in 948) — the walk/run
+     * leg-animation block (`SetMovementAnimSet`). Published by the codec so the world ext-info encoder
+     * can synthesize it for a walking slot without knowing the per-revision enum. Null ⇒ the revision
+     * does not model it and the synth is skipped.
+     */
+    @Volatile
+    var playerMovementAnim: PlayerUpdateMaskKey? = null
+
+    /**
+     * FORCED/TEMP MOVEMENT (glide) block key for the active revision (PLAYER_INFO bit 0x80 in 948) — the
+     * smooth tile→tile glide block (`SetRenderWaypoint`, opens the avatar+0xDBC lerp window). Published by
+     * the codec so the world ext-info encoder can synthesize it for a walking slot. Null ⇒ skip the synth.
+     */
+    @Volatile
+    var playerForcedMovement: PlayerUpdateMaskKey? = null
+
+    /**
      * Absolute LE bit positions of the expansion ("continue") bits in the PLAYER_INFO ext-info
      * flag bitset header, for the active revision. Index N is the continue-bit that must be set in
      * byte N so the client reads byte N+1. Published by codec registration from each revision's

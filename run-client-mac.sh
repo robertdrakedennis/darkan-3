@@ -40,6 +40,9 @@
 #   SCHEME                direct mode only: rs-launch | rs-launchs
 #   DARKAN_RECORD         1 to insert the recorder (auto-forced in production)
 #   DARKAN_RECORD_DIR     capture output dir (default: $DARKAN_DIR/recorder)
+#   DARKAN_ANIM_TRACE     1 to enable the per-frame LOCAL-avatar anim trace poller
+#                         (writes anim-trace.jsonl; OPT-IN, default OFF). Safe — a
+#                         register-safe sampler thread, NOT a render-fn hook.
 
 set -euo pipefail
 
@@ -286,6 +289,7 @@ env \
     DYLD_INSERT_LIBRARIES="$INSERT_LIBS" \
     ${DARKAN_RECORD:+DARKAN_RECORD="$DARKAN_RECORD"} \
     ${RECORD_DIR:+DARKAN_RECORD_DIR="$RECORD_DIR"} \
+    ${DARKAN_ANIM_TRACE:+DARKAN_ANIM_TRACE="$DARKAN_ANIM_TRACE"} \
     DARKAN_RECORD_MODE="$DARKAN_RECORD_MODE" \
     ${DARKAN_CONFIG_URI:+DARKAN_CONFIG_URI="$DARKAN_CONFIG_URI"} \
     ${DARKAN_RSA_MODULUS:+DARKAN_RSA_MODULUS="$DARKAN_RSA_MODULUS"} \

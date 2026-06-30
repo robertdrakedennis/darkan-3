@@ -49,7 +49,30 @@ sealed class UpdateMask {
      */
     data class HitMarksAndHeadbars(val hits: List<Hit>, val headbars: List<Headbar>) : UpdateMask()
 
-    /** PLAYER_INFO FORCED_MOVEMENT (bit 4, mask 0x10). 6 p1 + 3 p2. */
+    /**
+     * PLAYER_INFO FORCED/TEMP MOVEMENT — the smooth tile→tile GLIDE block (PLAYER_INFO bit 7,
+     * mask 0x80; NPC_INFO bit 15, mask 0x8000). Per the binary-verified spec
+     * `re-resources/docs/net/serverprot/player-appearance-948.md` §"Bit-7 (0x80) temp-movement block"
+     * the client reads this under bit 7 and feeds it to `SetRenderWaypoint @0x10039e220`, which opens
+     * the lerp window (`avatar+0xDBC`) so the avatar interpolates between tiles instead of snapping.
+     *
+     * Wire (12 bytes, plain payload — the per-field transforms are applied by the encoder). The first
+     * four fields are signed tile deltas; `SetRenderWaypoint` scales them by `0x200` fine units:
+     *  - `srcDx`  +0  g1_add  (client: wire-128) — source X tile delta
+     *  - `srcDz`  +1  g1_neg  (client: -wire)    — source Z tile delta
+     *  - `dstDx`  +2  g1                         — dest X tile delta
+     *  - `dstDz`  +3  g1_sub  (client: 128-wire) — dest Z tile delta
+     *  - `delta3` +4  g1_add                       — src-plane bias
+     *  - `delta4` +5  g1_neg                       — dst-plane bias
+     *  - `startTime` +6..7 g2 BE                   — lerp start tick (relative)
+     *  - `endTime`   +8..9 g2 BE                   — lerp end tick (relative)
+     *  - `yaw`    +0xa low byte g1_add, +0xb high 6 bits (`(wire & 0x3f) << 8`) — 14-bit render angle
+     *
+     * **Bit position corrected (2026-06-29):** the 947→948 map and the live `Rev948PlayerUpdateMaskKey`
+     * already place this at bit 7 / 0x80 (order 9) — bit 4 / 0x10 is a DIFFERENT block (spotanim/hit-bar
+     * sub-list, never calls `SetRenderWaypoint`). The trailing field is a 14-bit yaw (p1 + 6-bit), NOT a
+     * full short animation id (the legacy `animationId` field was a misnomer).
+     */
     data class ForcedMovement(
         val srcDx: Int,
         val srcDz: Int,
@@ -59,7 +82,28 @@ sealed class UpdateMask {
         val delta4: Int,
         val startTime: Int,
         val endTime: Int,
-        val animationId: Int,
+        val yaw: Int,
+    ) : UpdateMask()
+
+    /**
+     * PLAYER_INFO MOVEMENT ANIMATION — the walk/run LEG-ANIMATION block (PLAYER_INFO bit 5, mask 0x20).
+     * Per the binary-verified spec `re-resources/docs/net/serverprot/player-appearance-948.md`
+     * §"What ACTUALLY animates a remote-player walk", the client reads this under bit 5 and passes the
+     * 4 ids to `SetMovementAnimSet @0x1003a69f0` (vtable +0x1e0), which pushes them into the route-anim
+     * queue (`avatar+0x2c8`/`+0x2d0`) so the bas walk/run seq plays. Without it the avatar plays the bas
+     * IDLE loop even while its tile advances. NPCs use the same path (NPC walking works in production).
+     *
+     * Wire: `4× gSmart2or4s` (the movement-anim seq ids — walk/run/turn/idle set) + `1× g1_sub` (priority
+     * flag). All four ids == -1 STOPS the animation (the client calls `ResetMovementSeqs @0x100589ea0`).
+     * The 4 ids are the seqs of the player's bas; see [org.darkan.world.entity.Appearance] /
+     * `PlayerMovementAnim` for how they are sourced.
+     */
+    data class MovementAnim(
+        val seq0: Int,
+        val seq1: Int,
+        val seq2: Int,
+        val seq3: Int,
+        val priority: Int = 0,
     ) : UpdateMask()
 
     /**

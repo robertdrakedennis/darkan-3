@@ -38,12 +38,16 @@ import world.gregs.voidps.buffer.write.BufferWriter
  *
  * ## Increment scope (1.2b increment 1 — FOUNDATION; movementType=0/walk)
  *
- * Every known update is the stationary form `movementType=0` ([PlayerMovementEncoder]) — including
- * the local first-tick add, which carries the APPEARANCE ext-info INLINE (the prod local form,
- * `c0 …` + ext-info; see [buildInit]). No real run/teleport motion and no low-res add → high-res
- * promote is produced. The teleport form ([PlayerMovementEncoder.encodeAbsoluteTile]) is NOT used by
- * either build path (it was reverted from [buildInit]); it is retained as the increment-2 real-teleport
- * seam only. The precise increment-2 seam is documented at [encodeKnownPass] / [encodeExternalPass].
+ * A stationary known update is `movementType=0` ([PlayerMovementEncoder]) — including the local
+ * first-tick add, which carries the APPEARANCE ext-info INLINE (the prod local form, `c0 …` + ext-info;
+ * see [buildInit]). A WALKING known slot runs the prod three-phase walk state machine ([walkPhase]):
+ * WALK-START (`mvt=3` move-mode desc 0x8 + the step delta) → WALK-STEP (`mvt=1`) → WALK-STOP (`mvt=3`
+ * desc 0x0, no move), POSITION-ONLY (no movement ext-info). This is SERVER-DRIVEN for the LOCAL slot
+ * too — a decoded live-prod local walk is exactly this shape (the earlier "local walk is client-
+ * predicted, server sends mvt=0/absent" premise was falsified; the prior tools mis-identified the local
+ * slot as a remote player). No real run (`mvt=2`) and no low-res add → high-res promote is produced yet.
+ * The teleport form ([PlayerMovementEncoder.encodeAbsoluteTile]) is NOT used by either build path; it is
+ * retained as the real-teleport seam. The future seams are documented at [encodeKnownPass] / [encodeExternalPass].
  *
  * Two public entry points map to the two live call sites:
  *  * [buildWorldEntrySync] — `WorldServer` world-entry. Marks the appearance cached + clears
@@ -161,15 +165,15 @@ object PlayerInfoEncoder {
         byteAlignPass(bitOut) { encodeExternalPass(bitOut, player, slots, activeFlag = false, flaggedForExtInfo) }
         slots.rebuildAfterPasses()
 
-        // Record the appearance we sent so the per-tick path won't re-emit it next tick.
-        val cached = player.appearance.cachedBytes
-        if (cached != null && player.index in viewport.cachedApprHashes.indices) {
-            viewport.cachedApprHashes[player.index] = cached
-        }
-
+        // NOTE: the appearance-delivered record is no longer set here. [buildExtInfoBlocks] →
+        // [PlayerExtInfoEncoder.encodeExtendedInfoBlock] is now the SINGLE place that records the
+        // delivery, exactly when the APPEARANCE block is emitted, so the `hasExtendedInfo` flag (set
+        // during the passes above) and the emitted block stay consistent. Recording here would flip the
+        // appearance-undelivered state before the block builder runs → hasExt=1 with an empty block →
+        // desync.
         return PlayerInfo(
             bitBlock = bitOut.toArray(),
-            extendedInfo = buildExtInfoBlocks(flaggedForExtInfo),
+            extendedInfo = buildExtInfoBlocks(player, flaggedForExtInfo),
             firstTick = true,
         )
     }
@@ -193,7 +197,7 @@ object PlayerInfoEncoder {
 
         return PlayerInfo(
             bitBlock = bitOut.toArray(),
-            extendedInfo = buildExtInfoBlocks(flaggedForExtInfo),
+            extendedInfo = buildExtInfoBlocks(player, flaggedForExtInfo),
             firstTick = false,
         )
     }
@@ -209,14 +213,16 @@ object PlayerInfoEncoder {
      * `slot.nextActive = true` on both the bit-reading slot and each skipped slot,
      * `ClientStateCrossCheck.kt:1130/1122`).
      *
-     * The LOCAL slot is NOT special-cased: like every known slot with an undelivered appearance, it
-     * emits the stationary inline-appearance form `[hasUpdate=1][hasExt=1][mvt=0]` and its APPEARANCE
-     * ext-info block follows the bit block. This is the prod local first-tick form (`c0 …`, mvt=0,
-     * NOT the reverted mvt=3 teleport). Both [buildInit] and [buildPerTick] call this identically.
+     * The LOCAL slot is NOT special-cased: like every known slot it runs the same prod walk state machine
+     * ([walkPhase] + [PlayerMovementEncoder.encodeHighResPosition]). On a stationary tick with an undelivered
+     * appearance it emits the inline-appearance hold `[hasUpdate=1][hasExt=1][mvt=0]` + the APPEARANCE
+     * ext-info block (the prod local first-tick form `c0 …`, mvt=0). On a walk it emits the three-phase
+     * shape: WALK-START (`mvt=3` desc 0x8) → WALK-STEP (`mvt=1`) → WALK-STOP (`mvt=3` desc 0x0). Both
+     * [buildInit] and [buildPerTick] call this identically.
      *
-     * INCREMENT-2 SEAM: real walk/run for a known slot plugs into [PlayerMovementEncoder.encodeHighResPosition]
-     * (today `movementType=0`/walk); the demote-to-low-res case (decode mvt=0 + present→false,
-     * `ClientStateCrossCheck.kt:1170`) calls [PlayerInfoSlots.demoteToPending].
+     * After emitting the form, [commitWalkLatch] advances the slot's `wasWalking` latch (START/STEP set,
+     * STOP clear) so the next tick resolves the correct phase. The future run (`mvt=2`) and demote-to-low-res
+     * (decode mvt=0 + present→false) cases plug in at the same seam.
      */
     private fun encodeKnownPass(
         out: BufferWriter,
@@ -238,10 +244,12 @@ object PlayerInfoEncoder {
             val target = Players.get(idx)
             if (target != null && knownHasUpdate(viewer, target)) {
                 out.writeBits(1, 1)
-                PlayerMovementEncoder.encodeHighResPosition(out, target, flaggedForExtInfo)
-                // The decode does NOT set nextActive for a known mvt=0 stay (local/has-ext idle-return,
-                // ClientStateCrossCheck.kt:1171) — leave nextActive=false so the slot stays in this
-                // cohort next tick.
+                val phase = walkPhase(viewer, target)
+                PlayerMovementEncoder.encodeHighResPosition(out, viewer, target, phase, flaggedForExtInfo)
+                // Commit the walk-state latch now that the form is emitted (START/STEP set it, STOP clears
+                // it). The decode does NOT set nextActive for a known stay (ClientStateCrossCheck.kt:1171),
+                // so leave nextActive=false → the slot stays in this cohort next tick.
+                commitWalkLatch(slot, phase)
                 i++
             } else {
                 // Start of a stationary skip-run: count the following same-cohort no-update slots.
@@ -296,22 +304,63 @@ object PlayerInfoEncoder {
     }
 
     /**
-     * Does this known-cohort [target] have an update to deliver to [viewer] this tick? True when the
-     * target has ext-info to send ([PlayerExtInfoEncoder.needsAnyUpdate] — a pending mask or an
-     * undelivered appearance) OR it WALKED this tick (a step applied by the world tick,
-     * [Player.lastWalkStepDir] != [MovementQueue.NO_STEP], increment 2a). Either makes the slot emit
-     * `hasUpdate=1` and breaks any surrounding skip-run, so the walk bits actually reach the wire even
-     * when the appearance is already delivered.
+     * Does this known-cohort [target] have an update to deliver to [viewer] this tick? True when the target
+     * has ext-info to send ([PlayerExtInfoEncoder.needsAnyUpdate] — a pending mask or an appearance not yet
+     * delivered to THIS viewer), OR its per-tick walk [walkPhase] is not [PlayerMovementEncoder.WalkPhase.NONE]
+     * (a WALK-START / WALK-STEP / WALK-STOP marker is itself a high-res update).
      *
-     * [PlayerExtInfoEncoder.needsAnyUpdate] is evaluated FIRST and unconditionally so its
-     * first-appearance recording side effect still runs every tick regardless of whether the player
-     * also walked. (For the local slot on the init path the caller forces the absolute-tile form
-     * regardless; this gate governs the per-tick path.)
+     * SERVER-DRIVEN LOCAL WALK (2026-06-30 — the prod-decoded model): prod FORCES the local walk too. A
+     * decoded live-prod local walk (`session-20260630-033557-27478-production`, idx 1160) is the three-phase
+     * move-mode shape START(mvt3 desc 0x8)→STEP(mvt1)×N→STOP(mvt3 desc 0x0); the START/STOP markers and every
+     * STEP are `hasUpdate=1`. So the local slot is NOT special-cased — it takes forced movement exactly like
+     * any walker. Crucially the WALK-STOP tick (`wasWalking && !stepped`) IS an update (the idle marker), so it
+     * must NOT fold into a skip-run; [walkPhase] returning STOP makes this gate true for that tick. POSITION-
+     * ONLY — no movement ext-info (no bit-0x20/0x80); the slot is flagged for an ext-info block only by the
+     * `needsAnyUpdate` path (a real pending mask / first appearance).
+     *
+     * Pure read (no latch mutation) — safe to call during the skip-run look-ahead ([countKnownSkipRun]). The
+     * latch is committed only at the slot's emit point in [encodeKnownPass].
      */
     private fun knownHasUpdate(viewer: Player, target: Player): Boolean {
         val needsExtInfo = PlayerExtInfoEncoder.needsAnyUpdate(viewer, target)
-        val walkedThisTick = target.lastWalkStepDir != MovementQueue.NO_STEP
-        return needsExtInfo || walkedThisTick
+        return needsExtInfo || walkPhase(viewer, target) != PlayerMovementEncoder.WalkPhase.NONE
+    }
+
+    /**
+     * Resolve [target]'s per-tick walk phase as seen by [viewer] — the prod three-phase walk shape derived
+     * from the slot's persistent `wasWalking` latch + whether the target stepped this tick
+     * ([Player.lastWalkStepDir] != [MovementQueue.NO_STEP]):
+     *  * `!wasWalking && stepped`  → [PlayerMovementEncoder.WalkPhase.START] (idle→walk marker).
+     *  * `wasWalking  && stepped`  → [PlayerMovementEncoder.WalkPhase.STEP]  (walk→walk).
+     *  * `wasWalking  && !stepped` → [PlayerMovementEncoder.WalkPhase.STOP]  (walk→idle marker).
+     *  * `!wasWalking && !stepped` → [PlayerMovementEncoder.WalkPhase.NONE]  (stationary hold).
+     *
+     * **Pure** — reads the latch but never mutates it; the look-ahead and the gate can call it freely. The
+     * encoder commits the transition (set on START/STEP, clear on STOP) at the emit point via [commitWalkLatch].
+     * Applies to ANY walker; the local player is the immediate target but the machine is slot-generic.
+     */
+    private fun walkPhase(viewer: Player, target: Player): PlayerMovementEncoder.WalkPhase {
+        val stepped = target.lastWalkStepDir != MovementQueue.NO_STEP
+        val wasWalking = viewer.viewport.playerSlots.slot(target.index)?.wasWalking ?: false
+        return when {
+            !wasWalking && stepped -> PlayerMovementEncoder.WalkPhase.START
+            wasWalking && stepped -> PlayerMovementEncoder.WalkPhase.STEP
+            wasWalking && !stepped -> PlayerMovementEncoder.WalkPhase.STOP
+            else -> PlayerMovementEncoder.WalkPhase.NONE
+        }
+    }
+
+    /**
+     * Commit the slot's `wasWalking` latch after its high-res form is emitted: WALK-START / WALK-STEP set it
+     * (the client is now in the WALK move-state), WALK-STOP clears it (back to idle), and NONE leaves it
+     * (an idle/inline-appearance tick does not change the move-state). Called once per slot at the emit point.
+     */
+    private fun commitWalkLatch(slot: PlayerInfoSlots.GpiSlot, phase: PlayerMovementEncoder.WalkPhase) {
+        when (phase) {
+            PlayerMovementEncoder.WalkPhase.START, PlayerMovementEncoder.WalkPhase.STEP -> slot.wasWalking = true
+            PlayerMovementEncoder.WalkPhase.STOP -> slot.wasWalking = false
+            PlayerMovementEncoder.WalkPhase.NONE -> Unit
+        }
     }
 
     /**
@@ -432,12 +481,12 @@ object PlayerInfoEncoder {
         }
     }
 
-    /** Build the ext-info blocks for the players flagged this tick, in flag order. */
-    private fun buildExtInfoBlocks(flaggedForExtInfo: List<Int>): List<ByteArray> {
+    /** Build the ext-info blocks for the players flagged this tick (as seen by [viewer]), in flag order. */
+    private fun buildExtInfoBlocks(viewer: Player, flaggedForExtInfo: List<Int>): List<ByteArray> {
         val extendedInfo = ArrayList<ByteArray>(flaggedForExtInfo.size)
         for (slot in flaggedForExtInfo) {
             val target = Players.get(slot) ?: continue
-            extendedInfo.add(PlayerExtInfoEncoder.encodeExtendedInfoBlock(target))
+            extendedInfo.add(PlayerExtInfoEncoder.encodeExtendedInfoBlock(viewer, target))
         }
         return extendedInfo
     }

@@ -8,6 +8,7 @@ import world.gregs.voidps.cache.config.data.IDKDefinition
 import world.gregs.voidps.cache.config.data.InventoryDefinition
 import world.gregs.voidps.cache.config.data.ParamDefinition
 import world.gregs.voidps.cache.config.data.QuestDefinition
+import world.gregs.voidps.cache.config.data.RenderAnimationDefinition
 import world.gregs.voidps.cache.config.data.WorldAreaDefinition
 import world.gregs.voidps.cache.config.decoder.CursorDecoder
 import world.gregs.voidps.cache.config.decoder.HeadbarDecoder
@@ -16,6 +17,7 @@ import world.gregs.voidps.cache.config.decoder.IDKDecoder
 import world.gregs.voidps.cache.config.decoder.InventoryDecoder
 import world.gregs.voidps.cache.config.decoder.ParamDecoder
 import world.gregs.voidps.cache.config.decoder.QuestDecoder
+import world.gregs.voidps.cache.config.decoder.RenderAnimationDecoder
 import world.gregs.voidps.cache.config.decoder.WorldAreaDecoder
 import world.gregs.voidps.cache.definition.data.*
 import world.gregs.voidps.cache.definition.decoder.*
@@ -252,6 +254,7 @@ interface Cache {
         private val questDefinitions by lazy { Definitions(QuestDecoder(), get()) }
         private val spriteDefinitions by lazy { Definitions(SpriteDecoder(), get()) }
         private val bodyDefinitions by lazy { Definitions(BodyDecoder(), get()) }
+        private val renderAnimationDefinitions by lazy { Definitions(RenderAnimationDecoder(), get()) }
 
         @JvmStatic fun param(id: Int): ParamDefinition? = paramDefinitions.getOrNull(id)
         @JvmStatic fun cursor(id: Int): CursorDefinition? = cursorDefinitions.getOrNull(id)
@@ -262,6 +265,26 @@ interface Cache {
         @JvmStatic fun quest(id: Int): QuestDefinition? = questDefinitions.getOrNull(id)
         @JvmStatic fun sprite(id: Int): SpriteDefinition? = spriteDefinitions.getOrNull(id)
         @JvmStatic fun seq(id: Int): AnimationDefinition? = animation(id)
+
+        /**
+         * Render-animation ("bas" / base animation set) def — CONFIG index 2, archive 32
+         * ([Config.RENDER_ANIMATIONS]), file-per-id. This is the bas the player APPEARANCE block carries
+         * (field 9, default 2699). Its named seq fields are the def offsets the client's per-frame
+         * `jag::graphics::GraphEntity::SelectMovementAnimation @0x1003a4e90` reads to drive the avatar's
+         * walk/run legs (see `re-resources/docs/net/serverprot/player-appearance-948.md`):
+         *
+         *  - [RenderAnimationDefinition.primaryWalk]  → def `+0x94` (walk-forward)
+         *  - [RenderAnimationDefinition.run]          → def `+0xa4` (run)
+         *  - [RenderAnimationDefinition.turning]      → def `+0xac` (rotate-on-spot)
+         *  - [RenderAnimationDefinition.primaryIdle]  → def `+0x8c` (ready/idle)
+         *
+         * The PLAYER_INFO ext-info MOVEMENT_ANIM block (bit 0x20) carries `[primaryWalk, run, turning,
+         * primaryIdle]` in that order → `SetMovementAnimSet @0x1003a69f0`. [RenderAnimationDecoder] is used
+         * (NOT [BASDecoder]) because it decodes every seq opcode into the named fields that line up with
+         * those consumer offsets; [BASDecoder] skips several opcodes and stores seqs under non-matching
+         * field names.
+         */
+        @JvmStatic fun renderAnimation(id: Int): RenderAnimationDefinition? = renderAnimationDefinitions.getOrNull(id)
 
         /**
          * Body / wear-pos ("WearposDefaults") def (DEFAULTS/archive-6/file-0 per id). The appearance

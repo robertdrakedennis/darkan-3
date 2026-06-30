@@ -24,29 +24,21 @@ object ZoneBundleBuilder {
         if (pendingMap.isEmpty()) return emptyList()
 
         val viewport = player.viewport
-        val buildArea = viewport.buildArea
+        val plan = viewport.sceneBuildPlan
+        val buildArea = plan.buildArea
         val minBuildChunkX = buildArea.minRegion.x shl 3
         val maxBuildChunkX = (buildArea.maxRegion.x shl 3) + 7
         val minBuildChunkY = buildArea.minRegion.y shl 3
         val maxBuildChunkY = (buildArea.maxRegion.y shl 3) + 7
-        val originChunkX = ZoneStreamer.sceneBaseZone(viewport.buildAreaChunkX)
-        val originChunkY = ZoneStreamer.sceneBaseZone(viewport.buildAreaChunkY)
-        val minSceneChunkX = viewport.buildAreaChunkX - ZoneStreamer.SCENE_RADIUS_ZONES
-        val maxSceneChunkX = viewport.buildAreaChunkX + ZoneStreamer.SCENE_RADIUS_ZONES
-        val minSceneChunkY = viewport.buildAreaChunkY - ZoneStreamer.SCENE_RADIUS_ZONES
-        val maxSceneChunkY = viewport.buildAreaChunkY + ZoneStreamer.SCENE_RADIUS_ZONES
 
         val out = ArrayList<ServerProt>()
         for ((zoneId, packets) in pendingMap) {
             val zone = Zone(zoneId)
             if (zone.x !in minBuildChunkX..maxBuildChunkX) continue
             if (zone.y !in minBuildChunkY..maxBuildChunkY) continue
-            if (zone.x !in minSceneChunkX..maxSceneChunkX) continue
-            if (zone.y !in minSceneChunkY..maxSceneChunkY) continue
+            val localSceneZone = plan.localSceneZone(zone) ?: continue
             if (packets.isEmpty()) continue
 
-            val relX = zone.x - originChunkX
-            val relY = zone.y - originChunkY
             val enclosed = packets.filterIsInstance<LocAnim>()
             val standalone = packets.filterNot(::isEnclosedOnly)
 
@@ -54,8 +46,8 @@ object ZoneBundleBuilder {
                 out.add(
                     UpdateZonePartialEnclosed(
                         level = zone.level,
-                        zoneX = relX,
-                        zoneY = relY,
+                        zoneX = localSceneZone.zoneX,
+                        zoneY = localSceneZone.zoneY,
                         subPackets = enclosed,
                     )
                 )
@@ -64,8 +56,8 @@ object ZoneBundleBuilder {
                 out.add(
                     UpdateZonePartialFollows(
                         level = zone.level,
-                        zoneX = relX,
-                        zoneY = relY,
+                        zoneX = localSceneZone.zoneX,
+                        zoneY = localSceneZone.zoneY,
                     )
                 )
                 out.addAll(standalone)

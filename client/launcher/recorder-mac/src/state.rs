@@ -118,6 +118,89 @@ pub fn maybe_emit_state_snapshot() {
     emit_state_snapshot();
 }
 
+/// Monotonically-increasing per-sample counter (the `frame_seq` field of
+/// `anim-trace.jsonl`). Independent of the snapshot `tick` — it advances once per
+/// LOCAL-avatar sample the poller writes.
+static FRAME_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Take ONE anim-trace sample of the LOCAL avatar, off the published client base.
+/// Called by the poller thread (NOT a hook): it resolves the live local avatar via
+/// the `mem::*` null-guarded lip chain, reads the per-frame tick (`Client+0x518`),
+/// samples the anim fields, and appends one `anim-trace.jsonl` line. A NO-OP unless
+/// recording is active, the client base is known, AND the local avatar resolves
+/// (i.e. in-world) — so pre-world / between-avatar states write nothing. Returns
+/// whether a line was written (the poller only logs at most once).
+///
+/// SAFETY: this NEVER touches the render function or its registers — it only reads
+/// client memory through the fault-tolerant `mem::*` helpers (every hop null/low-
+/// page guarded). It cannot perturb the client; the worst case for an unmapped
+/// pointer is a missed sample, identical to the rest of the oracle.
+pub fn sample_anim_frame() -> bool {
+    if session().is_none() || !is_recording() {
+        return false;
+    }
+    let base = client_base();
+    if base == 0 {
+        return false;
+    }
+    // Resolve the LOCAL avatar defensively (every hop null-guarded inside). `None`
+    // pre-world / before the avatar exists ⇒ nothing to sample.
+    let Some(avatar) = crate::oracle::live_local_avatar(base) else {
+        return false;
+    };
+    // The live per-frame tick (read off the client base; -1 if unreadable). Passed
+    // through so the lerp window is interpretable; never used to gate the read.
+    let base_tick = mem::read_i32(base, crate::offsets::client_oracle::BASE_TICK).unwrap_or(-1);
+    let Some(s) = session() else { return false };
+    let af = crate::oracle::read_anim_frame(avatar, base_tick, image_slide());
+    let seq = FRAME_SEQ.fetch_add(1, Ordering::Relaxed);
+    s.anim_trace(seq, &af);
+    true
+}
+
+/// Anim-trace poller cadence (ms between LOCAL-avatar samples). ~16ms ≈ one render
+/// frame at 60fps — fine enough to see a walk→stop (3-6 frames ≈ 50-100ms) without
+/// the cost/risk of an inline hook on the per-frame render function. Overridable
+/// via `DARKAN_ANIM_TRACE_INTERVAL_MS` (clamped sane).
+const DEFAULT_ANIM_TRACE_INTERVAL_MS: u64 = 16;
+const MIN_ANIM_TRACE_INTERVAL_MS: u64 = 4;
+const MAX_ANIM_TRACE_INTERVAL_MS: u64 = 1000;
+
+fn anim_trace_interval() -> std::time::Duration {
+    let ms = std::env::var("DARKAN_ANIM_TRACE_INTERVAL_MS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .map(|v| v.clamp(MIN_ANIM_TRACE_INTERVAL_MS, MAX_ANIM_TRACE_INTERVAL_MS))
+        .unwrap_or(DEFAULT_ANIM_TRACE_INTERVAL_MS);
+    std::time::Duration::from_millis(ms)
+}
+
+/// Spawn the anim-trace POLLER thread (rs2client only). Gated by the CALLER on
+/// `DARKAN_ANIM_TRACE=1` — when unset this is never called, so the trace is fully
+/// inert (no thread, no `anim-trace.jsonl` writes) and normal/production captures
+/// are untouched. The thread loops forever (detached; the process exits with the
+/// client), sleeping `anim_trace_interval()` between calls to `sample_anim_frame`,
+/// which is itself a no-op until in-world. This is the REGISTER-SAFE replacement
+/// for the inline render-function hook (which crashed the client by clobbering its
+/// XMM registers): a poller cannot perturb the client — it only reads memory.
+pub fn spawn_anim_trace_poller() {
+    let interval = anim_trace_interval();
+    let _ = std::thread::Builder::new()
+        .name("darkan-anim-trace".into())
+        .spawn(move || {
+            crate::log(&format!(
+                "anim-trace poller started ({} ms interval) — writing anim-trace.jsonl",
+                interval.as_millis()
+            ));
+            loop {
+                // Guard the whole sample so a transient bad read can never unwind out
+                // of the thread (panic=abort is set; this is belt-and-suspenders).
+                let _ = std::panic::catch_unwind(sample_anim_frame);
+                std::thread::sleep(interval);
+            }
+        });
+}
+
 /// The main image's dyld vmaddr slide, published once at ctor (rs2client only).
 /// `prot_table::try_dump` needs only the slide to locate `g_serverProtTable`, so
 /// caching it here lets the hot-hook retry path attempt the dump without
@@ -128,6 +211,18 @@ static IMAGE_SLIDE: AtomicIsize = AtomicIsize::new(isize::MIN);
 /// Publish the main image's vmaddr slide (rs2client ctor). First write wins.
 pub fn publish_image_slide(slide: isize) {
     let _ = IMAGE_SLIDE.compare_exchange(isize::MIN, slide, Ordering::SeqCst, Ordering::Relaxed);
+}
+
+/// The published main-image dyld slide, or `None` if not yet published. Used by the
+/// anim-trace poller to map a live image-global pointer (the route move-mode token)
+/// back to its link-time address for labelling. Sentinel `isize::MIN` => unpublished.
+pub fn image_slide() -> Option<isize> {
+    let s = IMAGE_SLIDE.load(Ordering::Relaxed);
+    if s == isize::MIN {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 /// Attempt the one-shot live prot-table dump if the image slide is known. No-op

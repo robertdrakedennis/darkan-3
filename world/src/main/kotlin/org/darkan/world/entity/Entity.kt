@@ -1,5 +1,6 @@
 package org.darkan.world.entity
 
+import org.darkan.world.world.SpawnService
 import world.gregs.voidps.type.Tile
 
 /**
@@ -18,8 +19,8 @@ abstract class Entity {
     // builders; concrete subclasses (Player) may override with `var` if the slot id has to
     // be assigned post-construction (see [org.darkan.world.world.Players.allocate]).
 
-    /** Current world position. Default Lumbridge spawn. Updated by movement processing. */
-    var tile: Tile = Tile(3224, 3216, 0)
+    /** Current world position. Updated from [SpawnService] during player login and by movement processing. */
+    var tile: Tile = SpawnService.DEFAULT_SPAWN
 
     /** Facing direction (0-7 cardinal). Encoded into PLAYER_INFO / NPC_INFO appearance + face blocks. */
     var direction: Int = 0

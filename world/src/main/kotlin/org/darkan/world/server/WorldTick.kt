@@ -12,13 +12,17 @@ import org.darkan.core.Logger.logError
 import org.darkan.core.Logger.logInfo
 import org.darkan.core.Logger.logWarn
 import org.darkan.core.net.prot.AntiCheatChallenge
+import org.darkan.core.net.prot.DestroyZoneData
+import org.darkan.core.net.prot.RebuildNormalSimple
 import org.darkan.core.net.prot.TriggerOnDialogAbort
 import org.darkan.world.net.NpcInfoEncoder
 import org.darkan.world.net.PlayerInfoEncoder
 import org.darkan.world.net.ZoneBundleBuilder
+import org.darkan.world.net.ZoneStreamer
 import org.darkan.world.entity.Direction8
 import org.darkan.world.entity.MovementQueue
 import org.darkan.world.entity.Player
+import org.darkan.world.world.SceneBuildMode
 import org.darkan.world.world.Npcs
 import org.darkan.world.world.PlayerInfoSlots
 import org.darkan.world.world.Players
@@ -139,7 +143,10 @@ object WorldTick {
                 // apply at most ONE queued one-tile step BEFORE building this player's op22, so the
                 // walk bits the encoder emits reflect THIS tick's tile. No-op when no path is queued.
                 maybeSeedDebugWalk(player)
-                applyPendingStep(player)
+                val stepped = applyPendingStep(player)
+                if (stepped) {
+                    maybeQueueSceneRebuild(player)
+                }
 
                 queueAntiCheatChallenge(player, now)
 
@@ -252,10 +259,10 @@ object WorldTick {
      *
      * increment 2b: run (2 steps/tick), teleport, and client-input-driven steps build on this.
      */
-    private fun applyPendingStep(player: Player) {
-        if (!player.movementQueue.hasPendingStep()) return
+    private fun applyPendingStep(player: Player): Boolean {
+        if (!player.movementQueue.hasPendingStep()) return false
         val dir = player.movementQueue.pollStep()
-        if (dir == MovementQueue.NO_STEP) return
+        if (dir == MovementQueue.NO_STEP) return false
 
         val from = player.tile
         val to = Tile(from.x + Direction8.DX[dir], from.y + Direction8.DY[dir], from.level)
@@ -271,6 +278,35 @@ object WorldTick {
                 PlayerInfoSlots.LowResCoord(to.level, to.x shr 6, to.y shr 6),
             )
         }
+        return true
+    }
+
+    private fun maybeQueueSceneRebuild(player: Player) {
+        if (!player.viewport.requiresSceneRebuild(player.tile)) return
+
+        val plan = player.viewport.loadSceneBuild(player.tile, SceneBuildMode.Rebuild)
+        player.viewport.visibleNpcs.clear()
+        player.viewport.sentNpcAdds.clear()
+
+        player.session.queuePacket(DestroyZoneData())
+        player.session.queuePacket(
+            RebuildNormalSimple(
+                zoneX = plan.centreZoneX,
+                zoneZ = plan.centreZoneY,
+                packedCoordA = plan.buildArea.packedCoordA,
+                packedCoordB = plan.buildArea.packedCoordB,
+                npcInfoCoordBitWidth = NPC_INFO_COORD_BIT_WIDTH,
+                sceneRootId = plan.worldAreaTypeId,
+            )
+        )
+        for (packet in ZoneStreamer.buildPackets(plan)) {
+            player.session.queuePacket(packet)
+        }
+        logInfo(
+            "Scene rebuild queued for ${player.account.username}: " +
+                "tile=${player.tile.x},${player.tile.y},${player.tile.level} " +
+                "centreZone=${plan.centreZoneX},${plan.centreZoneY} buildArea=${plan.buildArea}"
+        )
     }
 
     /**
@@ -305,4 +341,6 @@ object WorldTick {
             "DARKAN_DEBUG_WALK_PATH: unknown compass token '$token' (expected one of N S E W NE NW SE SW)"
         )
     }
+
+    private const val NPC_INFO_COORD_BIT_WIDTH = 7
 }
