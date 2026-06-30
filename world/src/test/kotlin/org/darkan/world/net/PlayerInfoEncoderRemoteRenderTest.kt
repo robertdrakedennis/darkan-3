@@ -151,6 +151,129 @@ class PlayerInfoEncoderRemoteRenderTest {
     }
 
     @Test
+    fun `a LATE-JOINER in a different region than its stale anchor is re-anchored, added, then walks`() {
+        // The live multiplayer bug: the viewer enters the world FIRST; its GPI prefix (and slot model)
+        // therefore seed the late-joiner's slot with the LOCAL player's region (the joiner does not exist
+        // yet, so seedFromGpiPrefix / Op81GpiPrefix.build read no tile for it). When the remote then logs
+        // in in a DIFFERENT region, the old `tile>>6 == anchor` gate failed forever → skip-run → no
+        // render. The fix re-anchors AS PART OF the ADD (chained jumpFlag=1 region-move, decode branches
+        // 1-3), so the remote renders. Round-trip the viewer's op22 through the verified decode to prove
+        // it.
+        //
+        // Regions: viewer at (3200,3200) → region (50,50). Remote at (3199,3196) → region (49,49):
+        // a different region (crosses the >>6 boundary at 3200/3192) but only ~1 zone away, well inside
+        // the ±6-zone render window centred on the viewer's tile.
+        val viewerSpawn = Tile(3200, 3200, 0)
+        val viewer = newPlayer("viewer", viewerSpawn)
+        val viewerIdx = viewer.index
+        // Centre the render window on the viewer's actual tile (the live op81 does this); the default
+        // sceneBuildPlan is centred on DEFAULT_SPAWN, not the test's spawn.
+        viewer.viewport.loadSceneBuild(viewerSpawn, org.darkan.world.world.SceneBuildMode.Rebuild)
+
+        // Seed the viewer's slot model + build the decode prefix NOW, while the remote does NOT exist —
+        // so the remote's slot anchors to the viewer's (local) region. Both sides see the SAME stale
+        // anchor (the decode's resetFromGpiPrefix reads the same prefix word).
+        viewer.viewport.resetAfterGpiPrefix(viewerIdx)
+        val prefix = Op81GpiPrefix.build(spawnTile = viewerSpawn, localPlayerIndex = viewerIdx)
+        val session = PlayerInfoDecoder.DetailedSession(PlayerInfoDecoder.GpiPrefix(prefix, viewerIdx))
+
+        // NOW the late-joiner logs in, in a different region than the viewer's anchor for its slot.
+        val remoteSpawn = Tile(3199, 3196, 0)
+        val remote = newPlayer("remote", remoteSpawn)
+        val remoteIdx = remote.index
+        // Sanity: the remote really is in a different region than the viewer (= its stale anchor).
+        assertEquals(49, remoteSpawn.x ushr 6, "remote region X 49 differs from viewer anchor region X 50")
+        assertEquals(49, remoteSpawn.y ushr 6, "remote region Y 49 differs from viewer anchor region Y 50")
+
+        // ---- Tick 1: the viewer's encoder must RE-ANCHOR (jumpFlag=1 region-move) + ADD the joiner. ----
+        val entry = PlayerInfoEncoder.buildWorldEntrySync(viewer)
+        val d1 = session.next(wireBody(entry))
+        assertTrue(d1.decodeClean, "late-join world-entry frame must decode cleanly (re-anchor + add)")
+
+        val remoteState1 = assertNotNull(
+            d1.scene.players[remoteIdx],
+            "the late-joiner in a DIFFERENT region must still be added to the render cohort (re-anchored)",
+        )
+        val t1 = assertNotNull(remoteState1.tile, "the re-anchored remote decodes to a concrete tile")
+        assertEquals(remoteSpawn.x, t1.x, "re-anchored remote decoded X == its spawn X (new region 49<<6 + local)")
+        assertEquals(remoteSpawn.y, t1.y, "re-anchored remote decoded Y == its spawn Y")
+        assertEquals(remoteSpawn.level, t1.plane, "re-anchored remote decoded plane == its spawn plane")
+        assertNotNull(d1.scene.players[viewerIdx], "the viewer's own slot is present in its render cohort")
+
+        // ---- Tick 2: the now-high-res joiner walks one tile EAST. It is driven by the known passes. ----
+        val east = Direction8.indexOf(1, 0)
+        remote.tile = Tile(remote.tile.x + 1, remote.tile.y, remote.tile.level)
+        remote.lastWalkStepDir = east
+        val walk = PlayerInfoEncoder.buildIfNeeded(viewer)
+        remote.lastWalkStepDir = MovementQueue.NO_STEP
+
+        val d2 = session.next(wireBody(walk))
+        assertTrue(d2.decodeClean, "the joiner's walk frame must decode cleanly")
+        val move = assertNotNull(
+            d2.scene.movements.singleOrNull { it.index == remoteIdx },
+            "the promoted joiner must produce a high-res movement record this tick",
+        )
+        assertEquals(3, move.movementType, "first joiner walk tick is the WALK-START move-mode form (mvt=3)")
+        val remoteState2 = assertNotNull(d2.scene.players[remoteIdx], "joiner stays present after its walk step")
+        val t2 = assertNotNull(remoteState2.tile)
+        assertEquals(remoteSpawn.x + 1, t2.x, "east walk increments X")
+        assertEquals(remoteSpawn.y, t2.y, "east walk keeps Y")
+    }
+
+    @Test
+    fun `a rendered remote that walks across a region boundary stays rendered with no desync`() {
+        // The region-MOVER case: a seeded remote is added in the SAME region (the existing path), then
+        // walks across a region boundary. Once high-res (rendered) it is driven by the known passes,
+        // whose mvt=1 walk advances slot.tile with NO region anchor — so crossing a boundary must keep it
+        // rendered (no region-move emitted, no drop, no desync). This guards the high-res-walk seam the
+        // fix relies on (a rendered remote needs no re-anchor).
+        //
+        // Viewer region (50,50). Remote starts at (3199,3200): region (49,50) so it is added via the
+        // re-anchoring ADD on entry, then walks EAST to (3200,3200) = region (50,50) — crossing the >>6
+        // boundary at x=3200 while high-res.
+        val viewerSpawn = Tile(3200, 3200, 0)
+        val remoteSpawn = Tile(3199, 3200, 0)
+        val viewer = newPlayer("viewer", viewerSpawn)
+        val remote = newPlayer("remote", remoteSpawn)
+        val viewerIdx = viewer.index
+        val remoteIdx = remote.index
+        viewer.viewport.loadSceneBuild(viewerSpawn, org.darkan.world.world.SceneBuildMode.Rebuild)
+        viewer.viewport.resetAfterGpiPrefix(viewerIdx)
+
+        val prefix = Op81GpiPrefix.build(spawnTile = viewerSpawn, localPlayerIndex = viewerIdx)
+        val session = PlayerInfoDecoder.DetailedSession(PlayerInfoDecoder.GpiPrefix(prefix, viewerIdx))
+
+        // Tick 1: world entry adds + renders the remote (re-anchored — it spawned in region 49,50).
+        val d1 = session.next(wireBody(PlayerInfoEncoder.buildWorldEntrySync(viewer)))
+        assertTrue(d1.decodeClean, "entry frame must decode cleanly")
+        assertNotNull(d1.scene.players[remoteIdx], "remote is rendered on entry")
+        assertEquals(49, remoteSpawn.x ushr 6, "remote starts in region X 49 (west of the viewer's 50)")
+
+        // Tick 2: the rendered remote walks EAST across the region boundary into region (50,50).
+        val east = Direction8.indexOf(1, 0)
+        remote.tile = Tile(remote.tile.x + 1, remote.tile.y, remote.tile.level)
+        remote.lastWalkStepDir = east
+        val d2 = session.next(wireBody(PlayerInfoEncoder.buildIfNeeded(viewer)))
+        remote.lastWalkStepDir = MovementQueue.NO_STEP
+
+        assertTrue(d2.decodeClean, "the boundary-crossing walk frame must decode cleanly (no desync)")
+        assertEquals(50, remote.tile.x ushr 6, "remote is now in region X 50 (crossed the >>6 boundary)")
+        val moverState = assertNotNull(
+            d2.scene.players[remoteIdx],
+            "a rendered remote that crosses a region boundary must STAY rendered (high-res walk, no drop)",
+        )
+        val t2 = assertNotNull(moverState.tile)
+        assertEquals(3200, t2.x, "the crossed remote decodes to x=3200 (region 50, localX 0)")
+        assertEquals(3200, t2.y, "y unchanged")
+        // It is driven by the KNOWN passes (a high-res walk), not an external region-move.
+        val move = assertNotNull(
+            d2.scene.movements.singleOrNull { it.index == remoteIdx },
+            "the rendered remote produces a high-res movement record (it is in the known cohort)",
+        )
+        assertEquals(3, move.movementType, "the cross-boundary walk is a high-res WALK-START (mvt=3), not a low-res move")
+    }
+
+    @Test
     fun `the remote walk drives off the viewer's own slot latch with no cross-viewer bleed`() {
         // A promoted remote walks for the VIEWER even though the remote's OWN viewport never processed
         // it — the wasWalking latch lives on the viewer's GpiSlot (viewer.viewport.playerSlots), so a

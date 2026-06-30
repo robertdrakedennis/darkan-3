@@ -135,19 +135,32 @@ object WorldTick {
      */
     private fun runTick() {
         val now = System.currentTimeMillis()
+
+        // ---- PHASE A: MOVEMENT — settle EVERY player's tile + per-tick walk markers BEFORE any viewer
+        // builds. This MUST precede the build pass: a viewer's op22 reads every OTHER player's tile and
+        // its `lastWalkStepDir`/`lastRunDelta` (the per-tick walk-state markers the encoder turns into the
+        // remote's WALK-START/STEP/STOP). If movement were interleaved with the build in one slot-ordered
+        // loop (the old shape), a lower-slot viewer would build its op22 BEFORE a higher-slot remote was
+        // stepped — reading the remote's PREVIOUS-tick tile and a `NO_STEP` marker (the marker is set in
+        // the remote's own later iteration, then wiped by the end-of-tick reset before the viewer's next
+        // iteration). Net effect: a viewer NEVER sees a higher-slot remote's per-tick step → the remote's
+        // avatar "barely moves" and never animates a walk (LIVE MULTIPLAYER BUG #2). Two-phasing the tick
+        // (move-all, then build-all) is the same discipline the per-tick state reset already follows
+        // (cleared once, after all viewers are built — see the clear pass below).
+        Players.forEach { player ->
+            if (!player.readyForTick) return@forEach
+            try {
+                applyTickMovement(player)
+            } catch (e: Exception) {
+                logError("Per-player tick movement failed: ${player.account.username}", e)
+            }
+        }
+
+        // ---- PHASE B: BUILD — now that every tile is settled, build each viewer's per-tick sync packets.
         Players.forEach { player ->
             if (!player.readyForTick) return@forEach
             try {
                 val viewport = player.viewport
-
-                // Movement (1.2b increment 2a — WALK only): seed the scripted debug path once, then
-                // apply at most ONE queued one-tile step BEFORE building this player's op22, so the
-                // walk bits the encoder emits reflect THIS tick's tile. No-op when no path is queued.
-                maybeSeedDebugWalk(player)
-                val stepped = applyPendingStep(player)
-                if (stepped) {
-                    maybeQueueSceneRebuild(player)
-                }
 
                 queueAntiCheatChallenge(player, now)
 
@@ -238,6 +251,21 @@ object WorldTick {
     }
 
     // ---- Movement (1.2b increment 2a — local-player WALK only) -----------------------------------
+
+    /**
+     * PHASE A movement for one player: seed the scripted debug path once, apply at most one queued
+     * one-tile step (moving [Player.tile] + setting the per-tick walk markers), and queue a scene rebuild
+     * if the step crossed the rebuild threshold. Runs in [runTick]'s movement pass — BEFORE any viewer's
+     * op22 build — so every viewer sees this player's settled tile + walk markers this tick (see the
+     * Phase-A rationale in [runTick]). Extracted so the two-phase ordering is explicit and testable.
+     */
+    internal fun applyTickMovement(player: Player) {
+        maybeSeedDebugWalk(player)
+        val stepped = applyPendingStep(player)
+        if (stepped) {
+            maybeQueueSceneRebuild(player)
+        }
+    }
 
     /**
      * ONE-SHOT scripted-walk seeding: the first tick [player] is ready, enqueue [debugWalkPath] onto

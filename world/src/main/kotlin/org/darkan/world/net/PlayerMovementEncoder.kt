@@ -69,6 +69,29 @@ object PlayerMovementEncoder {
      */
     private const val LOW_RES_UPDATE_TYPE_ADD = 0
 
+    /**
+     * Low-res external `updateType=1` — the PLANE-ONLY region move (decode `decodeExternalPlayerUpdate`
+     * branch 1, `ClientStateCrossCheck.kt:1824`). Re-anchors only the slot coord's plane; region X/Y
+     * unchanged. Body: `[2-bit planeDelta]`, `plane = (plane + planeDelta) & 3`.
+     */
+    private const val LOW_RES_UPDATE_TYPE_REGION_PLANE = 1
+
+    /**
+     * Low-res external `updateType=2` — the SINGLE-STEP region move (decode branch 2,
+     * `ClientStateCrossCheck.kt:1830`). Re-anchors the slot coord by one Chebyshev-1 region step.
+     * Body: `[5-bit packed]` = `(planeDelta<<3) | dir8`; the client adds `PLAYER_REGION_DX/DY[dir8]`
+     * ([Direction8]) to the region coord.
+     */
+    private const val LOW_RES_UPDATE_TYPE_REGION_STEP = 2
+
+    /**
+     * Low-res external `updateType=3` — the LARGE / arbitrary region move (decode branch 3,
+     * `ClientStateCrossCheck.kt:1843`). Re-anchors the slot coord by an arbitrary 8-bit-wrapping region
+     * delta — the late-join / teleport-across-regions case. Body: `[20-bit packed]` =
+     * `(planeDelta<<16) | (dRegX<<8) | dRegY`.
+     */
+    private const val LOW_RES_UPDATE_TYPE_REGION_LARGE = 3
+
     /** `movementType=1` — the plain `[3-bit dir][1-bit followup]` walk-STEP form (the middle steps of a walk). */
     private const val MOVEMENT_TYPE_WALK = 1
 
@@ -407,5 +430,133 @@ object PlayerMovementEncoder {
         out.writeBits(6, localY)                      // local Y within the region anchor
         out.writeBits(1, if (hasExtInfo) 1 else 0)    // hasExtendedInfo
         if (hasExtInfo) flaggedForExtInfo.add(target.index)
+    }
+
+    /**
+     * Low-res **re-anchoring ADD** — the chained `jumpFlag=1` variant of branch 0 of
+     * `decodeExternalPlayerUpdate` (`core/.../recorder/ClientStateCrossCheck.kt:1807-1822`). It first
+     * emits a region-move ([encodeLowResRegionMove], the inverse of branches 1-3) to RE-ANCHOR the
+     * slot's low-res coord to the remote's CURRENT region, then emits the 6+6 localX/localY relative to
+     * that re-anchored region + the `hasExt` bit — exactly the decode's
+     * `if (bits.readBits(1) != 0) decodeExternalPlayerUpdate(...)` recursion (the jumpFlag bit at branch
+     * 0). This is what makes a late-joiner (slot seeded with the LOCAL player's region, never the
+     * joiner's) and a low-res region-mover (seeded, then walked to a new region) get added at all —
+     * without it the bare ADD's 6-bit local offsets cannot reach a tile outside the seeded anchor.
+     *
+     * Wire (MSB-first), mirroring the decode literally:
+     * ```
+     * 2 bits: updateType = 0          // ADD branch selector
+     * 1 bit:  jumpFlag = 1            // → the client recurses decodeExternalPlayerUpdate FIRST
+     *   <region-move bits>           // branch 1/2/3 — updates slot.coord to the remote's region
+     * 6 bits: localX                  // tile.x - (newRegionX << 6), now in 0..63
+     * 6 bits: localY                  // tile.y - (newRegionY << 6)
+     * 1 bit:  hasExtendedInfo
+     * ```
+     *
+     * The decode applies the chained region-move to `slot.coord` BEFORE reading localX/localY, so the
+     * local offsets MUST be relative to [newRegionX]/[newRegionY] (the remote's live region) — which is
+     * exactly what they are here. The caller ([org.darkan.world.world.PlayerInfoSlots.setCoord]) updates
+     * the SERVER's mirror of `slot.coord` to the same region so both sides stay identical. [fromRegionX]/
+     * [fromRegionY]/[fromPlane] are the slot's CURRENT (stale) anchor that the region-move deltas are
+     * added onto; [newRegionX]/[newRegionY] are the remote's live region (`tile>>6`).
+     */
+    fun encodeLowResReanchoringAdd(
+        out: BufferWriter,
+        viewer: Player,
+        target: Player,
+        fromRegionX: Int,
+        fromRegionY: Int,
+        fromPlane: Int,
+        newRegionX: Int,
+        newRegionY: Int,
+        flaggedForExtInfo: MutableList<Int>,
+    ) {
+        val newPlane = target.tile.level
+        val localX = target.tile.x - (newRegionX shl 6)
+        val localY = target.tile.y - (newRegionY shl 6)
+        require(localX in 0..63 && localY in 0..63) {
+            "re-anchoring ADD for slot ${target.index}: tile (${target.tile.x},${target.tile.y}) is not " +
+                "inside the NEW region anchor ($newRegionX,$newRegionY) — localX=$localX localY=$localY out " +
+                "of 0..63 (newRegion must be tile>>6)"
+        }
+        val hasExtInfo = PlayerExtInfoEncoder.hasFlaggableExtendedInfo(viewer, target)
+        out.writeBits(2, LOW_RES_UPDATE_TYPE_ADD)     // updateType = 0 (ADD)
+        out.writeBits(1, 1)                           // jumpFlag = 1 → chained region-move follows
+        encodeLowResRegionMove(
+            out,
+            fromRegionX = fromRegionX, fromRegionY = fromRegionY, fromPlane = fromPlane,
+            toRegionX = newRegionX, toRegionY = newRegionY, toPlane = newPlane,
+        )
+        out.writeBits(6, localX)                      // local X within the NEW region anchor
+        out.writeBits(6, localY)                      // local Y within the NEW region anchor
+        out.writeBits(1, if (hasExtInfo) 1 else 0)    // hasExtendedInfo
+        if (hasExtInfo) flaggedForExtInfo.add(target.index)
+    }
+
+    /**
+     * Low-res **region-move** — the exact inverse of `decodeExternalPlayerUpdate` branches 1/2/3
+     * (`core/.../recorder/ClientStateCrossCheck.kt:1824-1854`). Re-anchors a low-res slot's region
+     * coord from `(fromRegionX, fromRegionY, fromPlane)` to `(toRegionX, toRegionY, toPlane)`, choosing
+     * the smallest branch that can express the delta. Region coords are 8-bit (`& 0xff`); the decode
+     * ADDS the deltas onto the current coord and masks, so the encoder emits `(to - from) & 0xff`.
+     *
+     * Branch selection (mirroring the three decode branches):
+     *  * **branch 1** `[2:1][2:planeDelta]` — region X and Y unchanged, only the plane differs. The
+     *    decode reads a 2-bit plane delta and does `plane = (plane + delta) & 3`. (Decode line 1824-1828.)
+     *  * **branch 2** `[2:2][5:packed]` — a single Chebyshev-1 region step. `packed = (planeDelta<<3) |
+     *    dir8`, where `dir8` is the [Direction8] index whose `(DX,DY)` equals the region delta (both in
+     *    -1..1, not both 0). The decode reads `direction = packed & 0x7`, `planeDelta = packed >> 3`,
+     *    `regionX += PLAYER_REGION_DX[direction]`, `regionY += PLAYER_REGION_DY[direction]`. The
+     *    [Direction8] table IS the decode's `PLAYER_REGION_DX/DY`. (Decode line 1830-1842.)
+     *  * **branch 3** `[2:3][20:packed]` — an arbitrary region jump (the late-join case). `packed =
+     *    (planeDelta<<16) | (dRegX<<8) | dRegY`, all 8-bit wrapping deltas. The decode reads
+     *    `planeDelta = (packed>>16)&3`, `regionX += (packed>>8)&0xff`, `regionY += packed&0xff`, each
+     *    `& 0xff`. (Decode line 1843-1853.)
+     *
+     * planeDelta is `(toPlane - fromPlane) & 0x3` (the decode masks plane to 2 bits). NOTE branch 2's
+     * planeDelta is also masked to 2 bits in the decode (`packed >> 3` of a 5-bit field = 2 bits), so a
+     * branch-2 move can carry a plane change too; we use branch 2 only when the region delta is a single
+     * step regardless of plane, and fall to branch 3 otherwise.
+     */
+    fun encodeLowResRegionMove(
+        out: BufferWriter,
+        fromRegionX: Int,
+        fromRegionY: Int,
+        fromPlane: Int,
+        toRegionX: Int,
+        toRegionY: Int,
+        toPlane: Int,
+    ) {
+        val dRegX = (toRegionX - fromRegionX) and 0xff
+        val dRegY = (toRegionY - fromRegionY) and 0xff
+        val planeDelta = (toPlane - fromPlane) and 0x3
+
+        // Signed single-step region delta (for the branch-2 Chebyshev-1 test). Region coords wrap at
+        // 8 bits in the decode, but a real adjacent-region move is ±1 with no wrap, so compare the raw
+        // signed difference.
+        val sdx = toRegionX - fromRegionX
+        val sdy = toRegionY - fromRegionY
+
+        when {
+            dRegX == 0 && dRegY == 0 -> {
+                // Branch 1: plane-only change (region unchanged). planeDelta may be 0 (a no-op move);
+                // we still emit it because the caller only invokes a region-move when SOMETHING differs,
+                // and a 0/0/0 move round-trips as identity.
+                out.writeBits(2, LOW_RES_UPDATE_TYPE_REGION_PLANE)
+                out.writeBits(2, planeDelta)
+            }
+            sdx in -1..1 && sdy in -1..1 -> {
+                // Branch 2: a single 8-direction region step (+ optional plane delta).
+                val dir = Direction8.indexOf(sdx, sdy)
+                out.writeBits(2, LOW_RES_UPDATE_TYPE_REGION_STEP)
+                out.writeBits(5, (planeDelta shl 3) or dir)
+            }
+            else -> {
+                // Branch 3: arbitrary region jump (the late-join / large-move case). 8-bit wrapping
+                // deltas — exactly the values the decode adds back and masks.
+                out.writeBits(2, LOW_RES_UPDATE_TYPE_REGION_LARGE)
+                out.writeBits(20, (planeDelta shl 16) or (dRegX shl 8) or dRegY)
+            }
+        }
     }
 }

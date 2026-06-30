@@ -275,20 +275,23 @@ object PlayerInfoEncoder {
      * bits) or starts a skip-run (`hasUpdate=0` + a [writeSkipCount] over the following matching
      * no-update slots).
      *
-     * The one external update produced is the **low-res ADD** (`decodeExternalPlayerUpdate` branch 0,
+     * The external update produced is the **low-res ADD** (`decodeExternalPlayerUpdate` branch 0,
      * `ClientStateCrossCheck.kt`): for a pending slot that holds an in-range, not-yet-rendered
-     * REMOTE player ([shouldRenderRemote]) we write `hasUpdate=1` + the branch-0 ADD bits
-     * ([PlayerMovementEncoder.encodeLowResAdd] — the exact inverse of the decode), set `nextActive=true`,
-     * and [PlayerInfoSlots.promoteToRender] the slot so the next [PlayerInfoSlots.rebuildAfterPasses]
-     * moves it into [PlayerInfoSlots.renderList] and the known passes (the walk state machine) drive it
-     * from the following tick. Every other matching slot is a no-update slot and folds into the skip-run
-     * (`nextActive=true` on the run leader + each skipped slot, mirroring the decode's
-     * `slot.nextActive = true`, `ClientStateCrossCheck.kt`).
+     * REMOTE player ([shouldRenderRemote]) we write `hasUpdate=1` + the ADD bits (via [emitRemoteAdd]),
+     * set `nextActive=true`, and [PlayerInfoSlots.promoteToRender] the slot so the next
+     * [PlayerInfoSlots.rebuildAfterPasses] moves it into [PlayerInfoSlots.renderList] and the known
+     * passes (the walk state machine) drive it from the following tick. Every other matching slot is a
+     * no-update slot and folds into the skip-run (`nextActive=true` on the run leader + each skipped
+     * slot, mirroring the decode's `slot.nextActive = true`, `ClientStateCrossCheck.kt`).
      *
-     * The region-move branches (1-3) and the high-res→low-res demote remain seams: a remote that has
-     * walked out of its op81-seeded region anchor is not added until a region-move encoder lands (the
-     * ADD asserts the live tile sits inside the anchor). The world tick keeps the anchor coherent for
-     * the LOCAL slot via [PlayerInfoSlots.setCoord]; remotes are added at their seeded anchor.
+     * [emitRemoteAdd] picks the bare branch-0 ADD ([PlayerMovementEncoder.encodeLowResAdd], `jumpFlag=0`)
+     * when the slot's low-res anchor already matches the remote's region, or the **re-anchoring** ADD
+     * ([PlayerMovementEncoder.encodeLowResReanchoringAdd], `jumpFlag=1` + a chained region-move, decode
+     * branches 1-3) when it does not — the LATE-JOIN / region-mover case. So a remote whose seeded anchor
+     * is stale (a late-joiner seeded with the local region, or a low-res slot whose remote walked to a new
+     * region) is re-anchored AS PART OF the ADD and rendered, instead of folding into a perpetual
+     * skip-run. The high-res→low-res demote remains a seam (a rendered remote is driven by the known
+     * passes' high-res walk, which crosses region boundaries freely with no anchor).
      */
     private fun encodeExternalPass(
         out: BufferWriter,
@@ -311,13 +314,7 @@ object PlayerInfoEncoder {
             if (target != null && shouldRenderRemote(viewer, target, slot)) {
                 // Low-res ADD → promote to high-res: emit the branch-0 ADD bits, flip present, and set
                 // nextActive (the decode's caller does slot.nextActive=true on a returning add).
-                out.writeBits(1, 1)
-                val coord = slot.coord
-                PlayerMovementEncoder.encodeLowResAdd(
-                    out, viewer, target,
-                    regionX = coord.regionX, regionY = coord.regionY, plane = coord.plane,
-                    flaggedForExtInfo,
-                )
+                emitRemoteAdd(out, viewer, target, slots, slot, idx, flaggedForExtInfo)
                 slots.promoteToRender(idx)
                 slot.nextActive = true
                 i++
@@ -335,12 +332,76 @@ object PlayerInfoEncoder {
     }
 
     /**
+     * Emit the low-res ADD bits for an in-range remote [target] in pending slot [idx] and re-anchor the
+     * SERVER's slot coord to match — the inverse of `decodeExternalPlayerUpdate` branch 0
+     * (`ClientStateCrossCheck.kt:1807-1822`), with the chained `jumpFlag=1` re-anchoring variant when the
+     * slot's low-res anchor region != the remote's live region.
+     *
+     * Two cases, mirroring the decode's branch-0 jumpFlag bit:
+     *  * **anchor already correct** (`tile>>6 == coord.region`, same plane): the bare ADD
+     *    ([PlayerMovementEncoder.encodeLowResAdd], `jumpFlag=0`) — the 6-bit local offsets already fit.
+     *  * **anchor stale** (a LATE-JOINER seeded with the local player's region, or a low-res slot whose
+     *    remote walked to a new region): the re-anchoring ADD
+     *    ([PlayerMovementEncoder.encodeLowResReanchoringAdd], `jumpFlag=1`) — a chained region-move
+     *    (decode branches 1-3) updates `slot.coord` to the remote's CURRENT region FIRST, then the
+     *    localX/localY are read relative to it. We update the server mirror via [PlayerInfoSlots.setCoord]
+     *    so the server's coord stays identical to what the client decoded (the decode mutates
+     *    `slot.coord` inside the chained recursion before reading the locals).
+     *
+     * This is the fix for the live multiplayer bug: render eligibility ([shouldRenderRemote]) is now
+     * decoupled from the stale anchor — ANY in-window remote is added, re-anchoring as needed, so a
+     * late-joiner and a region-mover both render instead of folding into a perpetual skip-run.
+     */
+    private fun emitRemoteAdd(
+        out: BufferWriter,
+        viewer: Player,
+        target: Player,
+        slots: PlayerInfoSlots,
+        slot: PlayerInfoSlots.GpiSlot,
+        idx: Int,
+        flaggedForExtInfo: MutableList<Int>,
+    ) {
+        out.writeBits(1, 1) // hasUpdate
+        val anchor = slot.coord
+        val tile = target.tile
+        val liveRegionX = tile.x ushr 6
+        val liveRegionY = tile.y ushr 6
+        val anchorMatches =
+            anchor.plane == tile.level && anchor.regionX == liveRegionX && anchor.regionY == liveRegionY
+
+        if (anchorMatches) {
+            PlayerMovementEncoder.encodeLowResAdd(
+                out, viewer, target,
+                regionX = anchor.regionX, regionY = anchor.regionY, plane = anchor.plane,
+                flaggedForExtInfo,
+            )
+            return
+        }
+
+        // Re-anchor (chained jumpFlag=1 region-move) to the remote's live region, then ADD relative to
+        // it. Keep the SERVER's coord mirror in lock-step with the client's decode.
+        PlayerMovementEncoder.encodeLowResReanchoringAdd(
+            out, viewer, target,
+            fromRegionX = anchor.regionX, fromRegionY = anchor.regionY, fromPlane = anchor.plane,
+            newRegionX = liveRegionX, newRegionY = liveRegionY,
+            flaggedForExtInfo,
+        )
+        slots.setCoord(idx, PlayerInfoSlots.LowResCoord(tile.level, liveRegionX, liveRegionY))
+    }
+
+    /**
      * Should [viewer] add [target] (a registered remote in this pending slot) to its render cohort this
-     * tick? True iff the slot is not already present (not yet promoted), the remote is on the SAME plane
-     * as the slot's low-res region anchor, the remote's live tile sits INSIDE that anchor's region
-     * (`tile>>6 == anchor`, so the 6-bit local X/Y fit — a remote that walked out of its seeded region
-     * needs a region-move branch first, a later increment), and the remote is within the viewer's render
-     * window (Chebyshev distance in zones from the scene centre ≤ [SceneBuildPlanner.RENDER_RADIUS_ZONES]).
+     * tick? True iff the slot is not already present (not yet promoted) and the remote is within the
+     * viewer's render window (Chebyshev distance in zones from the scene centre ≤
+     * [SceneBuildPlanner.RENDER_RADIUS_ZONES], same plane — see [withinRenderWindow]).
+     *
+     * NOTE (2026-06-30 — the live multiplayer fix): this no longer requires the remote's live tile to
+     * sit inside the slot's low-res anchor region. That stale-anchor check is the bug — a LATE-JOINER's
+     * slot is seeded with the LOCAL player's region (the joiner did not exist at world entry, so
+     * `seedFromGpiPrefix` could not read its tile), and a low-res region-mover walks away from its
+     * seeded anchor; either way the old `tile>>6 == anchor` gate failed forever → a perpetual skip-run →
+     * no remote ever rendered. The add now RE-ANCHORS as part of the ADD ([emitRemoteAdd] emits the
+     * chained `jumpFlag=1` region-move, decode branches 1-3), so the 6-bit local offsets always fit.
      *
      * The viewer itself is never a remote (its slot is in [PlayerInfoSlots.renderList], not the pending
      * cohort), so no self-check is needed. Pure read (no mutation) so the skip-run look-ahead can call it.
@@ -348,11 +409,6 @@ object PlayerInfoEncoder {
     private fun shouldRenderRemote(viewer: Player, target: Player, slot: PlayerInfoSlots.GpiSlot): Boolean {
         if (slot.present) return false
         if (target.index == viewer.index) return false
-        val anchor = slot.coord
-        val tile = target.tile
-        if (tile.level != anchor.plane) return false
-        // The ADD carries 6-bit local offsets relative to the anchor region; the live tile must be in it.
-        if ((tile.x ushr 6) != anchor.regionX || (tile.y ushr 6) != anchor.regionY) return false
         return withinRenderWindow(viewer, target)
     }
 
