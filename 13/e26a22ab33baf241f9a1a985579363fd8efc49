@@ -1,0 +1,49 @@
+world/src/main/kotlin/org/darkan/world/net/PlayerInfoEncoder.kt
+  s_f8acc34803d486::t_dfe333363a091a 335-391,394-404
+  s_f8acc34803d486::t_d51e80f9ad4a8d 278,280-285,287-294
+  s_f8acc34803d486::t_a74d62485f5b46 317
+  s_f8acc34803d486::t_760eeecb2b0c37 334
+world/src/test/kotlin/org/darkan/world/net/PlayerInfoEncoderRemoteRenderTest.kt
+  s_f8acc34803d486::t_29f7edf6359ed5 153-275
+world/src/main/kotlin/org/darkan/world/server/WorldTick.kt
+  s_f8acc34803d486::t_11e0052a360855 138-149,153-157,159-163
+  s_f8acc34803d486::t_e2ff09a24120b2 256-269
+  s_9f5bfb4e88d8aa::t_a2bf4c02bc7381 255
+world/src/main/kotlin/org/darkan/world/net/PlayerMovementEncoder.kt
+  s_f8acc34803d486::t_936b76538bc4de 434-561
+  s_f8acc34803d486::t_fa62baffe1ab0a 72-94
+world/src/test/kotlin/org/darkan/world/net/PlayerInfoLateJoinWalkTest.kt
+  s_f8acc34803d486::t_a15e7e5dd35a8b 1-12,14-25,43-45,50-60,63-107,121-122,129-131,133-201,204-207,210-213,215-254,261,263-265,393
+  s_f8acc34803d486::t_5c804915e9fd61 26-42,46-49,61-62
+  s_f8acc34803d486::t_03435e67c1feb3 274-278
+  s_f8acc34803d486::t_8e0569d0a032b2 266-273,279-392
+  s_f8acc34803d486::t_9158cff57a538f 255-260,262
+  s_f8acc34803d486::t_0d3b474ffe0c6d 13
+  s_f8acc34803d486::t_03c0425c36e81e 108-114,116-120,123-127,132
+  s_f8acc34803d486::t_ec4a169efc3ff2 115,128
+  s_f8acc34803d486::t_b99396c2a7ccac 202-203,208-209,214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "13e26a22ab33baf241f9a1a985579363fd8efc49",
+  "prompts": {},
+  "sessions": {
+    "s_9f5bfb4e88d8aa": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f19a6-f316-7061-aeac-1e2528b70c70",
+        "model": "gpt-5.5"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    },
+    "s_f8acc34803d486": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98aa8e04-8dbd-4899-9598-7451f6a1a83b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "robert dennis <31261583+robertdrakedennis@users.noreply.github.com>"
+    }
+  }
+}
