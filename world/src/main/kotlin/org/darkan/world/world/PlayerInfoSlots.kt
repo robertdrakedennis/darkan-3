@@ -15,18 +15,18 @@ import world.gregs.voidps.type.Tile
  * "client-is-king" reference). The pairing is one-to-one:
  *
  *  * [GpiSlot] ↔ the decode's `PlayerSlot` (`active`, `nextActive`, `present`, `coord`)
- *    (`ClientStateCrossCheck.kt:1275`).
+ *    (`ClientStateCrossCheck.kt`).
  *  * [renderList] ↔ the decode's `renderList` — the **known / high-res** cohort iterated by the two
- *    known passes (`ClientStateCrossCheck.kt:1040`).
+ *    known passes (`ClientStateCrossCheck.kt`).
  *  * [pendingList] ↔ the decode's `pendingList` — the **external / low-res** cohort iterated by the
- *    two external passes (`ClientStateCrossCheck.kt:1041`).
- *  * [seedFromGpiPrefix] ↔ `resetFromGpiPrefix` (`ClientStateCrossCheck.kt:1047`): the op81 GPI
+ *    two external passes (`ClientStateCrossCheck.kt`).
+ *  * [seedFromGpiPrefix] ↔ `resetFromGpiPrefix` (`ClientStateCrossCheck.kt`): the op81 GPI
  *    prefix the client parsed at world entry seeds BOTH sides identically — local slot
  *    `active=false, present=true` into [renderList]; every other slot `active=((word>>18)&3)==0`,
  *    `present=false` into [pendingList]. The prefix seeds empty slots with the local player's map
  *    square and occupied slots with the occupant's map square, so low-res anchors never default to
  *    map square (0,0).
- *  * [rebuildAfterPasses] ↔ `rebuildActivityFlagsAndLists` (`ClientStateCrossCheck.kt:1259`): after
+ *  * [rebuildAfterPasses] ↔ `rebuildActivityFlagsAndLists` (`ClientStateCrossCheck.kt`): after
  *    the 4th pass, `active = nextActive` and `present` re-buckets each slot into [renderList] /
  *    [pendingList].
  *
@@ -38,13 +38,15 @@ import world.gregs.voidps.type.Tile
  * local player is therefore `active=false` here — matching the prefix — regardless of the `Player`
  * default.
  *
- * ## Increment scope (1.2b increment 1 — FOUNDATION)
+ * ## Scope
  *
- * This increment seeds the model from the prefix and exposes the cohorts + the post-pass rebuild so
- * the encoder can produce the verified four-pass shape. Real walk/run/teleport mutation of
- * [GpiSlot.coord] / [GpiSlot.present] (the low-res add → high-res promote → external move flow) is
- * increment 2; the mutators it needs ([promoteToRender], [demoteToPending], [setCoord]) are wired
- * here but unused this increment.
+ * The model seeds from the prefix and exposes the cohorts + the post-pass rebuild so the encoder can
+ * produce the verified four-pass shape, AND the low-res-add → high-res-promote transition for REMOTE
+ * players: [promoteToRender] is driven by
+ * [org.darkan.world.net.PlayerInfoEncoder.encodeExternalPass] when it emits a branch-0 ADD for an
+ * in-range remote, after which the known passes (the walk state machine) drive that slot. [setCoord]
+ * is driven by the world tick's region-anchor maintenance; [demoteToPending] (high-res → low-res when
+ * a slot leaves view) is the remaining external-transition seam and is not yet driven.
  */
 class PlayerInfoSlots(private val capacity: Int = SLOT_COUNT) {
 
@@ -77,6 +79,23 @@ class PlayerInfoSlots(private val capacity: Int = SLOT_COUNT) {
          * emit point. Mirrors the prod walk decode (`session-20260630-033557-27478-production`).
          */
         var wasWalking: Boolean = false
+
+        /**
+         * Run move-state latch — the RUN counterpart of [wasWalking]: true while THIS viewer's client
+         * believes the slot is in the RUN move-state (the last high-res form we emitted was a run-START
+         * or RUN-STEP and we have not yet emitted the run-STOP). The op22 run state machine
+         * ([org.darkan.world.net.PlayerInfoEncoder]) reads it alongside [wasWalking] to choose the
+         * per-tick form:
+         *  * `!wasWalking && !wasRunning && runStepped` → run-START (`mvt=3` desc 0xc); then set this.
+         *  * `wasRunning && runStepped`  → RUN-STEP (`mvt=2` runCode, 2 tiles/tick).
+         *  * `wasRunning && !stepped`    → run-STOP (`mvt=3` desc 0x0, == walk-STOP); then clear this.
+         *  * `wasRunning && walkStepped` (odd-tail handoff) → WALK-STEP (`mvt=1`); the slot stays "moving".
+         * Like [wasWalking] it persists across ticks (NOT reset by [rebuildAfterPasses]) and is committed
+         * by the encoder at the slot's emit point. The two latches are mutually exclusive at rest (a slot
+         * is idle, walking, or running) but the run→walk handoff briefly carries `wasRunning` while a
+         * WALK-STEP is emitted, then the next tick resolves from the committed latch.
+         */
+        var wasRunning: Boolean = false
     }
 
     /** Low-res region anchor: `plane` + region coords (`tile >> 6`). Mirrors the decode's `LowResCoord`. */
@@ -99,7 +118,7 @@ class PlayerInfoSlots(private val capacity: Int = SLOT_COUNT) {
 
     /**
      * Seed the model from the op81 GPI prefix the client parsed at world entry — the exact inverse of
-     * `resetFromGpiPrefix` (`ClientStateCrossCheck.kt:1047`).
+     * `resetFromGpiPrefix` (`ClientStateCrossCheck.kt`).
      *
      * The local slot is `active=false, present=true` (into [renderList]); every other slot is
      * `present=false` (into [pendingList]) with `active=true`. The coord mirrors the 20-bit prefix
@@ -149,7 +168,7 @@ class PlayerInfoSlots(private val capacity: Int = SLOT_COUNT) {
 
     /**
      * Re-bucket every slot after the 4th pass — the exact inverse of `rebuildActivityFlagsAndLists`
-     * (`ClientStateCrossCheck.kt:1259`): commit `active = nextActive`, reset `nextActive`, then place
+     * (`ClientStateCrossCheck.kt`): commit `active = nextActive`, reset `nextActive`, then place
      * `present` slots into [renderList] and the rest into [pendingList], preserving ascending index
      * order (the cohort order both sides iterate).
      */
@@ -166,8 +185,13 @@ class PlayerInfoSlots(private val capacity: Int = SLOT_COUNT) {
 
     /**
      * Promote a pending (external/low-res) slot into the render (known/high-res) cohort — the model
-     * side of the low-res "add → promote" transition (decode `decodeExternalPlayerUpdate` branch 0,
-     * `ClientStateCrossCheck.kt:1209`). Wired for increment 2; unused this increment.
+     * side of the low-res "add → promote" transition (the inverse of `decodeExternalPlayerUpdate`
+     * branch 0, `ClientStateCrossCheck.kt` `slot.present = true`). Called by
+     * [org.darkan.world.net.PlayerInfoEncoder.encodeExternalPass] right after it emits the branch-0 ADD
+     * bits for an in-range remote: this flips `present=true` so the next [rebuildAfterPasses] re-buckets
+     * the slot into [renderList], and from the following tick the known passes (the walk state machine)
+     * drive it. The ADD also sets the slot's `nextActive=true` at the emit point (matching the decode's
+     * caller, `ClientStateCrossCheck.kt`).
      */
     fun promoteToRender(index: Int) {
         slots[index]?.present = true
@@ -176,7 +200,7 @@ class PlayerInfoSlots(private val capacity: Int = SLOT_COUNT) {
     /**
      * Demote a known (high-res) slot back to the external (low-res) cohort — the model side of the
      * high-res "demote to low-res" transition (decode `decodeKnownPlayerUpdate` mvt=0 branch,
-     * `ClientStateCrossCheck.kt:1170`). Wired for increment 2; unused this increment.
+     * `ClientStateCrossCheck.kt`). Wired for increment 2; unused this increment.
      */
     fun demoteToPending(index: Int) {
         slots[index]?.present = false

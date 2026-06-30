@@ -5,7 +5,9 @@ import org.darkan.world.entity.MovementQueue
 import org.darkan.world.entity.Player
 import org.darkan.world.world.PlayerInfoSlots
 import org.darkan.world.world.Players
+import org.darkan.world.world.SceneBuildPlanner
 import world.gregs.voidps.buffer.write.BufferWriter
+import kotlin.math.abs
 
 /**
  * Orchestrator for op22 PLAYER_INFO. Emits the bit-packed body as the **exact inverse** of the
@@ -14,40 +16,42 @@ import world.gregs.voidps.buffer.write.BufferWriter
  *
  * ## The four passes, in the VERIFIED decode order
  *
- * `decodePlayerInfo` (`ClientStateCrossCheck.kt:1085`) runs FOUR passes, each followed by a byte
+ * `decodePlayerInfo` (in `ClientStateCrossCheck.kt`) runs FOUR passes, each followed by a byte
  * align, then rebuilds the cohorts. This encoder mirrors that order exactly:
  *
- *  1. **known, active=false** — `runKnownPass(renderList, false)` (`ClientStateCrossCheck.kt:1086`).
- *  2. **known, active=true**  — `runKnownPass(renderList, true)`  (`ClientStateCrossCheck.kt:1089`).
- *  3. **external, active=true**  — `runExternalPass(pendingList, true)`  (`ClientStateCrossCheck.kt:1092`).
- *  4. **external, active=false** — `runExternalPass(pendingList, false)` (`ClientStateCrossCheck.kt:1095`).
+ *  1. **known, active=false** — `runKnownPass(renderList, false)`.
+ *  2. **known, active=true**  — `runKnownPass(renderList, true)`.
+ *  3. **external, active=true**  — `runExternalPass(pendingList, true)`.
+ *  4. **external, active=false** — `runExternalPass(pendingList, false)`.
  *
  * Each pass is wrapped in [byteAlignPass] (the client byte-aligns the bit cursor at every pass
- * boundary — `alignToByte()` after each pass, `ClientStateCrossCheck.kt:1087/1090/1093/1096`). After
- * pass 4 the cohorts are rebuilt via [PlayerInfoSlots.rebuildAfterPasses], mirroring
- * `rebuildActivityFlagsAndLists` (`ClientStateCrossCheck.kt:1098/1259`) — so the server's slot model
+ * boundary — the decode's `alignToByte()` after each pass). After
+ * pass 4 the cohorts are rebuilt via [PlayerInfoSlots.rebuildAfterPasses], mirroring the decode's
+ * `rebuildActivityFlagsAndLists` — so the server's slot model
  * tracks the client's tick-over-tick.
  *
  * ## Per-slot pass body (the inverse of `runKnownPass` / `runExternalPass`)
  *
- * For each slot in the cohort list whose `active == activeFlag` (`ClientStateCrossCheck.kt:1117`):
+ * For each slot in the cohort list whose `active == activeFlag` (the decode's `runKnownPass`/`runExternalPass`):
  *  * a 1-bit `hasUpdate`; if the slot has an update → `1` + the known/external update bits;
  *  * else `0` + a [writeSkipCount] run covering the FOLLOWING same-cohort no-update slots, with
  *    `nextActive=true` set on this slot and every skipped slot (mirroring the decode's
- *    `slot.nextActive = true` on the skip path, `ClientStateCrossCheck.kt:1130/1122`).
+ *    `slot.nextActive = true` on the skip path).
  *
- * ## Increment scope (1.2b increment 1 — FOUNDATION; movementType=0/walk)
+ * ## Movement scope (walk + run + remote render — all server-driven)
  *
  * A stationary known update is `movementType=0` ([PlayerMovementEncoder]) — including the local
  * first-tick add, which carries the APPEARANCE ext-info INLINE (the prod local form, `c0 …` + ext-info;
- * see [buildInit]). A WALKING known slot runs the prod three-phase walk state machine ([walkPhase]):
- * WALK-START (`mvt=3` move-mode desc 0x8 + the step delta) → WALK-STEP (`mvt=1`) → WALK-STOP (`mvt=3`
- * desc 0x0, no move), POSITION-ONLY (no movement ext-info). This is SERVER-DRIVEN for the LOCAL slot
- * too — a decoded live-prod local walk is exactly this shape (the earlier "local walk is client-
- * predicted, server sends mvt=0/absent" premise was falsified; the prior tools mis-identified the local
- * slot as a remote player). No real run (`mvt=2`) and no low-res add → high-res promote is produced yet.
- * The teleport form ([PlayerMovementEncoder.encodeAbsoluteTile]) is NOT used by either build path; it is
- * retained as the real-teleport seam. The future seams are documented at [encodeKnownPass] / [encodeExternalPass].
+ * see [buildInit]). A MOVING known slot runs the prod three-phase state machine ([walkPhase]):
+ * START (`mvt=3` move-mode desc 0x8 walk / 0xc run + the step delta) → STEP (`mvt=1` walk = 1 tile /
+ * `mvt=2` run = 2 tiles) → STOP (`mvt=3` desc 0x0, no move), POSITION-ONLY (no movement ext-info). This is
+ * SERVER-DRIVEN for the LOCAL slot too — a decoded live-prod local walk is exactly this shape (the earlier
+ * "local walk is client-predicted, server sends mvt=0/absent" premise was falsified; the prior tools
+ * mis-identified the local slot as a remote player). REMOTE players in view are added (low-res ADD →
+ * [PlayerInfoSlots.promoteToRender] → high-res) and then driven by the SAME slot-generic state machine
+ * ([encodeExternalPass]). The teleport form ([PlayerMovementEncoder.encodeAbsoluteTile]) is NOT used by
+ * either build path; it is retained as the real-teleport seam. Remaining seams: remote region-move (a
+ * remote walking out of its op81-seeded region) and remote run.
  *
  * Two public entry points map to the two live call sites:
  *  * [buildWorldEntrySync] — `WorldServer` world-entry. Marks the appearance cached + clears
@@ -65,7 +69,7 @@ object PlayerInfoEncoder {
      * client (`S2C_PLAYER_INFO_OP22 @0x100043500`) rounds the player-info bit cursor UP to the next
      * byte (`ceil(bp/8)×8`) at every one of the 4 pass boundaries (RE-verified instruction-level
      * @0x10004363f / 0x100043732 / 0x100043854 / 0x100043938; mirrored by the decode's `alignToByte()`
-     * after each pass, `ClientStateCrossCheck.kt:1087/1090/1093/1096`), so each pass MUST begin on a
+     * after each pass, `ClientStateCrossCheck.kt`), so each pass MUST begin on a
      * byte boundary. Packing more than one pass into a byte (the old `c7 ff 40`) made the client read
      * the local entry's bits, round up, DISCARD that byte's trailing bits — where our skip-run began —
      * and resume the next pass mid-skip-run → bit-cursor desync → the ext-info drain reads the
@@ -203,7 +207,7 @@ object PlayerInfoEncoder {
     }
 
     /**
-     * Encode ONE known (high-res) pass — the inverse of `runKnownPass` (`ClientStateCrossCheck.kt:1110`).
+     * Encode ONE known (high-res) pass — the inverse of `runKnownPass` (`ClientStateCrossCheck.kt`).
      *
      * Iterates [PlayerInfoSlots.renderList] in order, processing slots whose `active == activeFlag`.
      * For each processed slot: if it has an update (appearance/masks to deliver), write `hasUpdate=1`
@@ -211,7 +215,7 @@ object PlayerInfoEncoder {
      * stationary skip-run: write `hasUpdate=0` + a [writeSkipCount] over the following matching
      * no-update slots, and set `nextActive=true` on this slot and every skipped slot (the decode does
      * `slot.nextActive = true` on both the bit-reading slot and each skipped slot,
-     * `ClientStateCrossCheck.kt:1130/1122`).
+     * `ClientStateCrossCheck.kt`).
      *
      * The LOCAL slot is NOT special-cased: like every known slot it runs the same prod walk state machine
      * ([walkPhase] + [PlayerMovementEncoder.encodeHighResPosition]). On a stationary tick with an undelivered
@@ -247,7 +251,7 @@ object PlayerInfoEncoder {
                 val phase = walkPhase(viewer, target)
                 PlayerMovementEncoder.encodeHighResPosition(out, viewer, target, phase, flaggedForExtInfo)
                 // Commit the walk-state latch now that the form is emitted (START/STEP set it, STOP clears
-                // it). The decode does NOT set nextActive for a known stay (ClientStateCrossCheck.kt:1171),
+                // it). The decode does NOT set nextActive for a known stay (ClientStateCrossCheck.kt),
                 // so leave nextActive=false → the slot stays in this cohort next tick.
                 commitWalkLatch(slot, phase)
                 i++
@@ -257,7 +261,7 @@ object PlayerInfoEncoder {
                 out.writeBits(1, 0)
                 writeSkipCount(out, skip)
                 slot.nextActive = true
-                // Mark the skipped slots (the decode sets nextActive=true on each, ClientStateCrossCheck.kt:1122).
+                // Mark the skipped slots (the decode sets nextActive=true on each, ClientStateCrossCheck.kt).
                 markSkippedKnown(slots, order, i + 1, activeFlag, skip)
                 i = advancePastSkipRun(slots, order, i + 1, activeFlag, skip)
             }
@@ -266,22 +270,32 @@ object PlayerInfoEncoder {
 
     /**
      * Encode ONE external (low-res) pass — the inverse of `runExternalPass`
-     * (`ClientStateCrossCheck.kt:1136`). Same structure as [encodeKnownPass] over
-     * [PlayerInfoSlots.pendingList]; an external update would be the low-res add/move form
-     * ([PlayerMovementEncoder.encodeLowResPosition]). This increment produces NO external updates —
-     * every pending slot is absent/no-update, so each matching cohort collapses to a single skip-run.
+     * (`ClientStateCrossCheck.kt`). Same interleaving structure as [encodeKnownPass] over
+     * [PlayerInfoSlots.pendingList]: a matching slot either has an update (`hasUpdate=1` + the update
+     * bits) or starts a skip-run (`hasUpdate=0` + a [writeSkipCount] over the following matching
+     * no-update slots).
      *
-     * INCREMENT-2 SEAM: a low-res "add → promote to high-res" (decode `decodeExternalPlayerUpdate`
-     * branch 0, `ClientStateCrossCheck.kt:1209`) writes `hasUpdate=1` here, emits the add bits via
-     * [PlayerMovementEncoder.encodeLowResPosition], sets `nextActive=true`, and calls
-     * [PlayerInfoSlots.promoteToRender]; the move branches (1-3) call [PlayerInfoSlots.setCoord].
+     * The one external update produced is the **low-res ADD** (`decodeExternalPlayerUpdate` branch 0,
+     * `ClientStateCrossCheck.kt`): for a pending slot that holds an in-range, not-yet-rendered
+     * REMOTE player ([shouldRenderRemote]) we write `hasUpdate=1` + the branch-0 ADD bits
+     * ([PlayerMovementEncoder.encodeLowResAdd] — the exact inverse of the decode), set `nextActive=true`,
+     * and [PlayerInfoSlots.promoteToRender] the slot so the next [PlayerInfoSlots.rebuildAfterPasses]
+     * moves it into [PlayerInfoSlots.renderList] and the known passes (the walk state machine) drive it
+     * from the following tick. Every other matching slot is a no-update slot and folds into the skip-run
+     * (`nextActive=true` on the run leader + each skipped slot, mirroring the decode's
+     * `slot.nextActive = true`, `ClientStateCrossCheck.kt`).
+     *
+     * The region-move branches (1-3) and the high-res→low-res demote remain seams: a remote that has
+     * walked out of its op81-seeded region anchor is not added until a region-move encoder lands (the
+     * ADD asserts the live tile sits inside the anchor). The world tick keeps the anchor coherent for
+     * the LOCAL slot via [PlayerInfoSlots.setCoord]; remotes are added at their seeded anchor.
      */
     private fun encodeExternalPass(
         out: BufferWriter,
         viewer: Player,
         slots: PlayerInfoSlots,
         activeFlag: Boolean,
-        @Suppress("UNUSED_PARAMETER") flaggedForExtInfo: MutableList<Int>,
+        flaggedForExtInfo: MutableList<Int>,
     ) {
         val order = slots.pendingList
         var i = 0
@@ -293,14 +307,66 @@ object PlayerInfoEncoder {
                 continue
             }
 
-            // No external slot has an update this increment — every matching slot is a no-update run.
-            val skip = countExternalSkipRun(slots, order, i + 1, activeFlag)
-            out.writeBits(1, 0)
-            writeSkipCount(out, skip)
-            slot.nextActive = true
-            markSkippedExternal(slots, order, i + 1, activeFlag, skip)
-            i = advancePastSkipRun(slots, order, i + 1, activeFlag, skip)
+            val target = Players.get(idx)
+            if (target != null && shouldRenderRemote(viewer, target, slot)) {
+                // Low-res ADD → promote to high-res: emit the branch-0 ADD bits, flip present, and set
+                // nextActive (the decode's caller does slot.nextActive=true on a returning add).
+                out.writeBits(1, 1)
+                val coord = slot.coord
+                PlayerMovementEncoder.encodeLowResAdd(
+                    out, viewer, target,
+                    regionX = coord.regionX, regionY = coord.regionY, plane = coord.plane,
+                    flaggedForExtInfo,
+                )
+                slots.promoteToRender(idx)
+                slot.nextActive = true
+                i++
+            } else {
+                // No-update slot: start a skip-run over the following matching slots that ALSO have no
+                // add (an add slot breaks the run, exactly as a high-res update breaks a known skip-run).
+                val skip = countExternalSkipRun(viewer, slots, order, i + 1, activeFlag)
+                out.writeBits(1, 0)
+                writeSkipCount(out, skip)
+                slot.nextActive = true
+                markSkippedExternal(slots, order, i + 1, activeFlag, skip)
+                i = advancePastSkipRun(slots, order, i + 1, activeFlag, skip)
+            }
         }
+    }
+
+    /**
+     * Should [viewer] add [target] (a registered remote in this pending slot) to its render cohort this
+     * tick? True iff the slot is not already present (not yet promoted), the remote is on the SAME plane
+     * as the slot's low-res region anchor, the remote's live tile sits INSIDE that anchor's region
+     * (`tile>>6 == anchor`, so the 6-bit local X/Y fit — a remote that walked out of its seeded region
+     * needs a region-move branch first, a later increment), and the remote is within the viewer's render
+     * window (Chebyshev distance in zones from the scene centre ≤ [SceneBuildPlanner.RENDER_RADIUS_ZONES]).
+     *
+     * The viewer itself is never a remote (its slot is in [PlayerInfoSlots.renderList], not the pending
+     * cohort), so no self-check is needed. Pure read (no mutation) so the skip-run look-ahead can call it.
+     */
+    private fun shouldRenderRemote(viewer: Player, target: Player, slot: PlayerInfoSlots.GpiSlot): Boolean {
+        if (slot.present) return false
+        if (target.index == viewer.index) return false
+        val anchor = slot.coord
+        val tile = target.tile
+        if (tile.level != anchor.plane) return false
+        // The ADD carries 6-bit local offsets relative to the anchor region; the live tile must be in it.
+        if ((tile.x ushr 6) != anchor.regionX || (tile.y ushr 6) != anchor.regionY) return false
+        return withinRenderWindow(viewer, target)
+    }
+
+    /**
+     * Is [target] inside [viewer]'s render window — within [SceneBuildPlanner.RENDER_RADIUS_ZONES] zones
+     * (Chebyshev) of the viewer's scene-centre tile, on the same plane? Reuses the op81 scene plan
+     * ([org.darkan.world.world.Viewport.sceneBuildPlan]) so visibility matches the actual loaded scene.
+     */
+    private fun withinRenderWindow(viewer: Player, target: Player): Boolean {
+        val centre = viewer.viewport.sceneBuildPlan.tile
+        if (centre.level != target.tile.level) return false
+        val dzx = abs((target.tile.x ushr 3) - (centre.x ushr 3))
+        val dzy = abs((target.tile.y ushr 3) - (centre.y ushr 3))
+        return dzx <= SceneBuildPlanner.RENDER_RADIUS_ZONES && dzy <= SceneBuildPlanner.RENDER_RADIUS_ZONES
     }
 
     /**
@@ -323,27 +389,58 @@ object PlayerInfoEncoder {
      */
     private fun knownHasUpdate(viewer: Player, target: Player): Boolean {
         val needsExtInfo = PlayerExtInfoEncoder.needsAnyUpdate(viewer, target)
+        // Any non-NONE phase (WALK-START/STEP/STOP and RUN_START/RUN_STEP/RUN_STOP) is itself a high-res
+        // update, so a moving slot — walking OR running — never folds into a skip-run on a move/marker tick.
         return needsExtInfo || walkPhase(viewer, target) != PlayerMovementEncoder.WalkPhase.NONE
     }
 
     /**
-     * Resolve [target]'s per-tick walk phase as seen by [viewer] — the prod three-phase walk shape derived
-     * from the slot's persistent `wasWalking` latch + whether the target stepped this tick
-     * ([Player.lastWalkStepDir] != [MovementQueue.NO_STEP]):
-     *  * `!wasWalking && stepped`  → [PlayerMovementEncoder.WalkPhase.START] (idle→walk marker).
-     *  * `wasWalking  && stepped`  → [PlayerMovementEncoder.WalkPhase.STEP]  (walk→walk).
-     *  * `wasWalking  && !stepped` → [PlayerMovementEncoder.WalkPhase.STOP]  (walk→idle marker).
-     *  * `!wasWalking && !stepped` → [PlayerMovementEncoder.WalkPhase.NONE]  (stationary hold).
+     * Resolve [target]'s per-tick movement phase as seen by [viewer] — the prod three-phase WALK shape
+     * and its RUN mirror, derived from the slot's persistent `wasWalking` / `wasRunning` latches + what
+     * the target did this tick:
+     *  * `walkStepped` = a 1-tile step was applied ([Player.lastWalkStepDir] != [MovementQueue.NO_STEP]).
+     *  * `runStepped`  = a full 2-tile RUN step was applied ([Player.lastRunDelta] != [MovementQueue.NO_STEP]).
      *
-     * **Pure** — reads the latch but never mutates it; the look-ahead and the gate can call it freely. The
-     * encoder commits the transition (set on START/STEP, clear on STOP) at the emit point via [commitWalkLatch].
-     * Applies to ANY walker; the local player is the immediate target but the machine is slot-generic.
+     * WALK arms (idle/walk, 1 tile/tick):
+     *  * `idle && walkStepped (not running)` → [PlayerMovementEncoder.WalkPhase.START] (idle→walk marker).
+     *  * `wasWalking && walkStepped`         → [PlayerMovementEncoder.WalkPhase.STEP]  (walk→walk).
+     *  * `wasWalking && !stepped`            → [PlayerMovementEncoder.WalkPhase.STOP]  (walk→idle marker).
+     *
+     * RUN arms (run, 2 tiles/tick — run-START carries the full first 2-tile delta, prod-verified):
+     *  * `idle && runStepped`        → [PlayerMovementEncoder.WalkPhase.RUN_START] (idle→run marker, +2 tiles).
+     *  * `wasRunning && runStepped`  → [PlayerMovementEncoder.WalkPhase.RUN_STEP]  (run→run, +2 tiles).
+     *  * `wasRunning && walkStepped && !runStepped` → [PlayerMovementEncoder.WalkPhase.STEP] (run→walk
+     *    odd-tail handoff: the runner slows to a 1-tile `mvt=1` WALK step).
+     *  * `wasRunning && !stepped`    → [PlayerMovementEncoder.WalkPhase.RUN_STOP] (run→idle marker).
+     *
+     *  * otherwise → [PlayerMovementEncoder.WalkPhase.NONE] (stationary hold).
+     *
+     * `wasWalking` and `wasRunning` are mutually exclusive at rest. A full 2-tile run step ([runStepped],
+     * `lastRunDelta` set by the world tick's run drain) drives both RUN_START (first tick) and RUN_STEP;
+     * the run-START carries the 2-tile delta as a signed-5 move-mode marker (byte offset 0xc).
+     *
+     * **Pure** — reads the latches but never mutates them; the look-ahead and the gate can call it freely.
+     * The encoder commits the transition at the emit point via [commitWalkLatch]. Applies to ANY mover;
+     * the local player is the immediate target but the machine is slot-generic.
      */
     private fun walkPhase(viewer: Player, target: Player): PlayerMovementEncoder.WalkPhase {
-        val stepped = target.lastWalkStepDir != MovementQueue.NO_STEP
-        val wasWalking = viewer.viewport.playerSlots.slot(target.index)?.wasWalking ?: false
+        val walkStepped = target.lastWalkStepDir != MovementQueue.NO_STEP
+        val runStepped = target.lastRunDelta != MovementQueue.NO_STEP
+        val stepped = walkStepped || runStepped
+        val slot = viewer.viewport.playerSlots.slot(target.index)
+        val wasWalking = slot?.wasWalking ?: false
+        val wasRunning = slot?.wasRunning ?: false
+        val idle = !wasWalking && !wasRunning
         return when {
-            !wasWalking && stepped -> PlayerMovementEncoder.WalkPhase.START
+            // RUN move-state (checked first so a running slot never falls into a WALK arm).
+            wasRunning && runStepped -> PlayerMovementEncoder.WalkPhase.RUN_STEP
+            wasRunning && walkStepped -> PlayerMovementEncoder.WalkPhase.STEP   // run→walk odd-tail handoff
+            wasRunning && !stepped -> PlayerMovementEncoder.WalkPhase.RUN_STOP
+            // Idle→run: a full 2-tile run step from rest enters via RUN_START.
+            idle && runStepped -> PlayerMovementEncoder.WalkPhase.RUN_START
+            // Idle→walk.
+            idle && walkStepped -> PlayerMovementEncoder.WalkPhase.START
+            // WALK move-state.
             wasWalking && stepped -> PlayerMovementEncoder.WalkPhase.STEP
             wasWalking && !stepped -> PlayerMovementEncoder.WalkPhase.STOP
             else -> PlayerMovementEncoder.WalkPhase.NONE
@@ -351,14 +448,29 @@ object PlayerInfoEncoder {
     }
 
     /**
-     * Commit the slot's `wasWalking` latch after its high-res form is emitted: WALK-START / WALK-STEP set it
-     * (the client is now in the WALK move-state), WALK-STOP clears it (back to idle), and NONE leaves it
-     * (an idle/inline-appearance tick does not change the move-state). Called once per slot at the emit point.
+     * Commit the slot's `wasWalking` / `wasRunning` latches after its high-res form is emitted:
+     *  * WALK-START / WALK-STEP → WALK move-state (wasWalking=true, wasRunning=false). The run→walk
+     *    odd-tail handoff lands here too (a STEP while `wasRunning`), cleanly transferring the move-state
+     *    to WALK so the next idle tick is a plain walk-STOP.
+     *  * run-START / RUN-STEP → RUN move-state (wasRunning=true, wasWalking=false).
+     *  * WALK-STOP / run-STOP → idle (both latches false).
+     *  * NONE → leave the latches (an idle/inline-appearance tick does not change the move-state).
+     * Called once per slot at the emit point.
      */
     private fun commitWalkLatch(slot: PlayerInfoSlots.GpiSlot, phase: PlayerMovementEncoder.WalkPhase) {
         when (phase) {
-            PlayerMovementEncoder.WalkPhase.START, PlayerMovementEncoder.WalkPhase.STEP -> slot.wasWalking = true
-            PlayerMovementEncoder.WalkPhase.STOP -> slot.wasWalking = false
+            PlayerMovementEncoder.WalkPhase.START, PlayerMovementEncoder.WalkPhase.STEP -> {
+                slot.wasWalking = true
+                slot.wasRunning = false
+            }
+            PlayerMovementEncoder.WalkPhase.RUN_START, PlayerMovementEncoder.WalkPhase.RUN_STEP -> {
+                slot.wasRunning = true
+                slot.wasWalking = false
+            }
+            PlayerMovementEncoder.WalkPhase.STOP, PlayerMovementEncoder.WalkPhase.RUN_STOP -> {
+                slot.wasWalking = false
+                slot.wasRunning = false
+            }
             PlayerMovementEncoder.WalkPhase.NONE -> Unit
         }
     }
@@ -392,8 +504,16 @@ object PlayerInfoEncoder {
         return count
     }
 
-    /** Count the stationary skip-run starting at [from] in the external cohort — every matching slot is a no-update slot this increment. */
+    /**
+     * Count the skip-run starting at [from] in the external cohort: the number of CONSECUTIVE matching
+     * (`active == activeFlag`) slots that have NO add — i.e. up to (but not including) the next matching
+     * slot that [shouldRenderRemote] would add. Mirrors [countKnownSkipRun]: an add slot breaks the run
+     * exactly as a high-res update breaks a known run, so the RLE stays the exact inverse of the decode's
+     * `runExternalPass` (a `hasUpdate=1` add is read individually; the no-update slots between adds fold
+     * into one skip-run).
+     */
     private fun countExternalSkipRun(
+        viewer: Player,
         slots: PlayerInfoSlots,
         order: List<Int>,
         from: Int,
@@ -403,13 +523,19 @@ object PlayerInfoEncoder {
         var i = from
         while (i < order.size) {
             val slot = slots.slot(order[i])
-            if (slot != null && slot.active == activeFlag) count++
+            if (slot == null || slot.active != activeFlag) {
+                i++
+                continue
+            }
+            val target = Players.get(order[i])
+            if (target != null && shouldRenderRemote(viewer, target, slot)) break
+            count++
             i++
         }
         return count
     }
 
-    /** Set `nextActive=true` on the [skip] matching known-cohort slots starting at [from] (decode `ClientStateCrossCheck.kt:1122`). */
+    /** Set `nextActive=true` on the [skip] matching known-cohort slots starting at [from] (decode `ClientStateCrossCheck.kt`). */
     private fun markSkippedKnown(
         slots: PlayerInfoSlots,
         order: List<Int>,
@@ -429,7 +555,7 @@ object PlayerInfoEncoder {
         }
     }
 
-    /** Set `nextActive=true` on the [skip] matching external-cohort slots starting at [from] (decode `ClientStateCrossCheck.kt:1148`). */
+    /** Set `nextActive=true` on the [skip] matching external-cohort slots starting at [from] (decode `ClientStateCrossCheck.kt`). */
     private fun markSkippedExternal(
         slots: PlayerInfoSlots,
         order: List<Int>,

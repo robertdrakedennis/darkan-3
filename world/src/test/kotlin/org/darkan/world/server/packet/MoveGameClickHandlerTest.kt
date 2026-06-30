@@ -100,4 +100,27 @@ class MoveGameClickHandlerTest {
 
         assertFalse(player.movementQueue.hasPendingStep(), "no movement for a click on the current tile")
     }
+
+    @Test
+    fun `the op74 ctrl-run modifier sets the entity running flag`() {
+        val player = newPlayer(Tile(3227, 3219, 0))
+        val handler = MoveGameClickHandler(stepProvider = NaiveStraightLineStepProvider)
+
+        // modifier=1 (ctrl-run) → the entity runs to the destination.
+        runBlocking { handler.handle(player.session, MoveGameClick(destX = 3232, destZ = 3219, modifier = 1)) }
+        assertTrue(player.running, "ctrl-run click (modifier=1) sets running")
+        assertTrue(player.movementQueue.hasPendingStep(), "ctrl-run click still enqueues the path")
+    }
+
+    @Test
+    fun `a plain op74 click clears the entity running flag`() {
+        val player = newPlayer(Tile(3227, 3219, 0))
+        val handler = MoveGameClickHandler(stepProvider = NaiveStraightLineStepProvider)
+
+        // Start running, then a plain (modifier=0) click must drop back to walk.
+        runBlocking { handler.handle(player.session, MoveGameClick(destX = 3232, destZ = 3219, modifier = 1)) }
+        assertTrue(player.running, "first click ran")
+        runBlocking { handler.handle(player.session, MoveGameClick(destX = 3227, destZ = 3224, modifier = 0)) }
+        assertFalse(player.running, "a plain click (modifier=0) clears running → walk")
+    }
 }

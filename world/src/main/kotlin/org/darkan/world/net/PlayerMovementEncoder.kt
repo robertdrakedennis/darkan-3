@@ -50,13 +50,24 @@ import world.gregs.voidps.buffer.write.BufferWriter
  *    `jag::packethandlers::PlayerInfo::DecodeKnownPlayerUpdate @0x100025640`.
  *  * teleport / absolute-tile init — `docs/protocol/world-bootstrap-948.md` §4.3.
  *
- * Run (`mvt=2` / move-mode RUN token a3c, byte offset 0xc) is a future increment; [encodeAbsoluteTile]
- * is the real-teleport primitive a teleport path will consume.
+ * Run (`mvt=2` / move-mode RUN token a3c, byte offset 0xc) is implemented: run-START
+ * ([WalkPhase.RUN_START], move-mode desc 0xc + first-tile delta) → RUN-STEP ([WalkPhase.RUN_STEP],
+ * `mvt=2` + 4-bit `runCode`, 2 tiles/tick) → run-STOP ([WalkPhase.RUN_STOP], == walk-STOP idle 0x0),
+ * with a `mvt=1` WALK handoff on the odd last tile. [encodeAbsoluteTile] is the real-teleport primitive
+ * a teleport path will consume.
  */
 object PlayerMovementEncoder {
 
     /** No-movement form: a stationary high-res update writes `movementType=0` (no walk/run). */
     private const val MOVEMENT_TYPE_NONE = 0
+
+    /**
+     * Low-res external `updateType=0` — the ADD / promote-to-high-res branch selector (decode
+     * `decodeExternalPlayerUpdate` branch 0, `ClientStateCrossCheck.kt`). Distinct name from
+     * [MOVEMENT_TYPE_NONE] (same value 0, different bit field: this is the 2-bit external selector, that
+     * is the 2-bit high-res movementType) so the two never read as interchangeable.
+     */
+    private const val LOW_RES_UPDATE_TYPE_ADD = 0
 
     /** `movementType=1` — the plain `[3-bit dir][1-bit followup]` walk-STEP form (the middle steps of a walk). */
     private const val MOVEMENT_TYPE_WALK = 1
@@ -91,21 +102,59 @@ object PlayerMovementEncoder {
     private const val MOVEMENT_TYPE_TELEPORT = 3
 
     /**
-     * The per-tick walk phase the orchestrator resolves for a high-res slot from its `wasWalking` latch
-     * and whether the target stepped this tick. Each maps to one of the encoder's high-res forms.
+     * The small-form 5-bit descriptor-selector field for the **RUN move-mode token a3c** — byte offset
+     * 0xc (`0xc & 0x1c == 0xc`), plane delta 0 (`0xc & 3 == 0`). This is the run-START marker the server
+     * sends on the idle→run tick; it carries the FIRST step's signed-5 tile delta (the run's first tile)
+     * and puts the client in the RUN move-state. Mirrors [MOVE_MODE_FIELD_WALK] (8) exactly, one ring
+     * out — RE-confirmed run token a3c, byte offset 0xc (rs2client 948-5 @0x1000263cd descriptor table).
+     */
+    private const val MOVE_MODE_FIELD_RUN = 0xc
+
+    /**
+     * High-res `movementType=2` — the plain `[2-bit mvt=0b10][4-bit runCode]` RUN-STEP form (the 2-tile/
+     * tick middle steps of a run). `runCode` indexes the perimeter of the 5×5 box (every entry Chebyshev-
+     * distance 2); the encoder maps the combined 2-tile delta to it via [runStepCode] (the inverse of the
+     * decode's [RUN_DX]/[RUN_DY] table). RE-verified `DecodeKnownPlayerUpdate @0x100025640`.
+     */
+    private const val MOVEMENT_TYPE_RUN = 2
+
+    /**
+     * The verified 16-entry RUN step table — `runCode` (0..15) → tile delta (a verbatim copy of the
+     * recorder oracle's `RUN_DX`/`RUN_DY`, `core/.../recorder/ClientStateCrossCheck.kt`). The op22
+     * RUN-STEP form ([encodeHighResPosition] [WalkPhase.RUN_STEP]) emits the `runCode` whose
+     * `(RUN_DX[code], RUN_DY[code])` equals the combined 2-tile delta. The decode reads the SAME table,
+     * so this is its exact inverse — every entry is Chebyshev-distance 2 (the run advances 2 tiles/tick).
+     */
+    private val RUN_DX = intArrayOf(-2, -1, 0, 1, 2, -2, 2, -2, 2, -2, 2, -2, -1, 0, 1, 2)
+    private val RUN_DY = intArrayOf(-2, -2, -2, -2, -2, -1, -1, 0, 0, 1, 1, 2, 2, 2, 2, 2)
+
+    /**
+     * The per-tick movement phase the orchestrator resolves for a high-res slot from its `wasWalking` /
+     * `wasRunning` latch and whether the target walk- or run-stepped this tick. Each maps to one of the
+     * encoder's high-res forms. The WALK arms are the prod three-phase walk shape; the RUN arms mirror
+     * them exactly one ring out (byte offset 0xc vs 0x8; run-STOP shares the idle 0x0 stop with walk).
      */
     enum class WalkPhase {
-        /** Not walking and did not step → stationary `mvt=0` hold (or the inline-appearance add). */
+        /** Not moving and did not step → stationary `mvt=0` hold (or the inline-appearance add). */
         NONE,
 
-        /** Idle→walk (`!wasWalking && stepped`) → WALK-START marker `mvt=3` desc 0x8 + the step's delta. */
+        /** Idle→walk (`!wasMoving && walkStepped`) → WALK-START marker `mvt=3` desc 0x8 + the step's delta. */
         START,
 
-        /** Walk→walk (`wasWalking && stepped`) → plain `mvt=1` `[dir][followup=0]`. */
+        /** Walk→walk (`wasWalking && walkStepped`) → plain `mvt=1` `[dir][followup=0]`. */
         STEP,
 
         /** Walk→idle (`wasWalking && !stepped`) → WALK-STOP marker `mvt=3` desc 0x0, `code15=0`, no move. */
         STOP,
+
+        /** Idle→run (`!wasMoving && runStepped`) → run-START marker `mvt=3` desc 0xc + the first step's delta. */
+        RUN_START,
+
+        /** Run→run (`wasRunning && runStepped`) → RUN-STEP `mvt=2` `[runCode:4]` (2 tiles/tick). */
+        RUN_STEP,
+
+        /** Run→idle (`wasRunning && !stepped`) → run-STOP marker `mvt=3` desc 0x0 (== walk-STOP, idle), no move. */
+        RUN_STOP,
     }
 
     /**
@@ -156,6 +205,13 @@ object PlayerMovementEncoder {
      *  * [WalkPhase.STEP] → `[hasExt][mvt=1][dir:3][followup:1=0]` (the middle steps).
      *  * [WalkPhase.STOP] → WALK-STOP marker: `[hasExt][mvt=3][large=0][code15=0]` (descriptor byte
      *    offset 0x0 = IDLE token a30, no move). Returns the client to idle → frame-perfect stop.
+     *  * [WalkPhase.RUN_START] → run-START marker: `[hasExt][mvt=3][large=0][code15]` with
+     *    `code15 = (0xc<<10) | (xS5<<5) | yS5` (descriptor byte offset 0xc = RUN token a3c + the first
+     *    step's ±1-tile signed-5 delta). Sets the client's RUN move-state and applies the first tile.
+     *  * [WalkPhase.RUN_STEP] → `[hasExt][mvt=2][runCode:4]` — the 2-tile/tick middle steps; [runCode]
+     *    ([runStepCode]) is the inverse of the [RUN_DX]/[RUN_DY] table for the combined 2-tile delta.
+     *  * [WalkPhase.RUN_STOP] → run-STOP marker: identical to [WalkPhase.STOP] (`mvt=3` desc 0x0, no
+     *    move) — the run returns to idle through the SAME idle token a30.
      *  * [WalkPhase.NONE] → stationary `mvt=0` hold (the local first-tick inline-appearance add takes
      *    this too: `[hasExt=1][mvt=0]` then the APPEARANCE block; a non-local hold with `hasExt=0`
      *    writes the trailing `demoteToLowRes=0` bit).
@@ -179,7 +235,8 @@ object PlayerMovementEncoder {
                 out.writeBits(1, if (hasExtInfo) 1 else 0)
                 out.writeBits(2, MOVEMENT_TYPE_MOVE_MODE)
                 out.writeBits(1, 0)                                  // large = 0 → 15-bit small form
-                out.writeBits(15, walkStartCode15(target.lastWalkStepDir))
+                val wd = target.lastWalkStepDir
+                out.writeBits(15, moveModeStartCode15(MOVE_MODE_FIELD_WALK, Direction8.DX[wd], Direction8.DY[wd]))
                 if (hasExtInfo) flaggedForExtInfo.add(target.index)
                 return
             }
@@ -202,6 +259,41 @@ object PlayerMovementEncoder {
                 if (hasExtInfo) flaggedForExtInfo.add(target.index)
                 return
             }
+            WalkPhase.RUN_START -> {
+                // run-START: [hasExt][mvt=3][large=0][code15] with descriptor byte offset 0xc (RUN token
+                // a3c) + the first run step's 2-tile signed-5 delta. Mirrors WALK-START one ring out
+                // (0xc vs 0x8) but carries the FULL 2-tile delta (a run advances 2 tiles/tick from its
+                // first tick). Sets the client's RUN move-state. Position-only. Prod-verified: an east
+                // 2-tile run-START → code15 0x3040 (byteOff 0xc, xS5=2).
+                val runCode = target.lastRunDelta
+                out.writeBits(1, if (hasExtInfo) 1 else 0)
+                out.writeBits(2, MOVEMENT_TYPE_MOVE_MODE)
+                out.writeBits(1, 0)                                  // large = 0 → 15-bit small form
+                out.writeBits(15, moveModeStartCode15(MOVE_MODE_FIELD_RUN, RUN_DX[runCode], RUN_DY[runCode]))
+                if (hasExtInfo) flaggedForExtInfo.add(target.index)
+                return
+            }
+            WalkPhase.RUN_STEP -> {
+                // RUN-STEP: [hasExt][mvt=2][runCode:4]. The 2-tile/tick middle steps; runCode is the
+                // inverse of the verified RUN_DX/RUN_DY table for the combined 2-tile delta the world
+                // tick recorded (target.lastRunDelta). Position-only.
+                out.writeBits(1, if (hasExtInfo) 1 else 0)
+                out.writeBits(2, MOVEMENT_TYPE_RUN)
+                out.writeBits(4, target.lastRunDelta)
+                if (hasExtInfo) flaggedForExtInfo.add(target.index)
+                return
+            }
+            WalkPhase.RUN_STOP -> {
+                // run-STOP: identical to WALK-STOP — [hasExt][mvt=3][large=0][code15=0], descriptor byte
+                // offset 0x0 (IDLE token a30), no move. The run returns to idle through the same idle
+                // token. Position-only.
+                out.writeBits(1, if (hasExtInfo) 1 else 0)
+                out.writeBits(2, MOVEMENT_TYPE_MOVE_MODE)
+                out.writeBits(1, 0)                                  // large = 0 → 15-bit small form
+                out.writeBits(15, MOVE_MODE_FIELD_IDLE shl 10)       // code15 = 0 (idle, no move)
+                if (hasExtInfo) flaggedForExtInfo.add(target.index)
+                return
+            }
             WalkPhase.NONE -> {
                 // Stationary hold — and the local first-tick inline-appearance add (hasExt=1 + APPEARANCE).
                 out.writeBits(1, if (hasExtInfo) 1 else 0)
@@ -217,40 +309,103 @@ object PlayerMovementEncoder {
     }
 
     /**
-     * Build the 15-bit small-form `code15` for the WALK-START marker of a one-tile step in
-     * [Direction8] index [walkDir]. Layout (the inverse of the binary's small-form decode):
-     * `(field << 10) | ((xS5 & 0x1f) << 5) | (yS5 & 0x1f)`, with `field` = [MOVE_MODE_FIELD_WALK] (8 →
-     * descriptor byte offset 0x8 = WALK token a38, plane delta 0), and `xS5`/`yS5` the signed-5 tile
-     * deltas (each ±1 for a one-tile step; 512 fine = 1 tile in the client). Each sub-field is masked
-     * so the result is a clean non-negative 15-bit int (`BufferWriter.writeBits` masks the value).
+     * Build the 15-bit small-form `code15` for a move-mode-START marker carrying tile delta `(xTiles,
+     * yTiles)`, using descriptor-selector [field]. Layout (the inverse of the binary's small-form
+     * decode): `(field << 10) | ((xS5 & 0x1f) << 5) | (yS5 & 0x1f)`, with `field` the byte offset
+     * (= [MOVE_MODE_FIELD_WALK] 8 for a WALK-START, [MOVE_MODE_FIELD_RUN] 0xc for a run-START; both have
+     * plane delta 0 since `field & 3 == 0`), and `xS5`/`yS5` the signed-5 tile deltas (512 fine = 1 tile
+     * in the client). Each sub-field is masked so the result is a clean non-negative 15-bit int
+     * (`BufferWriter.writeBits` masks the value).
      *
-     * Prod-verified (`session-20260630-033557-27478-production`, local idx 1160): a SOUTH start
-     * (DX=0,DY=-1) → `0x201f` (== prod tick11/tick33); a NORTH start (DX=0,DY=+1) → `0x2001`
+     * The carried delta differs by mode: a WALK-START carries the ±1-tile first walk step; a run-START
+     * carries the full **2-tile** first run step (the run advances 2 tiles/tick from its very first
+     * tick). Both fit the signed-5 field (range ±16).
+     *
+     * Prod-verified for WALK (`session-20260630-033557-27478-production`, local idx 1160): a SOUTH start
+     * (dx=0,dy=-1) → `0x201f` (== prod tick11/tick33); a NORTH start (dx=0,dy=+1) → `0x2001`
      * (== prod tick20/tick58). The decode recovers descriptor byte offset `(0x201f>>10)&0x1c == 0x8`.
+     * Prod-verified for RUN (same capture, running remote slot 894/898): an EAST 2-tile run-START
+     * (dx=2,dy=0) → `0x3040` (== remote tick48, byteOff 0xc); a (0,-2) run-START → `0x301e` (tick63).
      */
-    private fun walkStartCode15(walkDir: Int): Int {
-        val xTiles = Direction8.DX[walkDir]   // ±1 tile (or 0); 512 fine == 1 tile
-        val yTiles = Direction8.DY[walkDir]
-        return ((MOVE_MODE_FIELD_WALK and 0x1f) shl 10) or
+    private fun moveModeStartCode15(field: Int, xTiles: Int, yTiles: Int): Int {
+        return ((field and 0x1f) shl 10) or
             ((xTiles and 0x1f) shl 5) or
             (yTiles and 0x1f)
     }
 
     /**
-     * Low-res update form, per §4B `GetLowResolutionPlayerPosition`:
-     * ```
-     * 2 bits: updateType  (0 = promote to high-res, 1 = level change, 2 = small chunk, 3 = large multi-chunk)
-     * ```
-     * Today no low-res transitions happen; we emit `updateType=1` (level change, delta 0) as a safe
-     * no-op. This path is currently unreachable because the low-res list never flags a needed update
-     * (it folds into the skip-run), but is wired in for forward compatibility.
+     * Reverse lookup `(dx,dy)` → 4-bit `runCode` — the inverse of the verified [RUN_DX]/[RUN_DY] run
+     * step table. Given the combined 2-tile delta of a RUN tick, returns the `runCode` the RUN-STEP
+     * `mvt=2` form emits (the decode reads the same table). `dx`/`dy` MUST be a Chebyshev-distance-2
+     * perimeter delta (`max(|dx|,|dy|) == 2`, both in `-2..2`); a delta that is not on the 5×5 box
+     * perimeter has no `runCode` and throws (the world tick only feeds summed two-one-tile-step deltas,
+     * which are always Chebyshev-2 — see [org.darkan.world.entity.MovementQueue.pollRunStep]).
      */
-    fun encodeLowResPosition(
+    fun runStepCode(dx: Int, dy: Int): Int {
+        for (code in RUN_DX.indices) {
+            if (RUN_DX[code] == dx && RUN_DY[code] == dy) return code
+        }
+        throw IllegalArgumentException(
+            "no run-code for 2-tile delta (dx=$dx, dy=$dy); a RUN step delta must be on the 5×5 box " +
+                "perimeter (Chebyshev distance 2: dx,dy in -2..2 and max(|dx|,|dy|)==2)"
+        )
+    }
+
+    /**
+     * Low-res ADD form (`updateType=0`) — the exact inverse of the decode's
+     * `decodeExternalPlayerUpdate` branch 0 (`core/.../recorder/ClientStateCrossCheck.kt`).
+     * This is the "low-res add → promote to high-res" transition that makes an in-range remote enter the
+     * viewer's render cohort (next tick the known passes drive it). Read the decode literally, MSB-first:
+     *
+     * ```
+     * 2 bits: updateType = 0          // ADD (the branch selector)
+     * 1 bit:  jumpFlag                // if set the client recurses decodeExternalPlayerUpdate FIRST; we
+     *                                 //   emit 0 (the minimal ADD — no preceding low-res move chained in)
+     * 6 bits: localX                  // tile.x - (coord.regionX << 6), 0..63 within the region anchor
+     * 6 bits: localY                  // tile.y - (coord.regionY << 6), 0..63
+     * 1 bit:  hasExtendedInfo         // an ext-info block follows for this slot this tick
+     * ```
+     *
+     * The decode reconstructs the slot's absolute tile as
+     * `Tile((coord.regionX<<6)+localX, (coord.regionY<<6)+localY, coord.plane)` and sets `slot.present =
+     * true` (→ the rebuild moves it into `renderList`). [regionX]/[regionY]/[plane] are the slot's
+     * low-res region anchor ([org.darkan.world.world.PlayerInfoSlots.LowResCoord], seeded by the op81
+     * prefix); [tileX]/[tileY] are the remote's live absolute tile. The caller MUST have verified the
+     * remote sits inside this region (same `tile>>6`) so `localX`/`localY` fit in 6 bits — a remote in a
+     * different region than its low-res anchor needs a region-move branch first (a later increment); for
+     * now the visibility gate ([PlayerInfoEncoder]) only adds remotes whose live region equals the
+     * anchor seeded at world entry.
+     *
+     * `hasExtInfo` is set (and [target]'s index appended to [flaggedForExtInfo]) only when the slot has a
+     * deliverable ext-info block this tick — which for a freshly-promoted remote is its first APPEARANCE
+     * delivery to this viewer ([PlayerExtInfoEncoder.hasFlaggableExtendedInfo]). That is what makes the
+     * newly-rendered avatar actually draw with its body/kit.
+     */
+    fun encodeLowResAdd(
         out: BufferWriter,
-        @Suppress("UNUSED_PARAMETER") target: Player,
-        @Suppress("UNUSED_PARAMETER") flaggedForExtInfo: MutableList<Int>,
+        viewer: Player,
+        target: Player,
+        regionX: Int,
+        regionY: Int,
+        plane: Int,
+        flaggedForExtInfo: MutableList<Int>,
     ) {
-        out.writeBits(2, 1)   // updateType=1 (level change only)
-        out.writeBits(2, 0)   // levelDelta=0
+        val localX = target.tile.x - (regionX shl 6)
+        val localY = target.tile.y - (regionY shl 6)
+        require(localX in 0..63 && localY in 0..63) {
+            "low-res ADD for slot ${target.index}: tile (${target.tile.x},${target.tile.y}) is not inside " +
+                "region anchor ($regionX,$regionY) — localX=$localX localY=$localY out of 0..63; a region-move " +
+                "branch is required before the add"
+        }
+        require(plane == target.tile.level) {
+            "low-res ADD for slot ${target.index}: anchor plane $plane != target plane ${target.tile.level}"
+        }
+        val hasExtInfo = PlayerExtInfoEncoder.hasFlaggableExtendedInfo(viewer, target)
+        out.writeBits(2, LOW_RES_UPDATE_TYPE_ADD)     // updateType = 0 (ADD / promote to high-res)
+        out.writeBits(1, 0)                           // jumpFlag = 0 (no chained low-res move before the add)
+        out.writeBits(6, localX)                      // local X within the region anchor
+        out.writeBits(6, localY)                      // local Y within the region anchor
+        out.writeBits(1, if (hasExtInfo) 1 else 0)    // hasExtendedInfo
+        if (hasExtInfo) flaggedForExtInfo.add(target.index)
     }
 }

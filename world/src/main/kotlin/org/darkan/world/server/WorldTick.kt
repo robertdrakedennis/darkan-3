@@ -17,6 +17,7 @@ import org.darkan.core.net.prot.RebuildNormalSimple
 import org.darkan.core.net.prot.TriggerOnDialogAbort
 import org.darkan.world.net.NpcInfoEncoder
 import org.darkan.world.net.PlayerInfoEncoder
+import org.darkan.world.net.PlayerMovementEncoder
 import org.darkan.world.net.ZoneBundleBuilder
 import org.darkan.world.net.ZoneStreamer
 import org.darkan.world.entity.Direction8
@@ -202,13 +203,15 @@ object WorldTick {
 
         // Clear all per-tick pending state AFTER every viewer has been built — global
         // flags like Npc.spawned are read by all viewers' builders during the tick, so
-        // they must only be reset here, never inside a per-viewer build. The walk-step
-        // marker is per-tick too: reset it so a player that did NOT step next tick emits the
-        // stationary form (1.2b increment 2a).
+        // they must only be reset here, never inside a per-viewer build. The walk/run-step
+        // markers are per-tick too: reset them so a player that did NOT step next tick emits the
+        // stationary / STOP form. The persistent `running` mode flag is NOT reset (it survives
+        // until the op74 modifier flips it).
         Players.forEach {
             if (it.readyForTick) {
                 it.pendingUpdates.clear()
                 it.lastWalkStepDir = MovementQueue.NO_STEP
+                it.lastRunDelta = MovementQueue.NO_STEP
             }
         }
         Npcs.forEach {
@@ -251,23 +254,42 @@ object WorldTick {
     }
 
     /**
-     * Apply at most ONE pending one-tile step from [Player.movementQueue] this tick (the canonical RS
-     * 1-tile/tick walk): poll the 3-bit [Direction8] index, move [Player.tile] by its `(dx,dy)`, update
-     * the GPI slot's low-res region anchor via [PlayerInfoSlots.setCoord] when the region (`tile>>6`)
-     * changed, and record the index in [Player.lastWalkStepDir] so the op22 encoder emits the WALK form
-     * THIS tick. No-op (leaves `lastWalkStepDir == NO_STEP`) when nothing is queued.
+     * Apply this tick's pending movement from [Player.movementQueue], moving [Player.tile] and recording
+     * what the op22 encoder must emit:
+     *  * **WALK** (not running, or a single odd-tail tile): poll ONE 3-bit [Direction8] step, move 1
+     *    tile, set [Player.lastWalkStepDir] → the encoder emits the WALK form (mvt=1 / WALK-START).
+     *  * **RUN** ([Player.running] with ≥2 steps queued): poll TWO steps via [MovementQueue.pollRunStep],
+     *    move the SUMMED 2-tile delta, set [Player.lastRunDelta] to its `runCode`
+     *    ([org.darkan.world.net.PlayerMovementEncoder.runStepCode]) → the encoder emits the RUN form
+     *    (mvt=2 / run-START). The first sub-step's dir is ALSO put in [Player.lastWalkStepDir] for
+     *    diagnostics, but the RUN forms read `lastRunDelta`.
+     *  * **odd RUN tail** ([running] with exactly 1 step left): falls through to the WALK branch — the
+     *    runner slows to a single 1-tile `mvt=1` WALK step (the binary's run→walk handoff).
      *
-     * increment 2b: run (2 steps/tick), teleport, and client-input-driven steps build on this.
+     * Updates the GPI slot's low-res region anchor via [PlayerInfoSlots.setCoord] when the region
+     * (`tile>>6`) changed. No-op (leaves both `lastWalkStepDir`/`lastRunDelta == NO_STEP`) when nothing
+     * is queued. Returns true iff a step was applied.
      */
     private fun applyPendingStep(player: Player): Boolean {
-        if (!player.movementQueue.hasPendingStep()) return false
-        val dir = player.movementQueue.pollStep()
-        if (dir == MovementQueue.NO_STEP) return false
+        val queue = player.movementQueue
+        if (!queue.hasPendingStep()) return false
 
         val from = player.tile
-        val to = Tile(from.x + Direction8.DX[dir], from.y + Direction8.DY[dir], from.level)
+        val to: Tile
+        if (player.running && queue.pendingCount() >= 2) {
+            // RUN: combine two queued one-tile steps into one 2-tile move this tick.
+            val run = queue.pollRunStep() ?: return false
+            to = Tile(from.x + run.dx, from.y + run.dy, from.level)
+            player.lastRunDelta = PlayerMovementEncoder.runStepCode(run.dx, run.dy)
+            player.lastWalkStepDir = run.firstStepDir
+        } else {
+            // WALK (the 1-tile/tick canonical walk, and the odd-tail single tile of a run).
+            val dir = queue.pollStep()
+            if (dir == MovementQueue.NO_STEP) return false
+            to = Tile(from.x + Direction8.DX[dir], from.y + Direction8.DY[dir], from.level)
+            player.lastWalkStepDir = dir
+        }
         player.tile = to
-        player.lastWalkStepDir = dir
 
         // Keep the per-viewer GPI slot anchor coherent when the region changed — the slot model is the
         // viewer's own mirror of the client decode (mirrors the low-res region-move anchor update).

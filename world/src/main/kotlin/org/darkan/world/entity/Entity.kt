@@ -41,7 +41,36 @@ abstract class Entity {
      * [movementQueue]; read by the op22 high-res encoder so the WALK form
      * ([org.darkan.world.net.PlayerMovementEncoder.encodeHighResPosition]) emits this exact index, then
      * reset to `-1` at the end of the tick. A non-walking entity keeps `-1` → the stationary form.
+     *
+     * On a RUN tick (2 tiles/tick) this still carries the FIRST of the two combined steps — the WALK
+     * portion of the run handoff (the run-START's first tile, and an odd-tail walk step) reads it, while
+     * the RUN step proper reads [lastRunDelta]. On a pure 2-tile run tick both are set ([lastRunDelta]
+     * holds the summed delta; [lastWalkStepDir] holds the first sub-step's dir).
      */
     @Volatile
     var lastWalkStepDir: Int = MovementQueue.NO_STEP
+
+    /**
+     * Whether the entity is in the **run** movement mode (2 tiles/tick) — the op74 run modifier / ctrl-
+     * click toggles it ([org.darkan.world.server.packet.MoveGameClickHandler]). When set, the world tick
+     * drains up to TWO queued one-tile steps per tick and the op22 high-res encoder emits the verified
+     * RUN forms (run-START `mvt=3` desc 0xc → RUN-STEP `mvt=2` runCode → run-STOP `mvt=3` desc 0x0), with
+     * a clean handoff to a `mvt=1` WALK step on the odd last tile (the runner slows to 1 tile). Persists
+     * across ticks until the modifier flips it.
+     */
+    @Volatile
+    var running: Boolean = false
+
+    /**
+     * The combined 2-tile RUN delta applied THIS tick as a 4-bit `runCode` (index into the verified
+     * `RUN_DX`/`RUN_DY` perimeter table — `core/.../recorder/ClientStateCrossCheck.kt`), or
+     * [MovementQueue.NO_STEP] (`-1`) when the entity did not take a full 2-tile run step this tick. Set
+     * by the world tick when it polls + applies TWO queued one-tile steps while [running]; read by the
+     * op22 high-res RUN-STEP form ([org.darkan.world.net.PlayerMovementEncoder.encodeHighResPosition] /
+     * [org.darkan.world.net.PlayerMovementEncoder.runStepCode]) so it emits this exact `runCode`, then
+     * reset to `-1` at the end of the tick. A run tick whose tail is a single tile leaves this `-1` and
+     * sets [lastWalkStepDir] instead (the run→walk handoff).
+     */
+    @Volatile
+    var lastRunDelta: Int = MovementQueue.NO_STEP
 }

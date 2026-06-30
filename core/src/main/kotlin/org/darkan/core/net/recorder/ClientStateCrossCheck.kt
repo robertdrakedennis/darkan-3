@@ -178,18 +178,19 @@ data class PlayerMovement(
     /**
      * The slot's high-resolution tile AFTER applying this movement, as maintained by the decode. For
      * a high-res walk (`movementType==1`) this is `prevTile + DX/DY[dir]` — byte-exact (the dir→delta
-     * table is the same `PLAYER_REGION_DX/DY` the encoder inverts). For `movementType==0` it is the
-     * UNCHANGED tile (no forced movement). For run/teleport (`movementType==2/3`) it is best-effort
-     * (see [tileExact]). `null` only when the slot had no prior tile to advance from (e.g. a remote
+     * table is the same `PLAYER_REGION_DX/DY` the encoder inverts). For a high-res run
+     * (`movementType==2`) it is `prevTile + RUN_DX/RUN_DY[runCode]` — also byte-exact (the binary-verified
+     * 2-tile run table). For `movementType==0` it is the UNCHANGED tile (no forced movement). For teleport
+     * (`movementType==3`) it is best-effort (see [tileExact]). `null` only when the slot had no prior tile
+     * to advance from (e.g. a remote
      * slot that has not yet promoted to high-res). This is the per-tick LOCAL-slot path the probe reads.
      */
     val tileAfter: ClientStateCrossCheck.Tile? = null,
     /**
      * True iff [tileAfter] is byte-exactly reconstructed from the wire (mvt 0 = unchanged, mvt 1 =
-     * verified `DX/DY` walk delta). False for mvt 2 (run — the 4-bit→delta table is NOT binary-verified
-     * here, so the tile is advanced best-effort and flagged) and mvt 3 (move-mode/teleport — the
-     * decode does not reconstruct the absolute destination). Lets the probe label uncertain tiles
-     * honestly instead of asserting a fabricated position.
+     * verified `DX/DY` walk delta, mvt 2 = verified `RUN_DX/RUN_DY` 2-tile run delta). False only for
+     * mvt 3 (move-mode/teleport — the decode does not reconstruct the absolute destination). Lets the
+     * probe label uncertain tiles honestly instead of asserting a fabricated position.
      */
     val tileExact: Boolean = true,
 )
@@ -1731,19 +1732,19 @@ object ClientStateCrossCheck {
                     slot.sourceOpcode = sourceOpcode
                 }
                 2 -> {
-                    val dir = bits.readBits(4)
-                    // RUN: best-effort tile maintenance. The 4-bit run code → tile-delta table is NOT
-                    // binary-verified in this decode (the encoder never emits mvt=2), so we advance one
-                    // tile in the matching 8-dir when the low nibble is a known walk dir, but FLAG the
-                    // result inexact (tileExact=false) rather than fabricate a precise 2-tile run delta.
+                    // RUN (2 tiles/tick): the 4-bit runCode indexes the perimeter of the 5×5 box — the
+                    // binary-verified [RUN_DX]/[RUN_DY] table (rs2client 948-5 DecodeKnownPlayerUpdate
+                    // @0x100025640). Every code is a Chebyshev-distance-2 delta, so we advance the
+                    // maintained tile by exactly 2 tiles (byte-exact, tileExact=true) — NOT the prior
+                    // best-effort 1-tile walk-table guess. The runCode is read as 4 bits (the cursor
+                    // stays aligned).
+                    val runCode = bits.readBits(4)
                     val moved = prevTile?.let {
-                        if (dir in PLAYER_REGION_DX.indices) {
-                            Tile(it.x + PLAYER_REGION_DX[dir], it.y + PLAYER_REGION_DY[dir], it.plane)
-                        } else it
+                        Tile(it.x + RUN_DX[runCode], it.y + RUN_DY[runCode], it.plane)
                     }
                     movements += PlayerMovement(
-                        idx, movementType, dir = dir, hasExt = hasExt, followup = null,
-                        tileAfter = moved, tileExact = false,
+                        idx, movementType, dir = runCode, hasExt = hasExt, followup = null,
+                        tileAfter = moved, tileExact = moved != null,
                     )
                     slot.tile = moved
                     slot.sourceOpcode = sourceOpcode
@@ -2491,6 +2492,25 @@ object ClientStateCrossCheck {
     private val PLAYER_APPEARANCE_DISABLED_SLOTS = setOf(12, 13, 17)
     private val PLAYER_REGION_DX = intArrayOf(-1, 0, 1, -1, 1, -1, 0, 1)
     private val PLAYER_REGION_DY = intArrayOf(-1, -1, -1, 0, 0, 1, 1, 1)
+
+    /**
+     * The 16-entry RUN step table — the binary-verified `mvt=2` run-code → tile-delta mapping
+     * (rs2client 948-5 `DecodeKnownPlayerUpdate @0x100025640`). A run STEP is `[2-bit mvt=0b10][4-bit
+     * runCode]`; `runCode` (0..15) indexes the PERIMETER of the 5×5 box (every entry is Chebyshev-
+     * distance 2 from the slot), in raster order:
+     * ```
+     *   dy=-2:  code 0..4   (dx = -2,-1, 0, 1, 2)
+     *   dy=-1:  code 5,6    (dx = -2,    2)
+     *   dy= 0:  code 7,8    (dx = -2,    2)
+     *   dy=+1:  code 9,10   (dx = -2,    2)
+     *   dy=+2:  code 11..15 (dx = -2,-1, 0, 1, 2)
+     * ```
+     * `(dx,dy) = (RUN_DX[code], RUN_DY[code])`; the run advances 2 tiles/tick. The encoder
+     * ([org.darkan.world.net.PlayerMovementEncoder]) inverts this exact table (delta → runCode).
+     * RE-verified against the gold capture's running remote slot 898 (a straight-E run = code-8 steps).
+     */
+    private val RUN_DX = intArrayOf(-2, -1, 0, 1, 2, -2, 2, -2, 2, -2, 2, -2, -1, 0, 1, 2)
+    private val RUN_DY = intArrayOf(-2, -2, -2, -2, -2, -1, -1, 0, 0, 1, 1, 2, 2, 2, 2, 2)
     private const val NPC_ADD_SENTINEL = 0xFFFF
     private const val NPC_COORD_BITS = 7
 }

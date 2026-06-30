@@ -24,8 +24,15 @@ import world.gregs.voidps.type.Tile
  * [RoutefinderStepProvider]. Nothing else in the handler, the op74 decoder, or the GPI encoder changes.
  * The provider is the entire swap point.
  *
- * The modifier bit ([MoveGameClick.modifier]) gates run / ctrl-click on the client and is irrelevant to
- * plain walking, so it is logged but otherwise ignored here.
+ * ## Run modifier (the op74 ctrl-run bit)
+ *
+ * The modifier bit ([MoveGameClick.modifier], RE'd as `body[0] & 1` = `(modifierFlags>>2)&1`, a ctrl-
+ * style click modifier — `re-resources/docs/kb/glossary/ghidra-packet-bindings.md` c2s op74) selects
+ * RUN for this click: set on the click, the entity runs (2 tiles/tick) to the destination via the
+ * verified op22 RUN forms ([org.darkan.world.net.PlayerMovementEncoder]); clear, it walks. The flag is
+ * written onto [org.darkan.world.entity.Entity.running] and consumed by [org.darkan.world.server.WorldTick]'s
+ * 2-tile run drain. (A persistent run-orb toggle is a later increment; for now the per-click modifier is
+ * the run source.)
  */
 class MoveGameClickHandler(
     private val stepProvider: StepProvider = RoutefinderStepProvider(),
@@ -43,6 +50,10 @@ class MoveGameClickHandler(
         val dest = Tile(packet.destX, packet.destZ, from.level)
         val steps = stepProvider.stepsTo(from, dest)
 
+        // The ctrl-run modifier bit selects RUN (2 tiles/tick) for this click; consume it onto the
+        // entity so WorldTick's run drain + the op22 RUN forms fire. A plain click clears it (walk).
+        entity.running = packet.modifier != 0
+
         // A fresh click supersedes any in-progress walk: drop the queued tail before enqueueing the new
         // path so the avatar redirects to the latest destination instead of finishing the old one first.
         val queue = entity.movementQueue
@@ -52,8 +63,8 @@ class MoveGameClickHandler(
         }
 
         logInfo(
-            "op74 click-to-walk ${player.username}: (${from.x},${from.y}) -> (${dest.x},${dest.y}) " +
-                "modifier=${packet.modifier} steps=${steps.size}"
+            "op74 click-to-${if (entity.running) "run" else "walk"} ${player.username}: " +
+                "(${from.x},${from.y}) -> (${dest.x},${dest.y}) modifier=${packet.modifier} steps=${steps.size}"
         )
     }
 
